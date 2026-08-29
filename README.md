@@ -1,6 +1,6 @@
 # مخزن الوثائق
 
-تطبيق ويب عربي لرفع ملفات PDF والنصوص، تصنيفها تلقائياً حسب المشروع/الموضوع باستخدام تضمينات محلية، والبحث الدلالي عبر المحتوى باستخدام LangChain وFAISS.
+تطبيق ويب عربي لرفع ملفات PDF وOffice والنصوص، تصنيفها تلقائياً حسب المشروع/الموضوع، والبحث الفوري عبر المحتوى باستخدام BM25 (بدون تحميل نموذج ذكاء اصطناعي).
 
 ## الميزات
 
@@ -9,8 +9,9 @@
 - رفع ملفات PDF ونصية وOffice (Word وExcel وPowerPoint)
 - دعم أسماء الملفات العربية
 - مستكشف ملفات منظم حسب التصنيف ونوع الملف
-- تصنيف تلقائي باستخدام `paraphrase-multilingual-MiniLM-L12-v2` (مجاني، بدون مفتاح API)
-- بحث دلالي عبر FAISS (نسخة Streamlit) أو تضمينات المتصفح (نسخة GitHub Pages)
+- تصنيف تلقائي حسب تداخل الكلمات المفتاحية
+- بحث فوري BM25 (نسخة Streamlit ونسخة GitHub Pages)
+- **تخزين سحابي مشترك** على GitHub Pages — المستندات تبقى محفوظة عبر جميع المتصفحات
 
 ## بيانات الدخول الافتراضية
 
@@ -25,6 +26,25 @@
 export DOCSHELF_USERNAME=your_user
 export DOCSHELF_PASSWORD=your_password
 ```
+
+## التخزين السحابي (GitHub Pages)
+
+نسخة GitHub Pages تحفظ المستندات في ملف مشفّر داخل المستودع (`data/browser-store.enc.json`). المحتوى مشفّر بكلمة مرور الدخول، ويُشارك بين جميع المتصفحات والأجهزة.
+
+### إعداد التخزين السحابي (مرة واحدة)
+
+1. أنشئ **Personal Access Token** من GitHub:
+   - **Settings** → **Developer settings** → **Personal access tokens**
+   - الصلاحيات المطلوبة: `repo` (أو صلاحية الكتابة على محتوى المستودع فقط)
+2. أضف الرمز كسرّ في المستودع:
+   - **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
+   - الاسم: `DOCSHELF_GITHUB_TOKEN`
+   - القيمة: رمز PAT الذي أنشأته
+3. أعد تشغيل workflow النشر: **Actions** → **Deploy GitHub Pages** → **Re-run**
+
+بعد ذلك، عند رفع ملفات من أي متصفح، تُحفظ في المستودع وتظهر في جميع المتصفحات بعد تسجيل الدخول.
+
+> **ملاحظة:** Streamlit يحفظ الملفات محلياً على الخادم في مجلد `uploads/` ولا يحتاج هذا الإعداد.
 
 ## التشغيل المحلي (Streamlit)
 
@@ -92,16 +112,16 @@ gh api repos/:owner/semantic-doc-search/pages -X POST -f build_type=workflow
 ```
 app.py                    # واجهة Streamlit العربية مع تسجيل الدخول
 src/auth.py               # بوابة تسجيل الدخول
-src/document_store.py     # رفع، تصنيف، فهرس FAISS
-src/embeddings.py         # نموذج التضمين متعدد اللغات
+src/document_store.py     # رفع، تصنيف، فهرس BM25
 docs/                     # نسخة ثابتة للنشر على GitHub Pages
+docs/js/storage.js        # تخزين سحابي مشفّر عبر GitHub API
 .github/workflows/pages.yml
 uploads/                  # الملفات المرفوعة (Streamlit)
-data/                     # البيانات الوصفية + فهرس FAISS
+data/                     # البيانات الوصفية + فهرس BM25 + التخزين المشفّر للمتصفح
 ```
 
 ## ملاحظات
 
-- **GitHub Pages** يستضيف النسخة الثابتة في `docs/` (تعمل بالكامل في المتصفح).
+- **GitHub Pages** يستضيف النسخة الثابتة في `docs/` مع تخزين سحابي مشفّر في المستودع.
 - **Streamlit** يتطلب خادماً Python ويُستخدم للتطوير المحلي أو النشر على Streamlit Cloud.
-- لا يمكن إنشاء حساب GitHub نيابةً عنك — يجب إكمال التسجيل بنفسك.
+- المستندات على GitHub Pages تُحذف فقط عبر زر **حذف** داخل التطبيق.

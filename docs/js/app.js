@@ -3,9 +3,15 @@ import {
   assignCategory,
   allChunksFromDocuments,
 } from "./bm25-search.js";
+import {
+  clearStorageSession,
+  isCloudSyncEnabled,
+  loadDocuments,
+  saveDocuments,
+} from "./storage.js";
 
 const AUTH_KEY = "docshelf_auth";
-const STORE_KEY = "docshelf_store_v4";
+const PASSWORD_KEY = "docshelf_session_password";
 const USERNAME = "admin";
 const PASSWORD = "docshelf2024";
 const CHUNK_SIZE = 800;
@@ -38,7 +44,9 @@ const GROUP_ICONS = {
 };
 
 let pendingFiles = [];
-let state = loadState();
+let state = { documents: [] };
+let sessionPassword = "";
+let isHydrating = false;
 
 const loginView = document.getElementById("login-view");
 const appView = document.getElementById("app-view");
@@ -58,17 +66,43 @@ const resultCount = document.getElementById("result-count");
 const resultCountLabel = document.getElementById("result-count-label");
 const statusBanner = document.getElementById("status-banner");
 const modelStatus = document.getElementById("model-status");
+const storageBanner = document.getElementById("storage-banner");
 
-function loadState() {
+async function hydrateDocuments(password) {
+  isHydrating = true;
+  setStatus("جارٍ تحميل المستندات…");
   try {
-    return JSON.parse(localStorage.getItem(STORE_KEY) || '{"documents":[]}');
-  } catch {
-    return { documents: [] };
+    state = await loadDocuments(password);
+    updateStorageBanner();
+    renderLibrary();
+    setStatus("", false);
+  } catch (error) {
+    setStatus(`تعذّر تحميل المستندات: ${error.message}`, true);
+    throw error;
+  } finally {
+    isHydrating = false;
   }
 }
 
-function saveState() {
-  localStorage.setItem(STORE_KEY, JSON.stringify(state));
+async function persistState() {
+  if (!sessionPassword) return;
+  await saveDocuments(sessionPassword, state);
+  updateStorageBanner();
+}
+
+function updateStorageBanner() {
+  if (!storageBanner) return;
+  if (isCloudSyncEnabled()) {
+    storageBanner.textContent =
+      "التخزين السحابي مفعّل — المستندات محفوظة ومشتركة بين جميع المتصفحات.";
+    storageBanner.classList.remove("hidden", "warn");
+    storageBanner.classList.add("ready");
+    return;
+  }
+  storageBanner.textContent =
+    "تحذير: التخزين السحابي غير مفعّل. المستندات تُحفظ في هذا المتصفح فقط.";
+  storageBanner.classList.remove("hidden", "ready");
+  storageBanner.classList.add("warn");
 }
 
 function isAuthed() {
@@ -83,10 +117,14 @@ function showView() {
       modelStatus.textContent = "البحث فوري — لا حاجة لتحميل نموذج ذكاء اصطناعي";
       modelStatus.classList.add("ready");
     }
-    renderLibrary();
+    if (!isHydrating && sessionPassword) {
+      renderLibrary();
+      updateStorageBanner();
+    }
   } else {
     appView.classList.add("hidden");
     loginView.classList.remove("hidden");
+    if (storageBanner) storageBanner.classList.add("hidden");
   }
 }
 
@@ -317,10 +355,17 @@ function renderLibrary() {
     .join("");
 
   libraryList.querySelectorAll(".delete-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       state.documents = state.documents.filter((d) => d.id !== btn.dataset.id);
-      saveState();
-      renderLibrary();
+      try {
+        setStatus("جارٍ حفظ التغييرات…");
+        await persistState();
+        renderLibrary();
+        setStatus("تم حذف المستند.", true);
+        setTimeout(() => setStatus("", false), 2000);
+      } catch (error) {
+        setStatus(`تعذّر الحذف: ${error.message}`, true);
+      }
     });
   });
 
@@ -406,9 +451,14 @@ async function ingestFiles(files) {
         chunks,
       });
     }
-    saveState();
+    await persistState();
     renderLibrary();
-    setStatus("اكتملت الفهرسة.", true);
+    setStatus(
+      isCloudSyncEnabled()
+        ? "اكتملت الفهرسة وحُفظت في التخزين السحابي."
+        : "اكتملت الفهرسة.",
+      true
+    );
     setTimeout(() => setStatus("", false), 2500);
   } catch (error) {
     setStatus(`خطأ: ${error.message}`, true);
@@ -466,21 +516,36 @@ function runSearch() {
   searchBtn.disabled = false;
 }
 
-loginForm.addEventListener("submit", (event) => {
+loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const username = document.getElementById("username").value.trim();
   const password = document.getElementById("password").value;
-  if (username === USERNAME && password === PASSWORD) {
+  if (username !== USERNAME || password !== PASSWORD) {
+    loginError.classList.remove("hidden");
+    return;
+  }
+
+  loginError.classList.add("hidden");
+  sessionPassword = password;
+  try {
+    await hydrateDocuments(password);
     sessionStorage.setItem(AUTH_KEY, "1");
-    loginError.classList.add("hidden");
+    sessionStorage.setItem(PASSWORD_KEY, password);
     showView();
-  } else {
+  } catch {
+    sessionPassword = "";
+    clearStorageSession();
+    loginError.textContent = "تعذّر تحميل المستندات. تحقق من كلمة المرور أو إعداد التخزين.";
     loginError.classList.remove("hidden");
   }
 });
 
 logoutBtn.addEventListener("click", () => {
   sessionStorage.removeItem(AUTH_KEY);
+  sessionStorage.removeItem(PASSWORD_KEY);
+  sessionPassword = "";
+  state = { documents: [] };
+  clearStorageSession();
   showView();
 });
 
@@ -498,4 +563,26 @@ resultCount.addEventListener("input", () => {
   resultCountLabel.textContent = resultCount.value;
 });
 
-showView();
+async function bootstrap() {
+  if (isAuthed()) {
+    const savedPassword = sessionStorage.getItem(PASSWORD_KEY);
+    if (savedPassword) {
+      sessionPassword = savedPassword;
+      try {
+        await hydrateDocuments(savedPassword);
+        showView();
+        return;
+      } catch {
+        sessionStorage.removeItem(AUTH_KEY);
+        sessionStorage.removeItem(PASSWORD_KEY);
+        sessionPassword = "";
+        clearStorageSession();
+      }
+    } else {
+      sessionStorage.removeItem(AUTH_KEY);
+    }
+  }
+  showView();
+}
+
+bootstrap();

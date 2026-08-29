@@ -265,6 +265,25 @@ mark.query-hit, .query-hit {
   color: #0f6e56;
 }
 
+.storage-banner {
+  margin: -0.35rem 0 1rem 0;
+  padding: 0.55rem 0.85rem;
+  border-radius: 10px;
+  font-size: 0.92rem;
+}
+
+.storage-banner.ready {
+  background: #eef7f3;
+  border: 1px solid #b9dfd2;
+  color: #0f6e56;
+}
+
+.storage-banner.warn {
+  background: #fff1f1;
+  border: 1px solid #f0c4c4;
+  color: #9b2c2c;
+}
+
 @media (max-width: 900px) {
   .grid { grid-template-columns: 1fr; }
   .hero { flex-direction: column; }

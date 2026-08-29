@@ -24,6 +24,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Generate runtime config
+        env:
+          DOCSHELF_GITHUB_TOKEN: ${{ secrets.DOCSHELF_GITHUB_TOKEN }}
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+          const token = process.env.DOCSHELF_GITHUB_TOKEN || "";
+          const config = `/** Generated during deploy — do not edit manually. */
+          export const GITHUB_OWNER = "amany-moh-sy";
+          export const GITHUB_REPO = "semantic-doc-search";
+          export const GITHUB_BRANCH = "main";
+          export const GITHUB_TOKEN = ${JSON.stringify(token)};
+          export const STORE_PATH = "data/browser-store.enc.json";
+          `;
+          fs.writeFileSync("docs/js/config.js", config);
+          NODE
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
