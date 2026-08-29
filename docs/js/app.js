@@ -1,19 +1,15 @@
-import { pipeline, cos_sim, env } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
+import {
+  BM25Index,
+  assignCategory,
+  allChunksFromDocuments,
+} from "./bm25-search.js";
 
 const AUTH_KEY = "docshelf_auth";
-const STORE_KEY = "docshelf_store_v3";
-const MODEL_READY_KEY = "docshelf_model_ready";
+const STORE_KEY = "docshelf_store_v4";
 const USERNAME = "admin";
 const PASSWORD = "docshelf2024";
-const MODEL_ID = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
-const CATEGORY_THRESHOLD = 0.52;
 const CHUNK_SIZE = 800;
 const CHUNK_OVERLAP = 120;
-
-const STOPWORDS = new Set(
-  `في من إلى عن على أن أو كان كانت هذا هذه ذلك تلك التي الذي الذين ما لم لن إن أنه إذا ثم قد لقد حيث عند بين حتى بعد قبل كل بعض أي نحو عبر حول خلال ضمن دون فوق تحت مستند ملف صفحة نص محتوى
-  a an the and or but if in on at to for of with by from as is are was were be document file pdf txt`.split(/\s+/)
-);
 
 const EXT_GROUPS = {
   pdf: [".pdf"],
@@ -41,28 +37,6 @@ const GROUP_ICONS = {
   other: "📁",
 };
 
-function fileGroup(filename) {
-  const ext = `.${fileExtension(filename)}`;
-  for (const [group, extensions] of Object.entries(EXT_GROUPS)) {
-    if (extensions.includes(ext)) return group;
-  }
-  return "other";
-}
-
-function fileExtension(filename) {
-  const dot = String(filename || "").lastIndexOf(".");
-  return dot >= 0 ? filename.slice(dot + 1).toLowerCase() : "";
-}
-
-function fileEndsWith(filename, extension) {
-  return fileExtension(filename) === extension.replace(/^\./, "").toLowerCase();
-}
-
-async function loadJsZip() {
-  const mod = await import("https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm");
-  return mod.default || mod;
-}
-
 let pendingFiles = [];
 let state = loadState();
 
@@ -85,37 +59,6 @@ const resultCountLabel = document.getElementById("result-count-label");
 const statusBanner = document.getElementById("status-banner");
 const modelStatus = document.getElementById("model-status");
 
-function getSiteBase() {
-  let path = window.location.pathname;
-  if (path.endsWith(".html")) {
-    path = path.slice(0, path.lastIndexOf("/") + 1);
-  }
-  if (!path.endsWith("/")) {
-    path += "/";
-  }
-  return path;
-}
-
-function configureModelEnvironment() {
-  env.localModelPath = `${getSiteBase()}models/`;
-  env.allowLocalModels = true;
-  env.allowRemoteModels = true;
-  env.useBrowserCache = true;
-  env.cacheDir = "docshelf-transformers-cache";
-}
-
-configureModelEnvironment();
-
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register(`${getSiteBase()}sw.js`).catch(() => {
-    // Service worker is optional; local model files still load from Pages.
-  });
-}
-
-let embedder = null;
-let embedderPromise = null;
-let modelReady = sessionStorage.getItem(MODEL_READY_KEY) === "1";
-
 function loadState() {
   try {
     return JSON.parse(localStorage.getItem(STORE_KEY) || '{"documents":[]}');
@@ -132,22 +75,14 @@ function isAuthed() {
   return sessionStorage.getItem(AUTH_KEY) === "1";
 }
 
-function updateModelStatus(message) {
-  if (!modelStatus) return;
-  modelStatus.textContent = message;
-  modelStatus.classList.toggle("ready", modelReady);
-}
-
 function showView() {
   if (isAuthed()) {
     loginView.classList.add("hidden");
     appView.classList.remove("hidden");
-    updateModelStatus(
-      modelReady
-        ? "نموذج التضمين جاهز (محمّل من الخادم)"
-        : "جارٍ تحميل نموذج التضمين من الخادم…"
-    );
-    preloadEmbedder();
+    if (modelStatus) {
+      modelStatus.textContent = "البحث فوري — لا حاجة لتحميل نموذج ذكاء اصطناعي";
+      modelStatus.classList.add("ready");
+    }
     renderLibrary();
   } else {
     appView.classList.add("hidden");
@@ -164,111 +99,26 @@ function setStatus(message, show = true) {
   statusBanner.classList.remove("hidden");
 }
 
-async function getEmbedder() {
-  if (embedder) return embedder;
-  if (!embedderPromise) {
-    embedderPromise = pipeline("feature-extraction", MODEL_ID, { quantized: true })
-      .then((model) => {
-        embedder = model;
-        modelReady = true;
-        sessionStorage.setItem(MODEL_READY_KEY, "1");
-        updateModelStatus("نموذج التضمين جاهز (محمّل من الخادم)");
-        setStatus("", false);
-        return model;
-      })
-      .catch((error) => {
-        embedderPromise = null;
-        updateModelStatus("تعذّر تحميل نموذج التضمين");
-        throw error;
-      });
-  }
-  return embedderPromise;
+function fileExtension(filename) {
+  const dot = String(filename || "").lastIndexOf(".");
+  return dot >= 0 ? filename.slice(dot + 1).toLowerCase() : "";
 }
 
-function preloadEmbedder() {
-  if (modelReady && embedder) return Promise.resolve(embedder);
-  setStatus("جارٍ تحميل نموذج التضمين من الخادم…");
-  return getEmbedder().catch((error) => {
-    setStatus(`خطأ في تحميل النموذج: ${error.message}`, true);
-  });
+function fileGroup(filename) {
+  const ext = `.${fileExtension(filename)}`;
+  for (const [group, extensions] of Object.entries(EXT_GROUPS)) {
+    if (extensions.includes(ext)) return group;
+  }
+  return "other";
 }
 
-async function embedTexts(texts) {
-  const model = await getEmbedder();
-  const vectors = [];
-  for (const text of texts) {
-    const safeText = String(text || " ").trim() || " ";
-    const output = await model(safeText, { pooling: "mean", normalize: true });
-    vectors.push(Array.from(output.data));
-  }
-  return vectors;
+function fileEndsWith(filename, extension) {
+  return fileExtension(filename) === extension.replace(/^\./, "").toLowerCase();
 }
 
-async function embedQuery(text) {
-  const [vector] = await embedTexts([text]);
-  return vector;
-}
-
-function meanVector(vectors) {
-  if (!vectors.length) return [];
-  const dim = vectors[0].length;
-  const sum = new Array(dim).fill(0);
-  for (const vec of vectors) {
-    for (let i = 0; i < dim; i += 1) sum[i] += vec[i];
-  }
-  const mean = sum.map((v) => v / vectors.length);
-  const norm = Math.hypot(...mean) || 1;
-  return mean.map((v) => v / norm);
-}
-
-function topicLabel(text, filename) {
-  const safeText = String(text || "");
-  const tokens = (safeText.match(/[\u0600-\u06FF]{3,}|[A-Za-z][A-Za-z0-9_-]{2,}/g) || [])
-    .map((token) => token.toLowerCase())
-    .filter((token) => !STOPWORDS.has(token));
-  const counts = new Map();
-  for (const token of tokens) counts.set(token, (counts.get(token) || 0) + 1);
-  const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w]) => w);
-  if (!top.length) {
-    const baseName = String(filename || "").replace(/\.[^.]+$/, "");
-    return baseName || "عام";
-  }
-  return top.join(" / ");
-}
-
-function categoryCentroids(documents) {
-  const map = new Map();
-  for (const doc of documents) {
-    const preview = (doc.preview || doc.filename || "").slice(0, 2000);
-    if (!map.has(doc.category)) map.set(doc.category, []);
-    map.get(doc.category).push(preview);
-  }
-  const centroids = new Map();
-  for (const [category, previews] of map.entries()) {
-    // previews embeddings approximated from stored chunk vectors of that doc category
-    const docsInCat = documents.filter((d) => d.category === category);
-    const vectors = docsInCat.flatMap((d) => d.chunks.map((c) => c.embedding)).slice(0, 8);
-    if (vectors.length) centroids.set(category, meanVector(vectors));
-  }
-  return centroids;
-}
-
-async function assignCategory(text, filename, documents) {
-  const safeText = String(text || "");
-  const sample = safeText.slice(0, 4000) || String(filename || "مستند");
-  const queryVec = await embedQuery(sample);
-  const centroids = categoryCentroids(documents);
-  let bestCategory = null;
-  let bestScore = -1;
-  for (const [category, centroid] of centroids.entries()) {
-    const score = cos_sim(queryVec, centroid);
-    if (score > bestScore) {
-      bestScore = score;
-      bestCategory = category;
-    }
-  }
-  if (bestCategory && bestScore >= CATEGORY_THRESHOLD) return bestCategory;
-  return topicLabel(text, filename);
+async function loadJsZip() {
+  const mod = await import("https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm");
+  return mod.default || mod;
 }
 
 function chunkText(text) {
@@ -294,8 +144,7 @@ function extractDocxXmlText(xml) {
     if (node.textContent) texts.push(node.textContent);
   }
   if (!texts.length) {
-    const all = doc.getElementsByTagName("*");
-    for (const node of all) {
+    for (const node of doc.getElementsByTagName("*")) {
       if (node.localName === "t" && node.textContent) texts.push(node.textContent);
     }
   }
@@ -306,14 +155,9 @@ async function extractDocxText(arrayBuffer) {
   const JSZip = await loadJsZip();
   const zip = await JSZip.loadAsync(arrayBuffer);
   const documentXml = zip.file("word/document.xml");
-  if (!documentXml) {
-    throw new Error("ملف Word غير صالح (document.xml مفقود).");
-  }
-  const xml = await documentXml.async("string");
-  const text = extractDocxXmlText(xml);
-  if (!text) {
-    throw new Error("لم يُعثر على نص داخل ملف Word.");
-  }
+  if (!documentXml) throw new Error("ملف Word غير صالح (document.xml مفقود).");
+  const text = extractDocxXmlText(await documentXml.async("string"));
+  if (!text) throw new Error("لم يُعثر على نص داخل ملف Word.");
   return text;
 }
 
@@ -373,15 +217,12 @@ async function extractPdfText(arrayBuffer) {
 async function extractText(file, arrayBuffer) {
   const name = String(file?.name || "");
   const buffer = arrayBuffer || (await file.arrayBuffer());
-
   if (fileEndsWith(name, ".pdf")) return extractPdfText(buffer);
   if (fileEndsWith(name, ".docx")) return extractDocxText(buffer);
   if (fileEndsWith(name, ".xlsx") || fileEndsWith(name, ".xls")) return extractExcelText(buffer);
   if (fileEndsWith(name, ".pptx")) return extractPptxText(buffer);
   if (fileEndsWith(name, ".doc") || fileEndsWith(name, ".ppt")) {
-    throw new Error(
-      `${name}: صيغ .doc و .ppt القديمة غير مدعومة في المتصفح. استخدم docx/pptx.`
-    );
+    throw new Error(`${name}: صيغ .doc و .ppt القديمة غير مدعومة في المتصفح. استخدم docx/pptx.`);
   }
   if (EXT_GROUPS.text.some((ext) => fileEndsWith(name, ext))) {
     return new TextDecoder("utf-8").decode(buffer).trim();
@@ -398,7 +239,6 @@ function buildExplorerTree(documents) {
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push(doc);
   }
-
   return [...categories.entries()]
     .sort((a, b) => a[0].localeCompare(b[0], "ar"))
     .map(([category, groups]) => ({
@@ -424,9 +264,7 @@ function summarizeCategories(documents) {
 function renderLibrary() {
   const docs = state.documents;
   const docWord = docs.length === 1 ? "مستند" : "مستندات";
-  libraryMeta.textContent = `نموذج التضمين: ${MODEL_ID} · ${docs.length} ${docWord} · ${
-    modelReady ? "جاهز" : "قيد التحميل"
-  }`;
+  libraryMeta.textContent = `محرك البحث: BM25 (فوري) · ${docs.length} ${docWord}`;
 
   const categories = summarizeCategories(docs);
   categoryChips.innerHTML = categories
@@ -554,10 +392,9 @@ async function ingestFiles(files) {
       const arrayBuffer = await file.arrayBuffer();
       const text = await extractText(file, arrayBuffer);
       if (!text) throw new Error(`لم يُعثر على نص في ${file.name}`);
-      const category = await assignCategory(text, file.name, state.documents);
-      const chunks = chunkText(text);
-      const embeddings = await embedTexts(chunks);
-      const doc = {
+      const category = assignCategory(text, file.name, state.documents);
+      const chunks = chunkText(text).map((content) => ({ content }));
+      state.documents.push({
         id: crypto.randomUUID(),
         filename: file.name,
         category,
@@ -566,9 +403,8 @@ async function ingestFiles(files) {
         charCount: text.length,
         preview: text.replace(/\s+/g, " ").slice(0, 280),
         fileData: arrayBufferToBase64(arrayBuffer),
-        chunks: chunks.map((content, i) => ({ content, embedding: embeddings[i] })),
-      };
-      state.documents.push(doc);
+        chunks,
+      });
     }
     saveState();
     renderLibrary();
@@ -583,7 +419,7 @@ async function ingestFiles(files) {
   }
 }
 
-async function runSearch() {
+function runSearch() {
   const query = searchQuery.value.trim();
   if (!query) {
     searchResults.innerHTML = `<p class="muted">أدخل عبارة البحث.</p>`;
@@ -595,27 +431,10 @@ async function runSearch() {
   }
 
   searchBtn.disabled = true;
-  searchResults.innerHTML = `<p class="muted">جارٍ البحث…</p>`;
-  const queryVec = await embedQuery(query);
-  const category = categoryFilter.value;
+  const category = categoryFilter.value || null;
   const k = Number(resultCount.value);
-
-  const hits = [];
-  for (const doc of state.documents) {
-    if (category && doc.category !== category) continue;
-    for (const chunk of doc.chunks) {
-      hits.push({
-        docId: doc.id,
-        filename: doc.filename,
-        category: doc.category,
-        content: chunk.content,
-        score: cos_sim(queryVec, chunk.embedding),
-      });
-    }
-  }
-
-  hits.sort((a, b) => b.score - a.score);
-  const top = hits.slice(0, k);
+  const index = new BM25Index(allChunksFromDocuments(state.documents));
+  const top = index.search(query, k, category);
 
   if (!top.length) {
     searchResults.innerHTML = `<p class="muted">لم يُعثر على مقاطع مطابقة. جرّب عبارة أوسع.</p>`;

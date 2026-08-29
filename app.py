@@ -21,7 +21,6 @@ from src.document_store import (
     semantic_search,
 )
 from src.downloads import read_document_bytes
-from src.embeddings import EMBEDDING_MODEL_NAME, get_embeddings
 from src.explorer import build_explorer_tree
 from src.file_extractors import GROUP_ICONS, GROUP_LABELS_AR
 from src.highlight import highlight_text
@@ -214,6 +213,7 @@ st.markdown(
 )
 
 ALL_CATEGORIES = "جميع التصنيفات"
+SEARCH_ENGINE = "BM25 (فوري — بدون تحميل نموذج)"
 UPLOAD_TYPES = [
     "pdf",
     "txt",
@@ -230,7 +230,7 @@ UPLOAD_TYPES = [
 ]
 
 
-def render_file_explorer(docs: list[dict], embeddings) -> None:
+def render_file_explorer(docs: list[dict]) -> None:
     """Render a structured category → type → file tree."""
     tree = build_explorer_tree(docs)
     if not tree:
@@ -292,7 +292,7 @@ def render_file_explorer(docs: list[dict], embeddings) -> None:
                             st.caption("غير متوفر")
                     with col_actions:
                         if st.button("حذف", key=f"del-{doc['id']}", use_container_width=True):
-                            delete_document(doc["id"], embeddings)
+                            delete_document(doc["id"])
                             st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -307,8 +307,8 @@ def main() -> None:
             <div class="hero">
               <p class="brand">مخزن الوثائق</p>
               <p class="tagline">
-                ارفع ملفات PDF والنصوص، دع التضمينات المحلية تصنّفها تلقائياً إلى مشاريع،
-                ثم ابحث دلالياً عبر كل المحتوى باستخدام FAISS.
+                ارفع ملفات PDF والنصوص، دع التصنيف التلقائي يفرزها إلى مشاريع،
+                ثم ابحث فوراً عبر المحتوى بدون تحميل أي نموذج ذكاء اصطناعي.
               </p>
             </div>
             """,
@@ -320,7 +320,6 @@ def main() -> None:
             logout()
             st.rerun()
 
-    embeddings = get_embeddings()
     docs = load_metadata()
     categories = category_summary(docs)
 
@@ -346,7 +345,7 @@ def main() -> None:
                         text=f"جارٍ فهرسة {file.name}…",
                     )
                     try:
-                        record = ingest_file(file.name, file.getvalue(), embeddings)
+                        record = ingest_file(file.name, file.getvalue())
                         successes.append(
                             f"{record['filename']} ← **{record['category']}**"
                         )
@@ -365,7 +364,7 @@ def main() -> None:
         st.subheader("مستكشف الملفات")
         doc_word = "مستند" if len(docs) == 1 else "مستندات"
         st.caption(
-            f"نموذج التضمين: `{EMBEDDING_MODEL_NAME}` · "
+            f"محرك البحث: `{SEARCH_ENGINE}` · "
             f"{len(docs)} {doc_word}"
         )
 
@@ -379,7 +378,7 @@ def main() -> None:
                 unsafe_allow_html=True,
             )
 
-        render_file_explorer(docs, embeddings)
+        render_file_explorer(docs)
 
     with right:
         st.subheader("البحث الدلالي")
@@ -399,10 +398,9 @@ def main() -> None:
                 st.warning("ارفع مستندات قبل البحث.")
             else:
                 category = None if selected == ALL_CATEGORIES else selected
-                with st.spinner("جارٍ البحث في فهرس FAISS…"):
+                with st.spinner("جارٍ البحث…"):
                     hits = semantic_search(
                         query.strip(),
-                        embeddings,
                         k=top_k,
                         category=category,
                     )
