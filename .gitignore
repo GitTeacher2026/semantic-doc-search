@@ -12,5 +12,6 @@ data/*
 *.faiss
 .DS_Store
 .cache/
-models/
+docs/models/*
+!docs/models/.gitkeep
 *.log

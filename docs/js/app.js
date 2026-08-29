@@ -1,7 +1,8 @@
-import { pipeline, cos_sim } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
+import { pipeline, cos_sim, env } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
 
 const AUTH_KEY = "docshelf_auth";
 const STORE_KEY = "docshelf_store_v3";
+const MODEL_READY_KEY = "docshelf_model_ready";
 const USERNAME = "admin";
 const PASSWORD = "docshelf2024";
 const MODEL_ID = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
@@ -62,7 +63,6 @@ async function loadJsZip() {
   return mod.default || mod;
 }
 
-let embedder = null;
 let pendingFiles = [];
 let state = loadState();
 
@@ -83,6 +83,38 @@ const searchResults = document.getElementById("search-results");
 const resultCount = document.getElementById("result-count");
 const resultCountLabel = document.getElementById("result-count-label");
 const statusBanner = document.getElementById("status-banner");
+const modelStatus = document.getElementById("model-status");
+
+function getSiteBase() {
+  let path = window.location.pathname;
+  if (path.endsWith(".html")) {
+    path = path.slice(0, path.lastIndexOf("/") + 1);
+  }
+  if (!path.endsWith("/")) {
+    path += "/";
+  }
+  return path;
+}
+
+function configureModelEnvironment() {
+  env.localModelPath = `${getSiteBase()}models/`;
+  env.allowLocalModels = true;
+  env.allowRemoteModels = true;
+  env.useBrowserCache = true;
+  env.cacheDir = "docshelf-transformers-cache";
+}
+
+configureModelEnvironment();
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register(`${getSiteBase()}sw.js`).catch(() => {
+    // Service worker is optional; local model files still load from Pages.
+  });
+}
+
+let embedder = null;
+let embedderPromise = null;
+let modelReady = sessionStorage.getItem(MODEL_READY_KEY) === "1";
 
 function loadState() {
   try {
@@ -100,10 +132,22 @@ function isAuthed() {
   return sessionStorage.getItem(AUTH_KEY) === "1";
 }
 
+function updateModelStatus(message) {
+  if (!modelStatus) return;
+  modelStatus.textContent = message;
+  modelStatus.classList.toggle("ready", modelReady);
+}
+
 function showView() {
   if (isAuthed()) {
     loginView.classList.add("hidden");
     appView.classList.remove("hidden");
+    updateModelStatus(
+      modelReady
+        ? "نموذج التضمين جاهز (محمّل من الخادم)"
+        : "جارٍ تحميل نموذج التضمين من الخادم…"
+    );
+    preloadEmbedder();
     renderLibrary();
   } else {
     appView.classList.add("hidden");
@@ -121,12 +165,32 @@ function setStatus(message, show = true) {
 }
 
 async function getEmbedder() {
-  if (!embedder) {
-    setStatus("جارٍ تحميل نموذج التضمين… قد يستغرق ذلك دقيقة في أول زيارة.");
-    embedder = await pipeline("feature-extraction", MODEL_ID, { quantized: true });
-    setStatus("", false);
+  if (embedder) return embedder;
+  if (!embedderPromise) {
+    embedderPromise = pipeline("feature-extraction", MODEL_ID, { quantized: true })
+      .then((model) => {
+        embedder = model;
+        modelReady = true;
+        sessionStorage.setItem(MODEL_READY_KEY, "1");
+        updateModelStatus("نموذج التضمين جاهز (محمّل من الخادم)");
+        setStatus("", false);
+        return model;
+      })
+      .catch((error) => {
+        embedderPromise = null;
+        updateModelStatus("تعذّر تحميل نموذج التضمين");
+        throw error;
+      });
   }
-  return embedder;
+  return embedderPromise;
+}
+
+function preloadEmbedder() {
+  if (modelReady && embedder) return Promise.resolve(embedder);
+  setStatus("جارٍ تحميل نموذج التضمين من الخادم…");
+  return getEmbedder().catch((error) => {
+    setStatus(`خطأ في تحميل النموذج: ${error.message}`, true);
+  });
 }
 
 async function embedTexts(texts) {
@@ -360,7 +424,9 @@ function summarizeCategories(documents) {
 function renderLibrary() {
   const docs = state.documents;
   const docWord = docs.length === 1 ? "مستند" : "مستندات";
-  libraryMeta.textContent = `نموذج التضمين: ${MODEL_ID} · ${docs.length} ${docWord}`;
+  libraryMeta.textContent = `نموذج التضمين: ${MODEL_ID} · ${docs.length} ${docWord} · ${
+    modelReady ? "جاهز" : "قيد التحميل"
+  }`;
 
   const categories = summarizeCategories(docs);
   categoryChips.innerHTML = categories

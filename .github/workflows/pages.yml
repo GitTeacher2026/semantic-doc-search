@@ -24,7 +24,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Requires a one-time manual step: repo Settings → Pages → Source → GitHub Actions
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download embedding model to docs/models
+        run: |
+          pip install huggingface_hub
+          python scripts/download_browser_model.py
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
