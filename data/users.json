@@ -60,16 +60,5 @@
       "approvedAt": "2026-08-29T10:57:04.829Z"
     }
   ],
-  "pending": [
-    {
-      "id": "a0005be7-e02f-4b37-a5fe-ec9e8afefe89",
-      "username": "656",
-      "firstName": "565",
-      "lastName": "665",
-      "email": "65@ddfdf.com",
-      "passwordHash": "/mCN9X5XMKoAbgZ8S35BMzLi37WkprwnuyCM/6ALGa0=",
-      "approvalToken": "5db92672f4814b13a8086e4f7445dada",
-      "createdAt": "2026-08-29T11:04:13.039Z"
-    }
-  ]
+  "pending": []
 }
