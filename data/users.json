@@ -24,18 +24,6 @@
       "approvedAt": "2026-08-29T10:21:41.670Z"
     },
     {
-      "id": "a5b439ba-bd1f-4ae5-bc35-de2e2a78c588",
-      "username": "assa",
-      "firstName": "asas",
-      "lastName": "asas",
-      "email": "asas@gfg.com",
-      "passwordHash": "ykCVn/jaqbAq6brcNSM7fsvYWhf6PvnwH+N0x1olcnk=",
-      "role": "member",
-      "status": "approved",
-      "createdAt": "2026-08-29T10:44:23.558Z",
-      "approvedAt": "2026-08-29T10:44:38.184Z"
-    },
-    {
       "id": "023c0bdd-8ce4-498b-bd0a-3d82451e660c",
       "username": "ewe",
       "firstName": "wewe",
