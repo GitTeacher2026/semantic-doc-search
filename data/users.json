@@ -46,9 +46,7 @@
       "status": "approved",
       "createdAt": "2026-08-29T10:49:33.317Z",
       "approvedAt": "2026-08-29T10:49:41.457Z"
-    }
-  ],
-  "pending": [
+    },
     {
       "id": "573ab793-21cb-4c3f-84c7-21e10258621b",
       "username": "ffgffg",
@@ -56,8 +54,11 @@
       "lastName": "gfgfgf",
       "email": "gfgf@gfg.com",
       "passwordHash": "zsMSWWSlBz31HT9nE58+zbGvXEv/BTvlB+D8PWf7Qm0=",
-      "approvalToken": "ede73485f1c6458799ad6d9a19c01260",
-      "createdAt": "2026-08-29T10:56:28.472Z"
+      "role": "member",
+      "status": "approved",
+      "createdAt": "2026-08-29T10:56:28.472Z",
+      "approvedAt": "2026-08-29T10:57:04.829Z"
     }
-  ]
+  ],
+  "pending": []
 }
