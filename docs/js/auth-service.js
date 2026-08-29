@@ -172,9 +172,15 @@ async function sendGitHubIssueNotification(title, body) {
   }
 }
 
+function buildApprovalLinks(pendingUser) {
+  return {
+    approveUrl: approvalLink("approve", pendingUser.approvalToken),
+    rejectUrl: approvalLink("reject", pendingUser.approvalToken),
+  };
+}
+
 function buildApprovalMessage(pendingUser) {
-  const approveUrl = approvalLink("approve", pendingUser.approvalToken);
-  const rejectUrl = approvalLink("reject", pendingUser.approvalToken);
+  const { approveUrl, rejectUrl } = buildApprovalLinks(pendingUser);
   return [
     "طلب تسجيل جديد في مخزن الوثائق",
     "",
@@ -183,10 +189,10 @@ function buildApprovalMessage(pendingUser) {
     `البريد: ${pendingUser.email}`,
     `التاريخ: ${new Date(pendingUser.createdAt).toLocaleString("ar-EG")}`,
     "",
-    "للموافقة، افتح الرابط التالي:",
+    "✅ للموافقة على العضو:",
     approveUrl,
     "",
-    "للرفض:",
+    "❌ لرفض الطلب:",
     rejectUrl,
     "",
     `أو سجّل دخولك كمسؤول (${ADMIN_EMAIL}) ووافق من لوحة التحكم داخل التطبيق.`,
@@ -194,6 +200,7 @@ function buildApprovalMessage(pendingUser) {
 }
 
 export async function sendApprovalRequestEmail(pendingUser) {
+  const { approveUrl, rejectUrl } = buildApprovalLinks(pendingUser);
   const message = buildApprovalMessage(pendingUser);
   const subject = `طلب موافقة تسجيل: ${pendingUser.username}`;
 
@@ -202,6 +209,13 @@ export async function sendApprovalRequestEmail(pendingUser) {
     from_name: "مخزن الوثائق",
     name: `${pendingUser.firstName} ${pendingUser.lastName}`,
     email: pendingUser.email,
+    replyto: pendingUser.email,
+    username: pendingUser.username,
+    signup_email: pendingUser.email,
+    approve_link: approveUrl,
+    reject_link: rejectUrl,
+    "Approve (موافقة)": approveUrl,
+    "Reject (رفض)": rejectUrl,
     message,
   });
   if (web3.ok) {

@@ -84,6 +84,7 @@ export function initAuthPage({ onLoginSuccess }) {
   const loginForm = document.getElementById("login-form");
   const signupForm = document.getElementById("signup-form");
   const loginError = document.getElementById("login-error");
+  const loginPendingNotice = document.getElementById("login-pending-notice");
   const signupError = document.getElementById("signup-error");
   const signupSuccess = document.getElementById("signup-success");
   const showSignupBtn = document.getElementById("show-signup");
@@ -94,6 +95,7 @@ export function initAuthPage({ onLoginSuccess }) {
     event.preventDefault();
     switchAuthPanel("signup");
     showAuthMessage(loginError, "");
+    showAuthMessage(loginPendingNotice, "", false);
     showAuthMessage(signupError, "");
     showAuthMessage(signupSuccess, "", false);
     refreshCaptcha();
@@ -120,6 +122,7 @@ export function initAuthPage({ onLoginSuccess }) {
       setStoredUser(user);
       sessionStorage.setItem(AUTH_KEY, "1");
       showAuthMessage(loginError, "");
+      showAuthMessage(loginPendingNotice, "", false);
       await onLoginSuccess(user);
     } catch (error) {
       showAuthMessage(loginError, error.message);
@@ -148,12 +151,24 @@ export function initAuthPage({ onLoginSuccess }) {
       signupForm.reset();
       refreshCaptcha();
       showAuthMessage(signupError, "");
-      const successText = notification.sent
+      showAuthMessage(signupSuccess, "", false);
+
+      const pendingNotice =
+        "تم إنشاء حسابك بنجاح. طلبك بانتظار موافقة المسؤول — لا يمكنك تسجيل الدخول حتى يتم التفعيل. سنُرسل لك بريداً عند الموافقة.";
+      const noticeText = notification.sent
         ? notification.method === "github"
-          ? "تم إرسال طلب التسجيل. ستصلك رسالة على بريد GitHub المرتبط بحسابك للموافقة."
-          : "تم إرسال طلب التسجيل. ستصل موافقة إلى بريد المسؤول، وستُبلَّغ عند التفعيل."
-        : `تم حفظ طلب التسجيل. ${notification.note || "سيوافق المسؤول من داخل التطبيق."}`;
-      showAuthMessage(signupSuccess, successText, false);
+          ? `${pendingNotice} تم إخطار المسؤول عبر GitHub.`
+          : pendingNotice
+        : `${pendingNotice} ${notification.note || "سيوافق المسؤول من داخل التطبيق."}`;
+
+      const banner = document.getElementById("auth-action-banner");
+      if (banner) {
+        banner.classList.remove("hidden", "auth-error");
+        banner.classList.add("auth-success");
+        banner.textContent = noticeText;
+      }
+      showAuthMessage(loginPendingNotice, noticeText, false);
+
       switchAuthPanel("login");
     } catch (error) {
       showAuthMessage(signupError, error.message);
