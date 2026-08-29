@@ -28,6 +28,11 @@ import {
   saveDocuments,
 } from "./storage.js";
 import {
+  approvePendingUser,
+  rejectPendingUser,
+} from "./auth-service.js";
+import { getVaultPassword } from "./auth-page.js";
+import {
   daysUntilPurge,
   moveToTrash,
   normalizeState,
@@ -36,10 +41,6 @@ import {
   TRASH_RETENTION_DAYS,
 } from "./trash.js";
 
-const AUTH_KEY = "docshelf_auth";
-const PASSWORD_KEY = "docshelf_session_password";
-const USERNAME = "admin";
-const PASSWORD = "docshelf2024";
 const CHUNK_SIZE = 800;
 const CHUNK_OVERLAP = 120;
 
@@ -51,12 +52,14 @@ let pendingDeleteId = null;
 let pendingLockId = null;
 let pendingUnlockId = null;
 let pendingUnlockAction = null;
+let authApi = null;
+let currentUser = null;
 
-const loginView = document.getElementById("login-view");
 const appView = document.getElementById("app-view");
-const loginForm = document.getElementById("login-form");
-const loginError = document.getElementById("login-error");
 const logoutBtn = document.getElementById("logout-btn");
+const userGreeting = document.getElementById("user-greeting");
+const adminPanel = document.getElementById("admin-panel");
+const pendingUsersList = document.getElementById("pending-users-list");
 const dropZone = document.getElementById("drop-zone");
 const fileInput = document.getElementById("file-input");
 const pendingFilesEl = document.getElementById("pending-files");
@@ -141,26 +144,24 @@ function updateStorageBanner() {
 }
 
 function isAuthed() {
-  return sessionStorage.getItem(AUTH_KEY) === "1";
+  return Boolean(currentUser);
 }
 
 function showView() {
-  if (isAuthed()) {
-    loginView.classList.add("hidden");
-    appView.classList.remove("hidden");
-    if (modelStatus) {
-      modelStatus.textContent = "البحث فوري — لا حاجة لتحميل نموذج ذكاء اصطناعي";
-      modelStatus.classList.add("ready");
-    }
-    if (!isHydrating && sessionPassword) {
-      renderLibrary();
-      renderTrash();
-      updateStorageBanner();
-    }
-  } else {
-    appView.classList.add("hidden");
-    loginView.classList.remove("hidden");
-    if (storageBanner) storageBanner.classList.add("hidden");
+  if (!isAuthed()) return;
+  appView.classList.remove("hidden");
+  if (userGreeting && currentUser) {
+    userGreeting.textContent = `مرحباً ${currentUser.firstName} ${currentUser.lastName} (@${currentUser.username})`;
+  }
+  if (modelStatus) {
+    modelStatus.textContent = "البحث فوري — لا حاجة لتحميل نموذج ذكاء اصطناعي";
+    modelStatus.classList.add("ready");
+  }
+  if (!isHydrating && sessionPassword) {
+    renderLibrary();
+    renderTrash();
+    renderAdminPanel();
+    updateStorageBanner();
   }
 }
 
@@ -374,6 +375,62 @@ async function extractText(file, arrayBuffer) {
     return new TextDecoder("utf-8").decode(buffer).trim();
   }
   throw new Error(`نوع الملف غير مدعوم: ${name}`);
+}
+
+async function renderAdminPanel() {
+  if (!adminPanel || !authApi?.isAdmin?.()) {
+    adminPanel?.classList.add("hidden");
+    return;
+  }
+
+  const pending = await authApi.listPendingUsers();
+  adminPanel.classList.remove("hidden");
+
+  if (!pending.length) {
+    pendingUsersList.innerHTML = `<p class="muted">لا توجد طلبات تسجيل معلّقة.</p>`;
+    return;
+  }
+
+  pendingUsersList.innerHTML = pending
+    .map(
+      (user) => `
+      <div class="pending-user-row" data-id="${user.id}">
+        <div>
+          <strong>${escapeHtml(user.firstName)} ${escapeHtml(user.lastName)}</strong>
+          <div class="muted">@${escapeHtml(user.username)} · ${escapeHtml(user.email)}</div>
+        </div>
+        <div class="pending-user-actions">
+          <button class="btn primary small approve-user-btn" data-id="${user.id}" type="button">موافقة</button>
+          <button class="btn ghost small reject-user-btn" data-id="${user.id}" type="button">رفض</button>
+        </div>
+      </div>`
+    )
+    .join("");
+
+  pendingUsersList.querySelectorAll(".approve-user-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        await approvePendingUser(btn.dataset.id);
+        setStatus("تمت الموافقة وإرسال بريد تأكيدي للمستخدم.", true);
+        await renderAdminPanel();
+      } catch (error) {
+        setStatus(error.message, true);
+      }
+    });
+  });
+
+  pendingUsersList.querySelectorAll(".reject-user-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!window.confirm("رفض هذا الطلب؟")) return;
+      try {
+        await rejectPendingUser(btn.dataset.id);
+        setStatus("تم رفض الطلب وإبلاغ المستخدم.", true);
+        await renderAdminPanel();
+      } catch (error) {
+        setStatus(error.message, true);
+      }
+    });
+  });
 }
 
 function buildExplorerTree(documents) {
@@ -858,38 +915,13 @@ function runSearch() {
   searchBtn.disabled = false;
 }
 
-loginForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const username = document.getElementById("username").value.trim();
-  const password = document.getElementById("password").value;
-  if (username !== USERNAME || password !== PASSWORD) {
-    loginError.classList.remove("hidden");
-    return;
-  }
-
-  loginError.classList.add("hidden");
-  sessionPassword = password;
-  try {
-    await hydrateDocuments(password);
-    sessionStorage.setItem(AUTH_KEY, "1");
-    sessionStorage.setItem(PASSWORD_KEY, password);
-    showView();
-  } catch {
-    sessionPassword = "";
-    clearStorageSession();
-    loginError.textContent = "تعذّر تحميل المستندات. تحقق من كلمة المرور أو إعداد التخزين.";
-    loginError.classList.remove("hidden");
-  }
-});
-
 logoutBtn.addEventListener("click", () => {
-  sessionStorage.removeItem(AUTH_KEY);
-  sessionStorage.removeItem(PASSWORD_KEY);
   sessionPassword = "";
   state = normalizeState({});
+  currentUser = null;
   clearStorageSession();
   clearUnlockSession();
-  showView();
+  authApi?.logout?.();
 });
 
 ingestBtn.addEventListener("click", () => {
@@ -922,26 +954,16 @@ lockPasswordConfirm?.addEventListener("keydown", (event) => {
 
 setupDropZone();
 
-async function bootstrap() {
-  if (isAuthed()) {
-    const savedPassword = sessionStorage.getItem(PASSWORD_KEY);
-    if (savedPassword) {
-      sessionPassword = savedPassword;
-      try {
-        await hydrateDocuments(savedPassword);
-        showView();
-        return;
-      } catch {
-        sessionStorage.removeItem(AUTH_KEY);
-        sessionStorage.removeItem(PASSWORD_KEY);
-        sessionPassword = "";
-        clearStorageSession();
-      }
-    } else {
-      sessionStorage.removeItem(AUTH_KEY);
-    }
-  }
-  showView();
-}
+export async function startApp({ user, auth }) {
+  currentUser = user;
+  authApi = auth;
+  sessionPassword = getVaultPassword();
 
-bootstrap();
+  try {
+    await hydrateDocuments(sessionPassword);
+    showView();
+  } catch (error) {
+    setStatus(`تعذّر تحميل المستندات: ${error.message}`, true);
+    authApi?.logout?.();
+  }
+}

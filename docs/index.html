@@ -8,34 +8,149 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&family=Noto+Serif+Arabic:wght@600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/auth.css" />
 </head>
-<body>
-  <div id="login-view" class="view">
-    <div class="login-wrap">
-      <div class="login-card">
-        <h1>مخزن الوثائق</h1>
-        <p class="muted">سجّل الدخول للوصول إلى رفع الملفات والبحث الدلالي</p>
-        <form id="login-form">
-          <label for="username">اسم المستخدم</label>
-          <input id="username" name="username" type="text" placeholder="admin" autocomplete="username" required />
-          <label for="password">كلمة المرور</label>
-          <input id="password" name="password" type="password" placeholder="••••••••" autocomplete="current-password" required />
-          <button type="submit" class="btn primary">دخول</button>
-          <p id="login-error" class="error hidden">اسم المستخدم أو كلمة المرور غير صحيحة.</p>
-        </form>
-        <p class="hint">بيانات الدخول الافتراضية: admin / docshelf2024</p>
+<body class="auth-body">
+  <div id="login-view" class="auth-scene">
+    <div class="auth-bg" aria-hidden="true"></div>
+
+    <header class="auth-nav">
+      <div class="auth-brand">
+        <svg class="auth-brand-mark" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+          <circle cx="32" cy="32" r="30" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
+          <path d="M18 42c4-14 10-22 14-24s10 10 14 24" stroke="#f5f8ff" stroke-width="2" stroke-linecap="round"/>
+          <path d="M22 38c6-8 12-12 18-12s12 4 18 12" stroke="#d4af37" stroke-width="1.5" stroke-linecap="round"/>
+          <ellipse cx="32" cy="30" rx="10" ry="12" stroke="#f5f8ff" stroke-width="1.5"/>
+        </svg>
+        <span class="auth-brand-text">مخزن الوثائق</span>
       </div>
-    </div>
+      <nav class="auth-nav-links" aria-label="تنقل">
+        <span>الرئيسية</span>
+        <span>الميزات</span>
+        <span>حول</span>
+        <span>تواصل</span>
+      </nav>
+    </header>
+
+    <div id="auth-action-banner" class="auth-action-banner hidden" role="status"></div>
+
+    <main class="auth-main">
+      <div id="login-panel" class="auth-card">
+        <div class="auth-hero-icon" aria-hidden="true">
+          <svg viewBox="0 0 120 120" fill="none">
+            <defs>
+              <linearGradient id="hijabGold" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#f5e6b8"/>
+                <stop offset="100%" stop-color="#d4af37"/>
+              </linearGradient>
+            </defs>
+            <circle cx="60" cy="60" r="54" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+            <path d="M28 78c6-22 16-34 32-38s26 16 32 38" stroke="url(#hijabGold)" stroke-width="2.5" stroke-linecap="round"/>
+            <path d="M34 72c8-14 18-22 26-22s18 8 26 22" stroke="#f5f8ff" stroke-width="2" stroke-linecap="round"/>
+            <ellipse cx="60" cy="52" rx="18" ry="22" stroke="#f5f8ff" stroke-width="2"/>
+            <path d="M42 48c4-8 10-12 18-12s14 4 18 12" stroke="url(#hijabGold)" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <h1>تسجيل الدخول</h1>
+        <p class="auth-subtitle">MEMBER LOGIN — ادخل إلى مكتبتك الرقمية</p>
+        <form id="login-form" class="auth-form">
+          <label for="login-username">اسم المستخدم أو البريد</label>
+          <div class="auth-input-wrap">
+            <span class="input-icon">✉️</span>
+            <input id="login-username" name="username" type="text" placeholder="admin" autocomplete="username" required />
+          </div>
+          <label for="login-password">كلمة المرور</label>
+          <div class="auth-input-wrap">
+            <span class="input-icon">🔒</span>
+            <input id="login-password" name="password" type="password" placeholder="••••••••" autocomplete="current-password" required />
+          </div>
+          <button type="submit" class="auth-btn">دخول</button>
+          <p id="login-error" class="auth-error hidden"></p>
+        </form>
+        <p class="auth-footer">
+          ليس لديك حساب؟ <a href="#" id="show-signup" class="auth-link">إنشاء حساب</a>
+        </p>
+      </div>
+
+      <div id="signup-panel" class="auth-card hidden">
+        <div class="auth-hero-icon" aria-hidden="true">
+          <svg viewBox="0 0 120 120" fill="none">
+            <circle cx="60" cy="60" r="54" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+            <path d="M28 78c6-22 16-34 32-38s26 16 32 38" stroke="#d4af37" stroke-width="2.5" stroke-linecap="round"/>
+            <ellipse cx="60" cy="52" rx="18" ry="22" stroke="#f5f8ff" stroke-width="2"/>
+          </svg>
+        </div>
+        <h1>إنشاء حساب</h1>
+        <p class="auth-subtitle">يحتاج حسابك موافقة المسؤول عبر البريد</p>
+        <form id="signup-form" class="auth-form">
+          <label for="signup-username">اسم المستخدم</label>
+          <div class="auth-input-wrap">
+            <span class="input-icon">👤</span>
+            <input id="signup-username" name="username" type="text" placeholder="username" autocomplete="username" required />
+          </div>
+          <label for="signup-first-name">الاسم الأول</label>
+          <div class="auth-input-wrap">
+            <span class="input-icon">📝</span>
+            <input id="signup-first-name" name="firstName" type="text" placeholder="الاسم الأول" required />
+          </div>
+          <label for="signup-last-name">اسم العائلة</label>
+          <div class="auth-input-wrap">
+            <span class="input-icon">📝</span>
+            <input id="signup-last-name" name="lastName" type="text" placeholder="اسم العائلة" required />
+          </div>
+          <label for="signup-email">البريد الإلكتروني</label>
+          <div class="auth-input-wrap">
+            <span class="input-icon">✉️</span>
+            <input id="signup-email" name="email" type="email" placeholder="you@example.com" autocomplete="email" required />
+          </div>
+          <label for="signup-password">كلمة المرور</label>
+          <div class="auth-input-wrap">
+            <span class="input-icon">🔒</span>
+            <input id="signup-password" name="password" type="password" placeholder="8 أحرف على الأقل" autocomplete="new-password" required />
+          </div>
+          <label for="signup-password-confirm">تأكيد كلمة المرور</label>
+          <div class="auth-input-wrap">
+            <span class="input-icon">🔒</span>
+            <input id="signup-password-confirm" name="confirmPassword" type="password" placeholder="أعد إدخال كلمة المرور" autocomplete="new-password" required />
+          </div>
+          <label id="captcha-label" for="signup-captcha">التحقق</label>
+          <div class="captcha-row">
+            <div class="auth-input-wrap" style="flex:1">
+              <span class="input-icon">🔢</span>
+              <input id="signup-captcha" name="captcha" type="number" inputmode="numeric" placeholder="الإجابة" required />
+            </div>
+            <button id="refresh-captcha" class="captcha-refresh" type="button" title="تحديث">↻</button>
+          </div>
+          <label class="terms-row">
+            <input id="signup-terms" type="checkbox" required />
+            <span>أوافق على شروط الاستخدام وسياسة الخصوصية</span>
+          </label>
+          <button type="submit" class="auth-btn">إرسال طلب التسجيل</button>
+          <p id="signup-error" class="auth-error hidden"></p>
+          <p id="signup-success" class="auth-success hidden"></p>
+        </form>
+        <p class="auth-footer">
+          لديك حساب؟ <a href="#" id="show-login" class="auth-link">تسجيل الدخول</a>
+        </p>
+      </div>
+    </main>
   </div>
 
   <div id="app-view" class="view hidden">
     <header class="hero">
       <div>
         <h1>مخزن الوثائق</h1>
+        <p id="user-greeting" class="user-greeting"></p>
         <p class="tagline">ارفع ملفات PDF وOffice والنصوص، صنّفها تلقائياً، وابحث فوراً بدون تحميل أي نموذج.</p>
       </div>
       <button id="logout-btn" class="btn ghost" type="button">تسجيل الخروج</button>
     </header>
+
+    <div id="admin-panel" class="admin-panel hidden">
+      <h2>طلبات التسجيل بانتظار الموافقة</h2>
+      <p class="muted">يتم إرسال بريد تأكيدي إلى amanyak267@gmail.com عند كل طلب جديد.</p>
+      <div id="pending-users-list"></div>
+    </div>
 
     <div id="status-banner" class="status hidden"></div>
     <div id="storage-banner" class="storage-banner hidden"></div>
@@ -130,6 +245,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>
