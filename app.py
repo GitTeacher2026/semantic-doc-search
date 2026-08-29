@@ -230,6 +230,20 @@ UPLOAD_TYPES = [
 ]
 
 
+@st.dialog("تأكيد الحذف")
+def confirm_delete_dialog(doc_id: str, filename: str) -> None:
+    st.write(f"هل أنت متأكد من حذف «{filename}»؟")
+    st.caption("لا يمكن التراجع عن هذا الإجراء.")
+    col_confirm, col_cancel = st.columns(2)
+    with col_confirm:
+        if st.button("نعم، احذف", type="primary", use_container_width=True):
+            delete_document(doc_id)
+            st.rerun()
+    with col_cancel:
+        if st.button("إلغاء", use_container_width=True):
+            st.rerun()
+
+
 def render_file_explorer(docs: list[dict]) -> None:
     """Render a structured category → type → file tree."""
     tree = build_explorer_tree(docs)
@@ -292,8 +306,7 @@ def render_file_explorer(docs: list[dict]) -> None:
                             st.caption("غير متوفر")
                     with col_actions:
                         if st.button("حذف", key=f"del-{doc['id']}", use_container_width=True):
-                            delete_document(doc["id"])
-                            st.rerun()
+                            confirm_delete_dialog(doc["id"], doc["filename"])
     st.markdown("</div>", unsafe_allow_html=True)
 
 

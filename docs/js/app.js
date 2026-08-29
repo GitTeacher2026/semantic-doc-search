@@ -67,6 +67,13 @@ const resultCountLabel = document.getElementById("result-count-label");
 const statusBanner = document.getElementById("status-banner");
 const modelStatus = document.getElementById("model-status");
 const storageBanner = document.getElementById("storage-banner");
+const deleteDialog = document.getElementById("delete-dialog");
+const deleteDialogTitle = document.getElementById("delete-dialog-title");
+const deleteConfirmBtn = document.getElementById("delete-confirm-btn");
+const deleteCancelBtn = document.getElementById("delete-cancel-btn");
+const deleteDialogBackdrop = document.getElementById("delete-dialog-backdrop");
+
+let pendingDeleteId = null;
 
 async function hydrateDocuments(password) {
   isHydrating = true;
@@ -355,18 +362,7 @@ function renderLibrary() {
     .join("");
 
   libraryList.querySelectorAll(".delete-btn").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      state.documents = state.documents.filter((d) => d.id !== btn.dataset.id);
-      try {
-        setStatus("جارٍ حفظ التغييرات…");
-        await persistState();
-        renderLibrary();
-        setStatus("تم حذف المستند.", true);
-        setTimeout(() => setStatus("", false), 2000);
-      } catch (error) {
-        setStatus(`تعذّر الحذف: ${error.message}`, true);
-      }
-    });
+    btn.addEventListener("click", () => openDeleteDialog(btn.dataset.id));
   });
 
   libraryList.querySelectorAll(".download-btn").forEach((btn) => {
@@ -427,6 +423,35 @@ function downloadDocument(doc) {
 
 function findDocumentById(id) {
   return state.documents.find((doc) => doc.id === id);
+}
+
+function openDeleteDialog(docId) {
+  const doc = findDocumentById(docId);
+  if (!doc || !deleteDialog) return;
+  pendingDeleteId = docId;
+  deleteDialogTitle.textContent = `هل تريد حذف «${doc.filename}»؟`;
+  deleteDialog.classList.remove("hidden");
+}
+
+function closeDeleteDialog() {
+  pendingDeleteId = null;
+  if (deleteDialog) deleteDialog.classList.add("hidden");
+}
+
+async function confirmDelete() {
+  if (!pendingDeleteId) return;
+  const docId = pendingDeleteId;
+  closeDeleteDialog();
+  state.documents = state.documents.filter((d) => d.id !== docId);
+  try {
+    setStatus("جارٍ حفظ التغييرات…");
+    await persistState();
+    renderLibrary();
+    setStatus("تم حذف المستند.", true);
+    setTimeout(() => setStatus("", false), 2000);
+  } catch (error) {
+    setStatus(`تعذّر الحذف: ${error.message}`, true);
+  }
 }
 
 async function ingestFiles(files) {
@@ -562,6 +587,10 @@ searchBtn.addEventListener("click", runSearch);
 resultCount.addEventListener("input", () => {
   resultCountLabel.textContent = resultCount.value;
 });
+
+if (deleteConfirmBtn) deleteConfirmBtn.addEventListener("click", confirmDelete);
+if (deleteCancelBtn) deleteCancelBtn.addEventListener("click", closeDeleteDialog);
+if (deleteDialogBackdrop) deleteDialogBackdrop.addEventListener("click", closeDeleteDialog);
 
 async function bootstrap() {
   if (isAuthed()) {
