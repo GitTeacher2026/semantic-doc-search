@@ -44,13 +44,32 @@
     <main class="grid">
       <section class="panel">
         <h2>رفع الملفات</h2>
-        <input id="file-input" type="file" accept=".pdf,.txt,.md,.text,.log,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx" multiple />
+        <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="منطقة رفع الملفات">
+          <input id="file-input" class="drop-zone-input" type="file" accept=".pdf,.txt,.md,.text,.log,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx" multiple />
+          <div class="drop-zone-content">
+            <div class="drop-zone-icon" aria-hidden="true">📂</div>
+            <p class="drop-zone-title">اسحب الملفات وأفلتها هنا</p>
+            <p class="drop-zone-sub muted">أو انقر لاختيار الملفات من جهازك</p>
+            <div class="drop-zone-types">
+              <span class="type-pill pdf">PDF</span>
+              <span class="type-pill word">Word</span>
+              <span class="type-pill excel">Excel</span>
+              <span class="type-pill powerpoint">PPT</span>
+              <span class="type-pill text">نص</span>
+            </div>
+          </div>
+        </div>
+        <div id="pending-files" class="pending-files-grid hidden"></div>
         <button id="ingest-btn" class="btn primary" type="button" disabled>فهرسة وتصنيف</button>
 
         <h2>مستكشف الملفات</h2>
         <p id="library-meta" class="muted">جارٍ التحميل…</p>
         <div id="category-chips" class="chips"></div>
         <div id="library-list" class="explorer"></div>
+
+        <h2 class="section-gap">سلة المهملات</h2>
+        <p id="trash-meta" class="muted">الملفات المحذوفة تُحذف نهائياً بعد 30 يوماً.</p>
+        <div id="trash-list" class="trash-list"></div>
       </section>
 
       <section class="panel">
@@ -70,11 +89,43 @@
   <div id="delete-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title">
     <div class="modal-backdrop" id="delete-dialog-backdrop"></div>
     <div class="modal-card">
-      <h2 id="delete-dialog-title">هل تريد حذف هذا المستند؟</h2>
-      <p class="muted">لا يمكن التراجع عن هذا الإجراء.</p>
+      <h2 id="delete-dialog-title">هل تريد نقل هذا المستند إلى سلة المهملات؟</h2>
+      <p class="muted">سيُحذف نهائياً بعد 30 يوماً. يمكنك استعادته قبل ذلك.</p>
       <div class="modal-actions">
         <button id="delete-cancel-btn" class="btn ghost" type="button">إلغاء</button>
-        <button id="delete-confirm-btn" class="btn danger" type="button">نعم، احذف</button>
+        <button id="delete-confirm-btn" class="btn danger" type="button">نقل إلى السلة</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="lock-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="lock-dialog-title">
+    <div class="modal-backdrop" id="lock-dialog-backdrop"></div>
+    <div class="modal-card">
+      <h2 id="lock-dialog-title">قفل الملف</h2>
+      <p id="lock-dialog-sub" class="muted">أدخل كلمة مرور لحماية هذا الملف.</p>
+      <label for="lock-password">كلمة مرور القفل</label>
+      <input id="lock-password" type="password" autocomplete="new-password" />
+      <label for="lock-password-confirm">تأكيد كلمة المرور</label>
+      <input id="lock-password-confirm" type="password" autocomplete="new-password" />
+      <p id="lock-dialog-error" class="error hidden"></p>
+      <div class="modal-actions">
+        <button id="lock-cancel-btn" class="btn ghost" type="button">إلغاء</button>
+        <button id="lock-confirm-btn" class="btn primary" type="button">قفل الملف</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="unlock-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="unlock-dialog-title">
+    <div class="modal-backdrop" id="unlock-dialog-backdrop"></div>
+    <div class="modal-card">
+      <h2 id="unlock-dialog-title">فتح الملف المقفل</h2>
+      <p id="unlock-dialog-sub" class="muted">أدخل كلمة مرور القفل للوصول إلى هذا الملف.</p>
+      <label for="unlock-password">كلمة مرور القفل</label>
+      <input id="unlock-password" type="password" autocomplete="current-password" />
+      <p id="unlock-dialog-error" class="error hidden"></p>
+      <div class="modal-actions">
+        <button id="unlock-cancel-btn" class="btn ghost" type="button">إلغاء</button>
+        <button id="unlock-confirm-btn" class="btn primary" type="button">فتح</button>
       </div>
     </div>
   </div>

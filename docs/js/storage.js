@@ -4,8 +4,9 @@ import {
   isGitHubStorageConfigured,
   uploadEncryptedStore,
 } from "./github-storage.js";
+import { normalizeState, purgeExpiredTrash } from "./trash.js";
 
-const LOCAL_CACHE_KEY = "docshelf_store_v4";
+const LOCAL_CACHE_KEY = "docshelf_store_v5";
 
 let sessionKey = null;
 let currentSalt = null;
@@ -13,14 +14,18 @@ let remoteSha = null;
 
 function loadLocalDocuments() {
   try {
-    return JSON.parse(localStorage.getItem(LOCAL_CACHE_KEY) || '{"documents":[]}');
+    return normalizeState(JSON.parse(localStorage.getItem(LOCAL_CACHE_KEY) || "{}"));
   } catch {
-    return { documents: [] };
+    return normalizeState({});
   }
 }
 
 function saveLocalDocuments(state) {
-  localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(state));
+  localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(normalizeState(state)));
+}
+
+function finalizeState(state) {
+  return purgeExpiredTrash(normalizeState(state));
 }
 
 export function isCloudSyncEnabled() {
@@ -29,21 +34,21 @@ export function isCloudSyncEnabled() {
 
 export async function loadDocuments(password) {
   if (!isGitHubStorageConfigured()) {
-    return loadLocalDocuments();
+    return finalizeState(loadLocalDocuments());
   }
 
   const { envelope, sha } = await fetchEncryptedStore();
   remoteSha = sha;
 
   if (!envelope) {
-    const local = loadLocalDocuments();
+    const local = finalizeState(loadLocalDocuments());
     currentSalt = crypto.getRandomValues(new Uint8Array(16));
     sessionKey = await deriveKey(password, currentSalt);
-    if (local.documents.length) {
+    if (local.documents.length || local.trash.length) {
       await saveDocuments(password, local);
       return local;
     }
-    return { documents: [] };
+    return normalizeState({});
   }
 
   currentSalt = base64ToBytes(envelope.salt);
@@ -51,15 +56,16 @@ export async function loadDocuments(password) {
 
   try {
     const decrypted = await decryptJson(sessionKey, envelope.iv, envelope.ciphertext);
-    return { documents: decrypted.documents || [] };
+    return finalizeState(decrypted);
   } catch {
     throw new Error("كلمة المرور غير صحيحة أو بيانات التخزين تالفة.");
   }
 }
 
 export async function saveDocuments(password, state) {
+  const payload = finalizeState(state);
   if (!isGitHubStorageConfigured()) {
-    saveLocalDocuments(state);
+    saveLocalDocuments(payload);
     return;
   }
 
@@ -68,7 +74,7 @@ export async function saveDocuments(password, state) {
     sessionKey = await deriveKey(password, currentSalt);
   }
 
-  const { iv, ciphertext } = await encryptJson(sessionKey, state);
+  const { iv, ciphertext } = await encryptJson(sessionKey, payload);
   const envelope = {
     version: 1,
     salt: bytesToBase64(currentSalt),

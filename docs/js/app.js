@@ -4,11 +4,37 @@ import {
   allChunksFromDocuments,
 } from "./bm25-search.js";
 import {
+  EXT_GROUPS,
+  GROUP_ICONS,
+  GROUP_LABELS,
+  fileEndsWith,
+  fileExtension,
+  fileGroup,
+  formatFileSize,
+} from "./constants.js";
+import {
+  accessibleDocuments,
+  clearUnlockSession,
+  hashPassword,
+  isDocUnlocked,
+  lockDocSession,
+  unlockDoc,
+  verifyLockPassword,
+} from "./file-lock.js";
+import {
   clearStorageSession,
   isCloudSyncEnabled,
   loadDocuments,
   saveDocuments,
 } from "./storage.js";
+import {
+  daysUntilPurge,
+  moveToTrash,
+  normalizeState,
+  permanentlyDelete,
+  restoreFromTrash,
+  TRASH_RETENTION_DAYS,
+} from "./trash.js";
 
 const AUTH_KEY = "docshelf_auth";
 const PASSWORD_KEY = "docshelf_session_password";
@@ -17,47 +43,29 @@ const PASSWORD = "docshelf2024";
 const CHUNK_SIZE = 800;
 const CHUNK_OVERLAP = 120;
 
-const EXT_GROUPS = {
-  pdf: [".pdf"],
-  word: [".doc", ".docx"],
-  excel: [".xls", ".xlsx"],
-  powerpoint: [".ppt", ".pptx"],
-  text: [".txt", ".md", ".text", ".log", ".csv"],
-};
-
-const GROUP_LABELS = {
-  pdf: "PDF",
-  word: "Word",
-  excel: "Excel",
-  powerpoint: "PowerPoint",
-  text: "نص",
-  other: "أخرى",
-};
-
-const GROUP_ICONS = {
-  pdf: "📄",
-  word: "📝",
-  excel: "📊",
-  powerpoint: "📽️",
-  text: "📃",
-  other: "📁",
-};
-
 let pendingFiles = [];
-let state = { documents: [] };
+let state = normalizeState({});
 let sessionPassword = "";
 let isHydrating = false;
+let pendingDeleteId = null;
+let pendingLockId = null;
+let pendingUnlockId = null;
+let pendingUnlockAction = null;
 
 const loginView = document.getElementById("login-view");
 const appView = document.getElementById("app-view");
 const loginForm = document.getElementById("login-form");
 const loginError = document.getElementById("login-error");
 const logoutBtn = document.getElementById("logout-btn");
+const dropZone = document.getElementById("drop-zone");
 const fileInput = document.getElementById("file-input");
+const pendingFilesEl = document.getElementById("pending-files");
 const ingestBtn = document.getElementById("ingest-btn");
 const libraryMeta = document.getElementById("library-meta");
 const categoryChips = document.getElementById("category-chips");
 const libraryList = document.getElementById("library-list");
+const trashMeta = document.getElementById("trash-meta");
+const trashList = document.getElementById("trash-list");
 const categoryFilter = document.getElementById("category-filter");
 const searchQuery = document.getElementById("search-query");
 const searchBtn = document.getElementById("search-btn");
@@ -67,21 +75,40 @@ const resultCountLabel = document.getElementById("result-count-label");
 const statusBanner = document.getElementById("status-banner");
 const modelStatus = document.getElementById("model-status");
 const storageBanner = document.getElementById("storage-banner");
+
 const deleteDialog = document.getElementById("delete-dialog");
 const deleteDialogTitle = document.getElementById("delete-dialog-title");
 const deleteConfirmBtn = document.getElementById("delete-confirm-btn");
 const deleteCancelBtn = document.getElementById("delete-cancel-btn");
 const deleteDialogBackdrop = document.getElementById("delete-dialog-backdrop");
 
-let pendingDeleteId = null;
+const lockDialog = document.getElementById("lock-dialog");
+const lockDialogTitle = document.getElementById("lock-dialog-title");
+const lockDialogSub = document.getElementById("lock-dialog-sub");
+const lockPassword = document.getElementById("lock-password");
+const lockPasswordConfirm = document.getElementById("lock-password-confirm");
+const lockDialogError = document.getElementById("lock-dialog-error");
+const lockConfirmBtn = document.getElementById("lock-confirm-btn");
+const lockCancelBtn = document.getElementById("lock-cancel-btn");
+const lockDialogBackdrop = document.getElementById("lock-dialog-backdrop");
+
+const unlockDialog = document.getElementById("unlock-dialog");
+const unlockDialogTitle = document.getElementById("unlock-dialog-title");
+const unlockDialogSub = document.getElementById("unlock-dialog-sub");
+const unlockPassword = document.getElementById("unlock-password");
+const unlockDialogError = document.getElementById("unlock-dialog-error");
+const unlockConfirmBtn = document.getElementById("unlock-confirm-btn");
+const unlockCancelBtn = document.getElementById("unlock-cancel-btn");
+const unlockDialogBackdrop = document.getElementById("unlock-dialog-backdrop");
 
 async function hydrateDocuments(password) {
   isHydrating = true;
   setStatus("جارٍ تحميل المستندات…");
   try {
-    state = await loadDocuments(password);
+    state = normalizeState(await loadDocuments(password));
     updateStorageBanner();
     renderLibrary();
+    renderTrash();
     setStatus("", false);
   } catch (error) {
     setStatus(`تعذّر تحميل المستندات: ${error.message}`, true);
@@ -93,6 +120,7 @@ async function hydrateDocuments(password) {
 
 async function persistState() {
   if (!sessionPassword) return;
+  state = normalizeState(state);
   await saveDocuments(sessionPassword, state);
   updateStorageBanner();
 }
@@ -126,6 +154,7 @@ function showView() {
     }
     if (!isHydrating && sessionPassword) {
       renderLibrary();
+      renderTrash();
       updateStorageBanner();
     }
   } else {
@@ -144,21 +173,93 @@ function setStatus(message, show = true) {
   statusBanner.classList.remove("hidden");
 }
 
-function fileExtension(filename) {
-  const dot = String(filename || "").lastIndexOf(".");
-  return dot >= 0 ? filename.slice(dot + 1).toLowerCase() : "";
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
-function fileGroup(filename) {
-  const ext = `.${fileExtension(filename)}`;
-  for (const [group, extensions] of Object.entries(EXT_GROUPS)) {
-    if (extensions.includes(ext)) return group;
+function largeIconMarkup(group) {
+  const icon = GROUP_ICONS[group] || GROUP_ICONS.other;
+  return `<div class="file-icon-large ${group}" aria-hidden="true">${icon}</div>`;
+}
+
+function setPendingFiles(files) {
+  pendingFiles = [...files];
+  renderPendingFiles();
+  ingestBtn.disabled = !pendingFiles.length;
+}
+
+function renderPendingFiles() {
+  if (!pendingFiles.length) {
+    pendingFilesEl.classList.add("hidden");
+    pendingFilesEl.innerHTML = "";
+    return;
   }
-  return "other";
+
+  pendingFilesEl.classList.remove("hidden");
+  pendingFilesEl.innerHTML = pendingFiles
+    .map(
+      (file, index) => `
+      <article class="pending-file-card">
+        ${largeIconMarkup(fileGroup(file.name))}
+        <div class="pending-file-name">${escapeHtml(file.name)}</div>
+        <div class="pending-file-size">${formatFileSize(file.size)}</div>
+        <button class="pending-file-remove" type="button" data-index="${index}">إزالة</button>
+      </article>`
+    )
+    .join("");
+
+  pendingFilesEl.querySelectorAll(".pending-file-remove").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const index = Number(btn.dataset.index);
+      pendingFiles = pendingFiles.filter((_, i) => i !== index);
+      renderPendingFiles();
+      ingestBtn.disabled = !pendingFiles.length;
+    });
+  });
 }
 
-function fileEndsWith(filename, extension) {
-  return fileExtension(filename) === extension.replace(/^\./, "").toLowerCase();
+function setupDropZone() {
+  const addFiles = (fileList) => {
+    if (!fileList?.length) return;
+    const merged = [...pendingFiles];
+    for (const file of fileList) merged.push(file);
+    setPendingFiles(merged);
+  };
+
+  dropZone.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      fileInput.click();
+    }
+  });
+
+  fileInput.addEventListener("change", () => {
+    addFiles([...fileInput.files]);
+    fileInput.value = "";
+  });
+
+  ["dragenter", "dragover"].forEach((type) => {
+    dropZone.addEventListener(type, (event) => {
+      event.preventDefault();
+      dropZone.classList.add("drag-over");
+    });
+  });
+
+  ["dragleave", "drop"].forEach((type) => {
+    dropZone.addEventListener(type, (event) => {
+      event.preventDefault();
+      dropZone.classList.remove("drag-over");
+    });
+  });
+
+  dropZone.addEventListener("drop", (event) => {
+    addFiles([...event.dataTransfer.files]);
+  });
 }
 
 async function loadJsZip() {
@@ -306,6 +407,26 @@ function summarizeCategories(documents) {
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ar"));
 }
 
+function renderDocPreview(doc) {
+  if (doc.isLocked && !isDocUnlocked(doc)) {
+    return `<div class="locked-preview">🔒 ملف مقفل — افتحه لعرض المحتوى</div>`;
+  }
+  const preview = doc.preview || "";
+  return `<div class="explorer-file-preview">${escapeHtml(preview)}${preview.length >= 280 ? "…" : ""}</div>`;
+}
+
+function renderDocActions(doc) {
+  const locked = doc.isLocked;
+  const unlocked = isDocUnlocked(doc);
+  const lockBtn = locked
+    ? `<button class="btn ghost small unlock-btn" data-id="${doc.id}" type="button">${unlocked ? "إعادة القفل" : "فتح"}</button>`
+    : `<button class="btn ghost small lock-btn" data-id="${doc.id}" type="button">قفل</button>`;
+  return `
+    <button class="btn ghost small download-btn" data-id="${doc.id}" type="button">تنزيل</button>
+    ${lockBtn}
+    <button class="btn ghost small delete-btn" data-id="${doc.id}" type="button">حذف</button>`;
+}
+
 function renderLibrary() {
   const docs = state.documents;
   const docWord = docs.length === 1 ? "مستند" : "مستندات";
@@ -313,7 +434,7 @@ function renderLibrary() {
 
   const categories = summarizeCategories(docs);
   categoryChips.innerHTML = categories
-    .map(([name, count]) => `<span class="chip">${name} (${count})</span>`)
+    .map(([name, count]) => `<span class="chip">${escapeHtml(name)} (${count})</span>`)
     .join("");
 
   categoryFilter.innerHTML = `<option value="">جميع التصنيفات</option>${categories
@@ -321,7 +442,7 @@ function renderLibrary() {
     .join("")}`;
 
   if (!docs.length) {
-    libraryList.innerHTML = `<p class="muted">لا توجد مستندات بعد. ارفع ملفاً للبدء.</p>`;
+    libraryList.innerHTML = `<p class="muted">لا توجد مستندات بعد. اسحب ملفاً إلى منطقة الرفع للبدء.</p>`;
     return;
   }
 
@@ -338,20 +459,27 @@ function renderLibrary() {
             <div class="explorer-group">
               <div class="explorer-group-title">${group.icon} ${escapeHtml(group.label)} (${group.files.length})</div>
               ${group.files
-                .map(
-                  (doc) => `
-                <article class="explorer-file" data-id="${doc.id}">
-                  <div>
-                    <div class="explorer-file-title">${GROUP_ICONS[doc.fileGroup] || "📁"} ${escapeHtml(doc.filename)}</div>
-                    <div class="explorer-file-meta">${escapeHtml(doc.category)} · ${doc.charCount.toLocaleString("ar-EG")} حرف · ${escapeHtml(doc.extension || "")}</div>
-                    <div class="explorer-file-preview">${escapeHtml(doc.preview || "")}${(doc.preview || "").length >= 280 ? "…" : ""}</div>
+                .map((doc) => {
+                  const groupName = doc.fileGroup || fileGroup(doc.filename);
+                  const lockedClass = doc.isLocked ? " locked" : "";
+                  const lockBadge = doc.isLocked
+                    ? `<span class="lock-badge">🔒 مقفل</span>`
+                    : "";
+                  return `
+                <article class="explorer-file${lockedClass}" data-id="${doc.id}">
+                  <div class="explorer-file-main">
+                    ${largeIconMarkup(groupName)}
+                    <div>
+                      <div class="explorer-file-title">${lockBadge}${escapeHtml(doc.filename)}</div>
+                      <div class="explorer-file-meta">${escapeHtml(doc.category)} · ${doc.charCount.toLocaleString("ar-EG")} حرف · ${escapeHtml(doc.extension || "")}</div>
+                      ${renderDocPreview(doc)}
+                    </div>
                   </div>
                   <div class="explorer-actions">
-                    <button class="btn ghost small download-btn" data-id="${doc.id}" type="button">تنزيل</button>
-                    <button class="btn ghost small delete-btn" data-id="${doc.id}" type="button">حذف</button>
+                    ${renderDocActions(doc)}
                   </div>
-                </article>`
-                )
+                </article>`;
+                })
                 .join("")}
             </div>`
             )
@@ -361,24 +489,90 @@ function renderLibrary() {
     )
     .join("");
 
+  bindLibraryActions();
+}
+
+function bindLibraryActions() {
   libraryList.querySelectorAll(".delete-btn").forEach((btn) => {
     btn.addEventListener("click", () => openDeleteDialog(btn.dataset.id));
   });
 
   libraryList.querySelectorAll(".download-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const doc = findDocumentById(btn.dataset.id);
-      if (doc) downloadDocument(doc);
-    });
+    btn.addEventListener("click", () => handleDownload(btn.dataset.id));
+  });
+
+  libraryList.querySelectorAll(".lock-btn").forEach((btn) => {
+    btn.addEventListener("click", () => openLockDialog(btn.dataset.id));
+  });
+
+  libraryList.querySelectorAll(".unlock-btn").forEach((btn) => {
+    btn.addEventListener("click", () => handleUnlockButton(btn.dataset.id));
   });
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+function renderTrash() {
+  const trash = state.trash || [];
+  trashMeta.textContent =
+    trash.length === 0
+      ? `سلة المهملات فارغة. الملفات المحذوفة تُحذف نهائياً بعد ${TRASH_RETENTION_DAYS} يوماً.`
+      : `${trash.length} ملف في السلة — يُحذف تلقائياً بعد ${TRASH_RETENTION_DAYS} يوماً.`;
+
+  if (!trash.length) {
+    trashList.innerHTML = `<p class="muted">لا توجد ملفات في سلة المهملات.</p>`;
+    return;
+  }
+
+  trashList.innerHTML = trash
+    .map((doc) => {
+      const daysLeft = daysUntilPurge(doc.deletedAt);
+      const groupName = doc.fileGroup || fileGroup(doc.filename);
+      return `
+      <article class="trash-item" data-id="${doc.id}">
+        <div class="trash-item-info">
+          <div class="trash-item-title">${GROUP_ICONS[groupName] || "📁"} ${escapeHtml(doc.filename)}</div>
+          <div class="trash-item-meta">يُحذف نهائياً خلال ${daysLeft} يوم · ${escapeHtml(doc.category || "")}</div>
+        </div>
+        <div class="trash-actions">
+          <button class="btn ghost small restore-btn" data-id="${doc.id}" type="button">استعادة</button>
+          <button class="btn ghost small purge-btn" data-id="${doc.id}" type="button">حذف نهائي</button>
+        </div>
+      </article>`;
+    })
+    .join("");
+
+  trashList.querySelectorAll(".restore-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      state = restoreFromTrash(state, btn.dataset.id);
+      try {
+        setStatus("جارٍ استعادة الملف…");
+        await persistState();
+        renderLibrary();
+        renderTrash();
+        setStatus("تمت استعادة الملف.", true);
+        setTimeout(() => setStatus("", false), 2000);
+      } catch (error) {
+        setStatus(`تعذّرت الاستعادة: ${error.message}`, true);
+      }
+    });
+  });
+
+  trashList.querySelectorAll(".purge-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const doc = state.trash.find((item) => item.id === btn.dataset.id);
+      if (!doc) return;
+      if (!window.confirm(`حذف «${doc.filename}» نهائياً؟ لا يمكن التراجع.`)) return;
+      state = permanentlyDelete(state, btn.dataset.id);
+      try {
+        setStatus("جارٍ الحذف النهائي…");
+        await persistState();
+        renderTrash();
+        setStatus("تم الحذف النهائي.", true);
+        setTimeout(() => setStatus("", false), 2000);
+      } catch (error) {
+        setStatus(`تعذّر الحذف: ${error.message}`, true);
+      }
+    });
+  });
 }
 
 function highlightText(text, query) {
@@ -406,6 +600,10 @@ function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
+function findDocumentById(id) {
+  return state.documents.find((doc) => doc.id === id);
+}
+
 function downloadDocument(doc) {
   if (!doc.fileData) {
     setStatus("تعذّر التنزيل: الملف غير مخزّن. أعد رفع الملف.", true);
@@ -421,15 +619,32 @@ function downloadDocument(doc) {
   URL.revokeObjectURL(url);
 }
 
-function findDocumentById(id) {
-  return state.documents.find((doc) => doc.id === id);
+function handleDownload(docId) {
+  const doc = findDocumentById(docId);
+  if (!doc) return;
+  if (doc.isLocked && !isDocUnlocked(doc)) {
+    openUnlockDialog(docId, "download");
+    return;
+  }
+  downloadDocument(doc);
+}
+
+function handleUnlockButton(docId) {
+  const doc = findDocumentById(docId);
+  if (!doc) return;
+  if (doc.isLocked && isDocUnlocked(doc)) {
+    lockDocSession(docId);
+    renderLibrary();
+    return;
+  }
+  openUnlockDialog(docId, "unlock");
 }
 
 function openDeleteDialog(docId) {
   const doc = findDocumentById(docId);
   if (!doc || !deleteDialog) return;
   pendingDeleteId = docId;
-  deleteDialogTitle.textContent = `هل تريد حذف «${doc.filename}»؟`;
+  deleteDialogTitle.textContent = `هل تريد نقل «${doc.filename}» إلى سلة المهملات؟`;
   deleteDialog.classList.remove("hidden");
 }
 
@@ -442,15 +657,116 @@ async function confirmDelete() {
   if (!pendingDeleteId) return;
   const docId = pendingDeleteId;
   closeDeleteDialog();
-  state.documents = state.documents.filter((d) => d.id !== docId);
+  state = moveToTrash(state, docId);
+  lockDocSession(docId);
   try {
-    setStatus("جارٍ حفظ التغييرات…");
+    setStatus("جارٍ نقل الملف إلى سلة المهملات…");
     await persistState();
     renderLibrary();
-    setStatus("تم حذف المستند.", true);
+    renderTrash();
+    setStatus("تم نقل الملف إلى سلة المهملات.", true);
     setTimeout(() => setStatus("", false), 2000);
   } catch (error) {
     setStatus(`تعذّر الحذف: ${error.message}`, true);
+  }
+}
+
+function openLockDialog(docId) {
+  const doc = findDocumentById(docId);
+  if (!doc || !lockDialog) return;
+  pendingLockId = docId;
+  lockDialogTitle.textContent = `قفل «${doc.filename}»`;
+  lockDialogSub.textContent = "أدخل كلمة مرور لحماية هذا الملف. لن يظهر محتواه في البحث حتى تفتحه.";
+  lockPassword.value = "";
+  lockPasswordConfirm.value = "";
+  lockDialogError.classList.add("hidden");
+  lockDialog.classList.remove("hidden");
+  lockPassword.focus();
+}
+
+function closeLockDialog() {
+  pendingLockId = null;
+  if (lockDialog) lockDialog.classList.add("hidden");
+}
+
+async function confirmLock() {
+  if (!pendingLockId) return;
+  const password = lockPassword.value;
+  const confirm = lockPasswordConfirm.value;
+  if (password.length < 4) {
+    lockDialogError.textContent = "كلمة المرور يجب أن تكون 4 أحرف على الأقل.";
+    lockDialogError.classList.remove("hidden");
+    return;
+  }
+  if (password !== confirm) {
+    lockDialogError.textContent = "كلمتا المرور غير متطابقتين.";
+    lockDialogError.classList.remove("hidden");
+    return;
+  }
+
+  const doc = findDocumentById(pendingLockId);
+  if (!doc) return closeLockDialog();
+
+  doc.isLocked = true;
+  doc.lockHash = await hashPassword(password);
+  lockDocSession(doc.id);
+  closeLockDialog();
+
+  try {
+    await persistState();
+    renderLibrary();
+    setStatus("تم قفل الملف.", true);
+    setTimeout(() => setStatus("", false), 2000);
+  } catch (error) {
+    setStatus(`تعذّر قفل الملف: ${error.message}`, true);
+  }
+}
+
+function openUnlockDialog(docId, action = "unlock") {
+  const doc = findDocumentById(docId);
+  if (!doc || !unlockDialog) return;
+  pendingUnlockId = docId;
+  pendingUnlockAction = action;
+  unlockDialogTitle.textContent = `فتح «${doc.filename}»`;
+  unlockDialogSub.textContent =
+    action === "download"
+      ? "هذا الملف مقفل. أدخل كلمة مرور القفل للتنزيل."
+      : "أدخل كلمة مرور القفل لعرض المحتوى والبحث فيه.";
+  unlockPassword.value = "";
+  unlockDialogError.classList.add("hidden");
+  unlockDialog.classList.remove("hidden");
+  unlockPassword.focus();
+}
+
+function closeUnlockDialog() {
+  pendingUnlockId = null;
+  pendingUnlockAction = null;
+  if (unlockDialog) unlockDialog.classList.add("hidden");
+}
+
+async function confirmUnlock() {
+  if (!pendingUnlockId) return;
+  const doc = findDocumentById(pendingUnlockId);
+  if (!doc) return closeUnlockDialog();
+
+  const valid = await verifyLockPassword(doc, unlockPassword.value);
+  if (!valid) {
+    unlockDialogError.textContent = "كلمة مرور القفل غير صحيحة.";
+    unlockDialogError.classList.remove("hidden");
+    return;
+  }
+
+  const action = pendingUnlockAction;
+  const docId = pendingUnlockId;
+  unlockDoc(docId);
+  closeUnlockDialog();
+  renderLibrary();
+
+  if (action === "download") {
+    downloadDocument(doc);
+  } else {
+    setStatus("تم فتح الملف المقفل.", true);
+    setTimeout(() => setStatus("", false), 2000);
   }
 }
 
@@ -474,6 +790,8 @@ async function ingestFiles(files) {
         preview: text.replace(/\s+/g, " ").slice(0, 280),
         fileData: arrayBufferToBase64(arrayBuffer),
         chunks,
+        isLocked: false,
+        lockHash: null,
       });
     }
     await persistState();
@@ -490,6 +808,7 @@ async function ingestFiles(files) {
   } finally {
     ingestBtn.disabled = !pendingFiles.length;
     pendingFiles = [];
+    renderPendingFiles();
     fileInput.value = "";
   }
 }
@@ -500,15 +819,16 @@ function runSearch() {
     searchResults.innerHTML = `<p class="muted">أدخل عبارة البحث.</p>`;
     return;
   }
-  if (!state.documents.length) {
-    searchResults.innerHTML = `<p class="muted">ارفع مستندات قبل البحث.</p>`;
+  const searchable = accessibleDocuments(state.documents);
+  if (!searchable.length) {
+    searchResults.innerHTML = `<p class="muted">ارفع مستندات أو افتح الملفات المقفلة قبل البحث.</p>`;
     return;
   }
 
   searchBtn.disabled = true;
   const category = categoryFilter.value || null;
   const k = Number(resultCount.value);
-  const index = new BM25Index(allChunksFromDocuments(state.documents));
+  const index = new BM25Index(allChunksFromDocuments(searchable));
   const top = index.search(query, k, category);
 
   if (!top.length) {
@@ -532,10 +852,7 @@ function runSearch() {
       .join("");
 
     searchResults.querySelectorAll(".search-download-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const doc = findDocumentById(btn.dataset.id);
-        if (doc) downloadDocument(doc);
-      });
+      btn.addEventListener("click", () => handleDownload(btn.dataset.id));
     });
   }
   searchBtn.disabled = false;
@@ -569,14 +886,10 @@ logoutBtn.addEventListener("click", () => {
   sessionStorage.removeItem(AUTH_KEY);
   sessionStorage.removeItem(PASSWORD_KEY);
   sessionPassword = "";
-  state = { documents: [] };
+  state = normalizeState({});
   clearStorageSession();
+  clearUnlockSession();
   showView();
-});
-
-fileInput.addEventListener("change", () => {
-  pendingFiles = [...fileInput.files];
-  ingestBtn.disabled = !pendingFiles.length;
 });
 
 ingestBtn.addEventListener("click", () => {
@@ -591,6 +904,23 @@ resultCount.addEventListener("input", () => {
 if (deleteConfirmBtn) deleteConfirmBtn.addEventListener("click", confirmDelete);
 if (deleteCancelBtn) deleteCancelBtn.addEventListener("click", closeDeleteDialog);
 if (deleteDialogBackdrop) deleteDialogBackdrop.addEventListener("click", closeDeleteDialog);
+
+if (lockConfirmBtn) lockConfirmBtn.addEventListener("click", confirmLock);
+if (lockCancelBtn) lockCancelBtn.addEventListener("click", closeLockDialog);
+if (lockDialogBackdrop) lockDialogBackdrop.addEventListener("click", closeLockDialog);
+
+if (unlockConfirmBtn) unlockConfirmBtn.addEventListener("click", confirmUnlock);
+if (unlockCancelBtn) unlockCancelBtn.addEventListener("click", closeUnlockDialog);
+if (unlockDialogBackdrop) unlockDialogBackdrop.addEventListener("click", closeUnlockDialog);
+
+unlockPassword?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") confirmUnlock();
+});
+lockPasswordConfirm?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") confirmLock();
+});
+
+setupDropZone();
 
 async function bootstrap() {
   if (isAuthed()) {

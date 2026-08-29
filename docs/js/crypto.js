@@ -47,3 +47,9 @@ export async function decryptJson(key, ivB64, ciphertextB64) {
   const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
   return JSON.parse(new TextDecoder().decode(plain));
 }
+
+export async function hashPassword(password) {
+  const data = new TextEncoder().encode(String(password || ""));
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return bytesToBase64(new Uint8Array(hash));
+}
