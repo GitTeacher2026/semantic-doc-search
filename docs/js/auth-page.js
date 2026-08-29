@@ -136,7 +136,7 @@ export function initAuthPage({ onLoginSuccess }) {
     }
 
     try {
-      await registerUser({
+      const { notification } = await registerUser({
         username: document.getElementById("signup-username").value,
         firstName: document.getElementById("signup-first-name").value,
         lastName: document.getElementById("signup-last-name").value,
@@ -148,11 +148,12 @@ export function initAuthPage({ onLoginSuccess }) {
       signupForm.reset();
       refreshCaptcha();
       showAuthMessage(signupError, "");
-      showAuthMessage(
-        signupSuccess,
-        "تم إرسال طلب التسجيل. ستصل موافقة إلى المسؤول عبر البريد، وستُبلَّغ عند التفعيل.",
-        false
-      );
+      const successText = notification.sent
+        ? notification.method === "github"
+          ? "تم إرسال طلب التسجيل. ستصلك رسالة على بريد GitHub المرتبط بحسابك للموافقة."
+          : "تم إرسال طلب التسجيل. ستصل موافقة إلى بريد المسؤول، وستُبلَّغ عند التفعيل."
+        : `تم حفظ طلب التسجيل. ${notification.note || "سيوافق المسؤول من داخل التطبيق."}`;
+      showAuthMessage(signupSuccess, successText, false);
       switchAuthPanel("login");
     } catch (error) {
       showAuthMessage(signupError, error.message);

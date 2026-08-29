@@ -1,4 +1,11 @@
-import { ADMIN_EMAIL, SITE_URL, WEB3FORMS_ACCESS_KEY } from "./config.js";
+import {
+  ADMIN_EMAIL,
+  GITHUB_OWNER,
+  GITHUB_REPO,
+  GITHUB_TOKEN,
+  SITE_URL,
+  WEB3FORMS_ACCESS_KEY,
+} from "./config.js";
 import { hashPassword } from "./file-lock.js";
 import { loadUsersDbWithSha, normalizeUsersDb, saveUsersDb } from "./users-store.js";
 
@@ -111,8 +118,8 @@ export async function registerUser(input) {
 
   db.pending.push(pendingUser);
   await saveUsersDb(db, sha);
-  await sendApprovalRequestEmail(pendingUser);
-  return pendingUser;
+  const notification = await sendApprovalRequestEmail(pendingUser);
+  return { pendingUser, notification };
 }
 
 function approvalLink(action, token) {
@@ -122,19 +129,45 @@ function approvalLink(action, token) {
 
 async function sendWeb3Form(payload) {
   if (!WEB3FORMS_ACCESS_KEY) return false;
-  const res = await fetch("https://api.web3forms.com/submit", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ access_key: WEB3FORMS_ACCESS_KEY, ...payload }),
-  });
-  const data = await res.json().catch(() => ({}));
-  return res.ok && data.success;
+  try {
+    const res = await fetch("https://api.web3forms.com/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ access_key: WEB3FORMS_ACCESS_KEY, ...payload }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return res.ok && data.success;
+  } catch {
+    return false;
+  }
 }
 
-export async function sendApprovalRequestEmail(pendingUser) {
+async function sendGitHubIssueNotification(title, body) {
+  if (!GITHUB_TOKEN) return false;
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/issues`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${GITHUB_TOKEN}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ title, body }),
+      }
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function buildApprovalMessage(pendingUser) {
   const approveUrl = approvalLink("approve", pendingUser.approvalToken);
   const rejectUrl = approvalLink("reject", pendingUser.approvalToken);
-  const message = [
+  return [
     "طلب تسجيل جديد في مخزن الوثائق",
     "",
     `الاسم: ${pendingUser.firstName} ${pendingUser.lastName}`,
@@ -142,18 +175,45 @@ export async function sendApprovalRequestEmail(pendingUser) {
     `البريد: ${pendingUser.email}`,
     `التاريخ: ${new Date(pendingUser.createdAt).toLocaleString("ar-EG")}`,
     "",
-    `موافقة: ${approveUrl}`,
-    `رفض: ${rejectUrl}`,
+    "للموافقة، افتح الرابط التالي:",
+    approveUrl,
+    "",
+    "للرفض:",
+    rejectUrl,
+    "",
+    `أو سجّل دخولك كمسؤول (${ADMIN_EMAIL}) ووافق من لوحة التحكم داخل التطبيق.`,
   ].join("\n");
+}
 
-  const sent = await sendWeb3Form({
-    subject: `طلب موافقة تسجيل: ${pendingUser.username}`,
+export async function sendApprovalRequestEmail(pendingUser) {
+  const message = buildApprovalMessage(pendingUser);
+  const subject = `طلب موافقة تسجيل: ${pendingUser.username}`;
+
+  if (await sendWeb3Form({
+    subject,
     from_name: "مخزن الوثائق",
     email: ADMIN_EMAIL,
     message,
-  });
+  })) {
+    return { sent: true, method: "email" };
+  }
 
-  return sent;
+  if (await sendGitHubIssueNotification(
+    `[Signup] Approve user: ${pendingUser.username}`,
+    message
+  )) {
+    return {
+      sent: true,
+      method: "github",
+      note: "تم إرسال إشعار إلى بريد GitHub المرتبط بحسابك.",
+    };
+  }
+
+  return {
+    sent: false,
+    method: "none",
+    note: "تعذّر إرسال البريد. سجّل دخولك كمسؤول للموافقة من داخل التطبيق.",
+  };
 }
 
 export async function sendUserDecisionEmail(user, approved) {
@@ -161,12 +221,25 @@ export async function sendUserDecisionEmail(user, approved) {
     ? `مرحباً ${user.firstName},\n\nتمت الموافقة على حسابك في مخزن الوثائق. يمكنك تسجيل الدخول الآن.\n\n${SITE_URL}`
     : `مرحباً ${user.firstName},\n\nنعتذر، لم تتم الموافقة على طلب تسجيلك في مخزن الوثائق.`;
 
-  return sendWeb3Form({
-    subject: approved ? "تمت الموافقة على حسابك" : "تم رفض طلب التسجيل",
+  const subject = approved ? "تمت الموافقة على حسابك" : "تم رفض طلب التسجيل";
+
+  if (await sendWeb3Form({
+    subject,
     from_name: "مخزن الوثائق",
     email: user.email,
     message,
-  });
+  })) {
+    return true;
+  }
+
+  if (approved) {
+    await sendGitHubIssueNotification(
+      `[Approved] User ${user.username} can now log in`,
+      `تمت الموافقة على ${user.firstName} ${user.lastName} (${user.email}).\n\nأبلغ المستخدم بأنه يمكنه تسجيل الدخول الآن.`
+    );
+  }
+
+  return false;
 }
 
 export async function processApprovalAction(action, token) {
