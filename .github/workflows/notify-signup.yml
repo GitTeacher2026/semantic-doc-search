@@ -1,0 +1,195 @@
+name: Notify admin on signup
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - data/users.json
+  workflow_dispatch:
+    inputs:
+      force_all_pending:
+        description: Email for all pending signups (not only new)
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect new pending signups
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const forceAll = process.env.FORCE_ALL === 'true';
+          const current = JSON.parse(fs.readFileSync('data/users.json', 'utf8'));
+          let previousPending = [];
+          try {
+            const { execSync } = require('child_process');
+            const prev = execSync('git show HEAD^:data/users.json', { encoding: 'utf8' });
+            previousPending = JSON.parse(prev).pending || [];
+          } catch {
+            previousPending = [];
+          }
+          const prevIds = new Set(previousPending.map((u) => u.id));
+          const pending = current.pending || [];
+          const targets = forceAll
+            ? pending
+            : pending.filter((u) => !prevIds.has(u.id));
+          fs.writeFileSync('pending-targets.json', JSON.stringify(targets, null, 2));
+          console.log(`Pending to notify: ${targets.length}`);
+          NODE
+        env:
+          FORCE_ALL: ${{ github.event.inputs.force_all_pending || 'false' }}
+
+      - name: Build email content
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const targets = JSON.parse(fs.readFileSync('pending-targets.json', 'utf8'));
+          if (!targets.length) {
+            fs.writeFileSync('email-subject.txt', '');
+            fs.writeFileSync('email-body.txt', '');
+            process.exit(0);
+          }
+          const site = 'https://amany-moh-sy.github.io/semantic-doc-search';
+          const lines = targets.flatMap((u) => {
+            const approve = `${site}/?action=approve&token=${encodeURIComponent(u.approvalToken)}`;
+            const reject = `${site}/?action=reject&token=${encodeURIComponent(u.approvalToken)}`;
+            return [
+              `--- ${u.username} ---`,
+              `الاسم: ${u.firstName} ${u.lastName}`,
+              `البريد: ${u.email}`,
+              `التاريخ: ${u.createdAt}`,
+              `موافقة: ${approve}`,
+              `رفض: ${reject}`,
+              '',
+            ];
+          });
+          const body = [
+            'طلبات تسجيل جديدة في مخزن الوثائق',
+            '',
+            ...lines,
+            'أو سجّل دخولك كمسؤول ووافق من لوحة التحكم داخل التطبيق.',
+          ].join('\n');
+          const subject = targets.length === 1
+            ? `[مخزن الوثائق] موافقة مطلوبة: ${targets[0].username}`
+            : `[مخزن الوثائق] ${targets.length} طلبات تسجيل بانتظار الموافقة`;
+          fs.writeFileSync('email-subject.txt', subject);
+          fs.writeFileSync('email-body.txt', body);
+          NODE
+
+      - name: Skip if nothing to send
+        id: check
+        run: |
+          SUBJECT=$(cat email-subject.txt)
+          if [ -z "$SUBJECT" ]; then
+            echo "has_email=false" >> "$GITHUB_OUTPUT"
+            echo "No new pending signups."
+          else
+            echo "has_email=true" >> "$GITHUB_OUTPUT"
+            echo "Subject: $SUBJECT"
+          fi
+
+      - name: Load email subject
+        if: steps.check.outputs.has_email == 'true'
+        id: subject
+        run: |
+          SUBJECT=$(cat email-subject.txt)
+          {
+            echo "text<<EOF"
+            echo "$SUBJECT"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Send via Gmail SMTP
+        if: steps.check.outputs.has_email == 'true' && secrets.MAIL_USERNAME != '' && secrets.MAIL_PASSWORD != ''
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: ${{ steps.subject.outputs.text }}
+          to: amanyak267@gmail.com
+          from: مخزن الوثائق <${{ secrets.MAIL_USERNAME }}>
+          body: file://email-body.txt
+
+      - name: Send via Web3Forms
+        if: steps.check.outputs.has_email == 'true' && secrets.WEB3FORMS_ACCESS_KEY != ''
+        env:
+          WEB3FORMS_ACCESS_KEY: ${{ secrets.WEB3FORMS_ACCESS_KEY }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const subject = fs.readFileSync('email-subject.txt', 'utf8');
+          const message = fs.readFileSync('email-body.txt', 'utf8');
+          if (!subject.trim()) process.exit(0);
+          fetch('https://api.web3forms.com/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({
+              access_key: process.env.WEB3FORMS_ACCESS_KEY,
+              subject,
+              from_name: 'مخزن الوثائق',
+              email: 'amanyak267@gmail.com',
+              message,
+            }),
+          }).then(async (res) => {
+            const data = await res.json().catch(() => ({}));
+            console.log('Web3Forms response:', data);
+            if (!res.ok || !data.success) process.exit(1);
+          });
+          NODE
+
+      - name: Send via Resend API
+        if: steps.check.outputs.has_email == 'true' && secrets.RESEND_API_KEY != ''
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const subject = fs.readFileSync('email-subject.txt', 'utf8');
+          const text = fs.readFileSync('email-body.txt', 'utf8');
+          if (!subject.trim()) process.exit(0);
+          fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              from: 'مخزن الوثائق <onboarding@resend.dev>',
+              to: ['amanyak267@gmail.com'],
+              subject,
+              text,
+            }),
+          }).then(async (res) => {
+            const data = await res.json().catch(() => ({}));
+            console.log('Resend response:', data);
+            if (!res.ok) process.exit(1);
+          });
+          NODE
+
+      - name: Warn if email not configured
+        if: steps.check.outputs.has_email == 'true' && secrets.MAIL_USERNAME == '' && secrets.WEB3FORMS_ACCESS_KEY == '' && secrets.RESEND_API_KEY == ''
+        run: |
+          echo "::warning::No email secrets configured. Add one of:"
+          echo "  - MAIL_USERNAME + MAIL_PASSWORD (Gmail App Password for amanyak267@gmail.com)"
+          echo "  - WEB3FORMS_ACCESS_KEY (from web3forms.com)"
+          echo "  - RESEND_API_KEY (from resend.com)"
+          echo ""
+          echo "Email content that would have been sent:"
+          cat email-body.txt

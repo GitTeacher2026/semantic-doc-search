@@ -30,6 +30,7 @@ import {
 import {
   approvePendingUser,
   rejectPendingUser,
+  resendPendingSignupEmails,
 } from "./auth-service.js";
 import { getVaultPassword } from "./auth-page.js";
 import {
@@ -60,6 +61,7 @@ const logoutBtn = document.getElementById("logout-btn");
 const userGreeting = document.getElementById("user-greeting");
 const adminPanel = document.getElementById("admin-panel");
 const pendingUsersList = document.getElementById("pending-users-list");
+const resendEmailBtn = document.getElementById("resend-email-btn");
 const dropZone = document.getElementById("drop-zone");
 const fileInput = document.getElementById("file-input");
 const pendingFilesEl = document.getElementById("pending-files");
@@ -430,6 +432,23 @@ async function renderAdminPanel() {
         setStatus(error.message, true);
       }
     });
+  });
+}
+
+if (resendEmailBtn) {
+  resendEmailBtn.addEventListener("click", async () => {
+    try {
+      setStatus("جارٍ إرسال بريد الموافقة…");
+      const ok = await resendPendingSignupEmails();
+      setStatus(
+        ok
+          ? "تم إرسال طلب البريد. تحقق من amanyak267@gmail.com خلال دقيقة (وراجع مجلد الرسائل غير المرغوبة)."
+          : "تعذّر إرسال البريد. أضف MAIL_USERNAME و MAIL_PASSWORD في أسرار المستودع.",
+        true
+      );
+    } catch (error) {
+      setStatus(error.message, true);
+    }
   });
 }
 

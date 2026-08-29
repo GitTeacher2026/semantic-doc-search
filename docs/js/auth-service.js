@@ -1,5 +1,6 @@
 import {
   ADMIN_EMAIL,
+  GITHUB_BRANCH,
   GITHUB_OWNER,
   GITHUB_REPO,
   GITHUB_TOKEN,
@@ -185,6 +186,31 @@ function buildApprovalMessage(pendingUser) {
   ].join("\n");
 }
 
+async function triggerSignupEmailWorkflow() {
+  if (!GITHUB_TOKEN) return false;
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/workflows/notify-signup.yml/dispatches`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${GITHUB_TOKEN}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ref: GITHUB_BRANCH,
+          inputs: { force_all_pending: "true" },
+        }),
+      }
+    );
+    return res.status === 204;
+  } catch {
+    return false;
+  }
+}
+
 export async function sendApprovalRequestEmail(pendingUser) {
   const message = buildApprovalMessage(pendingUser);
   const subject = `طلب موافقة تسجيل: ${pendingUser.username}`;
@@ -198,21 +224,33 @@ export async function sendApprovalRequestEmail(pendingUser) {
     return { sent: true, method: "email" };
   }
 
+  const workflowTriggered = await triggerSignupEmailWorkflow();
+
   if (await sendGitHubIssueNotification(
     `[Signup] Approve user: ${pendingUser.username}`,
     message
   )) {
     return {
       sent: true,
-      method: "github",
-      note: "تم إرسال إشعار إلى بريد GitHub المرتبط بحسابك.",
+      method: workflowTriggered ? "github-workflow" : "github",
+      note: workflowTriggered
+        ? "تم إرسال طلب بريد إلى GitHub Actions. تحقق من صندوق الوارد خلال دقيقة."
+        : "تم إنشاء تنبيه GitHub Issue. فعّل إشعارات البريد في GitHub أو أضف سر Gmail في المستودع.",
+    };
+  }
+
+  if (workflowTriggered) {
+    return {
+      sent: true,
+      method: "github-workflow",
+      note: "تم إرسال طلب بريد عبر GitHub Actions. تحقق من صندوق الوارد خلال دقيقة.",
     };
   }
 
   return {
     sent: false,
     method: "none",
-    note: "تعذّر إرسال البريد. سجّل دخولك كمسؤول للموافقة من داخل التطبيق.",
+    note: "تعذّر إرسال البريد. أضف MAIL_USERNAME و MAIL_PASSWORD في إعدادات المستودع (Gmail App Password).",
   };
 }
 
@@ -294,6 +332,10 @@ export async function rejectPendingUser(pendingId) {
 export async function listPendingUsers() {
   const { db } = await loadUsersDbWithSha();
   return db.pending;
+}
+
+export async function resendPendingSignupEmails() {
+  return triggerSignupEmailWorkflow();
 }
 
 export function normalizeUsers(data) {
