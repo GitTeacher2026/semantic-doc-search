@@ -58,16 +58,26 @@ gh auth login
 gh repo create semantic-doc-search --public --source=. --remote=github --push
 ```
 
-### 3) تفعيل GitHub Pages
+### 3) تفعيل GitHub Pages (خطوة إلزامية — مرة واحدة)
+
+> **إذا فشل الـ workflow بخطأ `Get Pages site failed` / `Not Found` على `configure-pages@v5`،**
+> فهذا يعني أن GitHub Pages **غير مُفعَّل بعد** في المستودع. لا يمكن للـ workflow تفعيله تلقائياً.
+
+**الطريقة الأسهل (من المتصفح):**
+
+1. افتح المستودع على GitHub
+2. **Settings** → **Pages**
+3. تحت **Build and deployment** → **Source**
+4. اختر **GitHub Actions** (وليس *Deploy from a branch*)
+5. أعد تشغيل الـ workflow: **Actions** → **Deploy GitHub Pages** → **Re-run all jobs**
+
+**أو عبر GitHub CLI:**
 
 ```bash
-gh api repos/:owner/semantic-doc-search/pages -X POST \
-  -f build_type=workflow \
-  -f source[branch]=main \
-  -f source[path]=/docs
+gh api repos/:owner/semantic-doc-search/pages -X POST -f build_type=workflow
 ```
 
-أو من واجهة GitHub: **Settings → Pages → Build and deployment → GitHub Actions**.
+(استبدل `:owner` باسم مستخدمك، مثلاً `joseph-goodman`.)
 
 ### 4) عنوان الموقع
 

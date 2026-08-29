@@ -24,6 +24,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Requires a one-time manual step: repo Settings → Pages → Source → GitHub Actions
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
