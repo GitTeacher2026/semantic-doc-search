@@ -41,16 +41,25 @@ const GROUP_ICONS = {
 };
 
 function fileGroup(filename) {
-  const lower = filename.toLowerCase();
+  const ext = `.${fileExtension(filename)}`;
   for (const [group, extensions] of Object.entries(EXT_GROUPS)) {
-    if (extensions.some((ext) => lower.endsWith(ext))) return group;
+    if (extensions.includes(ext)) return group;
   }
   return "other";
 }
 
 function fileExtension(filename) {
-  const match = filename.toLowerCase().match(/\.([a-z0-9]+)$/);
-  return match ? match[1] : "";
+  const dot = String(filename || "").lastIndexOf(".");
+  return dot >= 0 ? filename.slice(dot + 1).toLowerCase() : "";
+}
+
+function fileEndsWith(filename, extension) {
+  return fileExtension(filename) === extension.replace(/^\./, "").toLowerCase();
+}
+
+async function loadJsZip() {
+  const mod = await import("https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm");
+  return mod.default || mod;
 }
 
 let embedder = null;
@@ -124,7 +133,8 @@ async function embedTexts(texts) {
   const model = await getEmbedder();
   const vectors = [];
   for (const text of texts) {
-    const output = await model(text, { pooling: "mean", normalize: true });
+    const safeText = String(text || " ").trim() || " ";
+    const output = await model(safeText, { pooling: "mean", normalize: true });
     vectors.push(Array.from(output.data));
   }
   return vectors;
@@ -148,12 +158,17 @@ function meanVector(vectors) {
 }
 
 function topicLabel(text, filename) {
-  const tokens = (text.toLowerCase().match(/[\u0600-\u06FF]{3,}|[a-z][a-z0-9_-]{2,}/gi) || [])
-    .filter((t) => !STOPWORDS.has(t));
+  const safeText = String(text || "");
+  const tokens = (safeText.match(/[\u0600-\u06FF]{3,}|[A-Za-z][A-Za-z0-9_-]{2,}/g) || [])
+    .map((token) => token.toLowerCase())
+    .filter((token) => !STOPWORDS.has(token));
   const counts = new Map();
   for (const token of tokens) counts.set(token, (counts.get(token) || 0) + 1);
   const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w]) => w);
-  if (!top.length) return filename.replace(/\.[^.]+$/, "") || "عام";
+  if (!top.length) {
+    const baseName = String(filename || "").replace(/\.[^.]+$/, "");
+    return baseName || "عام";
+  }
   return top.join(" / ");
 }
 
@@ -175,7 +190,8 @@ function categoryCentroids(documents) {
 }
 
 async function assignCategory(text, filename, documents) {
-  const sample = text.slice(0, 4000) || filename;
+  const safeText = String(text || "");
+  const sample = safeText.slice(0, 4000) || String(filename || "مستند");
   const queryVec = await embedQuery(sample);
   const centroids = categoryCentroids(documents);
   let bestCategory = null;
@@ -203,15 +219,43 @@ function chunkText(text) {
   return chunks.length ? chunks : [text || ""];
 }
 
-async function extractDocxText(file) {
-  const mammoth = await import("https://cdn.jsdelivr.net/npm/mammoth@1.8.0/+esm");
-  const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
-  return (result.value || "").trim();
+function extractDocxXmlText(xml) {
+  const doc = new DOMParser().parseFromString(xml, "application/xml");
+  const texts = [];
+  const wordNodes = doc.getElementsByTagNameNS(
+    "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+    "t"
+  );
+  for (const node of wordNodes) {
+    if (node.textContent) texts.push(node.textContent);
+  }
+  if (!texts.length) {
+    const all = doc.getElementsByTagName("*");
+    for (const node of all) {
+      if (node.localName === "t" && node.textContent) texts.push(node.textContent);
+    }
+  }
+  return texts.join(" ").replace(/\s+/g, " ").trim();
 }
 
-async function extractExcelText(file) {
+async function extractDocxText(arrayBuffer) {
+  const JSZip = await loadJsZip();
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  const documentXml = zip.file("word/document.xml");
+  if (!documentXml) {
+    throw new Error("ملف Word غير صالح (document.xml مفقود).");
+  }
+  const xml = await documentXml.async("string");
+  const text = extractDocxXmlText(xml);
+  if (!text) {
+    throw new Error("لم يُعثر على نص داخل ملف Word.");
+  }
+  return text;
+}
+
+async function extractExcelText(arrayBuffer) {
   const XLSX = await import("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm");
-  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+  const workbook = XLSX.read(arrayBuffer, { type: "array" });
   const parts = [];
   for (const sheetName of workbook.SheetNames) {
     parts.push(`## ${sheetName}`);
@@ -227,9 +271,9 @@ async function extractExcelText(file) {
   return parts.join("\n").trim();
 }
 
-async function extractPptxText(file) {
-  const JSZip = (await import("https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm")).default;
-  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+async function extractPptxText(arrayBuffer) {
+  const JSZip = await loadJsZip();
+  const zip = await JSZip.loadAsync(arrayBuffer);
   const slidePaths = Object.keys(zip.files)
     .filter((path) => /ppt\/slides\/slide\d+\.xml$/i.test(path))
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
@@ -248,12 +292,11 @@ async function extractPptxText(file) {
   return parts.join("\n").trim();
 }
 
-async function extractPdfText(file) {
+async function extractPdfText(arrayBuffer) {
   const pdfjs = await import("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs");
   pdfjs.GlobalWorkerOptions.workerSrc =
     "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
-  const buffer = await file.arrayBuffer();
-  const pdf = await pdfjs.getDocument({ data: buffer }).promise;
+  const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
   const parts = [];
   for (let i = 1; i <= pdf.numPages; i += 1) {
     const page = await pdf.getPage(i);
@@ -263,21 +306,23 @@ async function extractPdfText(file) {
   return parts.join("\n").trim();
 }
 
-async function extractText(file) {
-  const name = file.name.toLowerCase();
-  if (name.endsWith(".pdf")) return extractPdfText(file);
-  if (name.endsWith(".docx")) return extractDocxText(file);
-  if (name.endsWith(".xlsx") || name.endsWith(".xls")) return extractExcelText(file);
-  if (name.endsWith(".pptx")) return extractPptxText(file);
-  if (name.endsWith(".doc") || name.endsWith(".ppt")) {
+async function extractText(file, arrayBuffer) {
+  const name = String(file?.name || "");
+  const buffer = arrayBuffer || (await file.arrayBuffer());
+
+  if (fileEndsWith(name, ".pdf")) return extractPdfText(buffer);
+  if (fileEndsWith(name, ".docx")) return extractDocxText(buffer);
+  if (fileEndsWith(name, ".xlsx") || fileEndsWith(name, ".xls")) return extractExcelText(buffer);
+  if (fileEndsWith(name, ".pptx")) return extractPptxText(buffer);
+  if (fileEndsWith(name, ".doc") || fileEndsWith(name, ".ppt")) {
     throw new Error(
-      `${file.name}: صيغ .doc و .ppt القديمة غير مدعومة في المتصفح. استخدم docx/pptx.`
+      `${name}: صيغ .doc و .ppt القديمة غير مدعومة في المتصفح. استخدم docx/pptx.`
     );
   }
-  if (EXT_GROUPS.text.some((ext) => name.endsWith(ext))) {
-    return (await file.text()).trim();
+  if (EXT_GROUPS.text.some((ext) => fileEndsWith(name, ext))) {
+    return new TextDecoder("utf-8").decode(buffer).trim();
   }
-  throw new Error(`نوع الملف غير مدعوم: ${file.name}`);
+  throw new Error(`نوع الملف غير مدعوم: ${name}`);
 }
 
 function buildExplorerTree(documents) {
@@ -350,7 +395,7 @@ function renderLibrary() {
                   <div>
                     <div class="explorer-file-title">${GROUP_ICONS[doc.fileGroup] || "📁"} ${escapeHtml(doc.filename)}</div>
                     <div class="explorer-file-meta">${escapeHtml(doc.category)} · ${doc.charCount.toLocaleString("ar-EG")} حرف · ${escapeHtml(doc.extension || "")}</div>
-                    <div class="explorer-file-preview">${escapeHtml(doc.preview)}${doc.preview.length >= 280 ? "…" : ""}</div>
+                    <div class="explorer-file-preview">${escapeHtml(doc.preview || "")}${(doc.preview || "").length >= 280 ? "…" : ""}</div>
                   </div>
                   <div class="explorer-actions">
                     <button class="btn ghost small download-btn" data-id="${doc.id}" type="button">تنزيل</button>
@@ -392,8 +437,10 @@ function escapeHtml(value) {
 }
 
 function highlightText(text, query) {
-  const escaped = escapeHtml(text);
-  const tokens = [...new Set(query.trim().split(/\s+/).filter((token) => token.length >= 2))]
+  const escaped = escapeHtml(String(text || ""));
+  const safeQuery = String(query || "").trim();
+  if (!safeQuery) return escaped;
+  const tokens = [...new Set(safeQuery.split(/\s+/).filter((token) => token.length >= 2))]
     .sort((a, b) => b.length - a.length);
   let result = escaped;
   for (const token of tokens) {
@@ -439,7 +486,7 @@ async function ingestFiles(files) {
   try {
     for (const file of files) {
       const arrayBuffer = await file.arrayBuffer();
-      const text = await extractText(file);
+      const text = await extractText(file, arrayBuffer);
       if (!text) throw new Error(`لم يُعثر على نص في ${file.name}`);
       const category = await assignCategory(text, file.name, state.documents);
       const chunks = chunkText(text);
