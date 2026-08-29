@@ -48,5 +48,16 @@
       "approvedAt": "2026-08-29T10:49:41.457Z"
     }
   ],
-  "pending": []
+  "pending": [
+    {
+      "id": "310af02d-dc2b-4295-af92-c7385ba669c5",
+      "username": "fgfg",
+      "firstName": "gfg",
+      "lastName": "fgfg",
+      "email": "fgfg@h.com",
+      "passwordHash": "35b4fvhr6VtHQP6WC4v7BLssNHQMgQTwjo+pArsmV+Q=",
+      "approvalToken": "a89e411132994bbb847cf7e15378405e",
+      "createdAt": "2026-08-29T10:55:30.497Z"
+    }
+  ]
 }
