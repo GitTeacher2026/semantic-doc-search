@@ -12,16 +12,5 @@
       "createdAt": "2026-01-01T00:00:00.000Z"
     }
   ],
-  "pending": [
-    {
-      "id": "2bd06c55-2dae-466b-8d20-f5b83f4c63ad",
-      "username": "kasper",
-      "firstName": "ralf",
-      "lastName": "messo",
-      "email": "breakdance1475256@gmail.com",
-      "passwordHash": "BkvSOW+8FEEJ/s8mMsUQn8/gMHgD6Ry/kFkR56DNBsI=",
-      "approvalToken": "21d7e03b9cb247e48949467c476f2eee",
-      "createdAt": "2026-08-29T10:17:36.575Z"
-    }
-  ]
+  "pending": []
 }
