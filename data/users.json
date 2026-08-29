@@ -1,0 +1,16 @@
+{
+  "users": [
+    {
+      "id": "admin-default",
+      "username": "admin",
+      "firstName": "مدير",
+      "lastName": "النظام",
+      "email": "amanyak267@gmail.com",
+      "passwordHash": "EA7ALRaIWq3P05mCoRiRlsInyKr4JxTah7diD610IVo=",
+      "role": "admin",
+      "status": "approved",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "pending": []
+}
