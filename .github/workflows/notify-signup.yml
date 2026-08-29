@@ -132,31 +132,8 @@ jobs:
           body: file://email-body.txt
 
       - name: Send via Web3Forms
-        if: steps.check.outputs.has_email == 'true' && env.HAS_WEB3FORMS == 'true'
-        env:
-          WEB3FORMS_ACCESS_KEY: ${{ secrets.WEB3FORMS_ACCESS_KEY }}
-        run: |
-          node <<'NODE'
-          const fs = require('fs');
-          const subject = fs.readFileSync('email-subject.txt', 'utf8');
-          const message = fs.readFileSync('email-body.txt', 'utf8');
-          if (!subject.trim()) process.exit(0);
-          fetch('https://api.web3forms.com/submit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify({
-              access_key: process.env.WEB3FORMS_ACCESS_KEY,
-              subject,
-              from_name: 'مخزن الوثائق',
-              email: 'amanyak267@gmail.com',
-              message,
-            }),
-          }).then(async (res) => {
-            const data = await res.json().catch(() => ({}));
-            console.log('Web3Forms response:', data);
-            if (!res.ok || !data.success) process.exit(1);
-          });
-          NODE
+        if: false
+        run: echo "Web3Forms free plan blocks server-side API calls. Emails are sent from the browser instead."
 
       - name: Send via Resend API
         if: steps.check.outputs.has_email == 'true' && env.HAS_RESEND == 'true'

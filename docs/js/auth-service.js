@@ -1,6 +1,5 @@
 import {
   ADMIN_EMAIL,
-  GITHUB_BRANCH,
   GITHUB_OWNER,
   GITHUB_REPO,
   GITHUB_TOKEN,
@@ -129,17 +128,25 @@ function approvalLink(action, token) {
 }
 
 async function sendWeb3Form(payload) {
-  if (!WEB3FORMS_ACCESS_KEY) return false;
+  if (!WEB3FORMS_ACCESS_KEY) return { ok: false, error: "missing_key" };
   try {
     const res = await fetch("https://api.web3forms.com/submit", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ access_key: WEB3FORMS_ACCESS_KEY, ...payload }),
+      body: JSON.stringify({
+        access_key: WEB3FORMS_ACCESS_KEY,
+        botcheck: false,
+        ...payload,
+      }),
     });
     const data = await res.json().catch(() => ({}));
-    return res.ok && data.success;
-  } catch {
-    return false;
+    if (res.ok && data.success) return { ok: true };
+    return {
+      ok: false,
+      error: data.message || data.body?.message || `HTTP ${res.status}`,
+    };
+  } catch (error) {
+    return { ok: false, error: String(error.message || error) };
   }
 }
 
@@ -186,45 +193,20 @@ function buildApprovalMessage(pendingUser) {
   ].join("\n");
 }
 
-async function triggerSignupEmailWorkflow() {
-  if (!GITHUB_TOKEN) return false;
-  try {
-    const res = await fetch(
-      `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/workflows/notify-signup.yml/dispatches`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${GITHUB_TOKEN}`,
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ref: GITHUB_BRANCH,
-          inputs: { force_all_pending: "true" },
-        }),
-      }
-    );
-    return res.status === 204;
-  } catch {
-    return false;
-  }
-}
-
 export async function sendApprovalRequestEmail(pendingUser) {
   const message = buildApprovalMessage(pendingUser);
   const subject = `طلب موافقة تسجيل: ${pendingUser.username}`;
 
-  if (await sendWeb3Form({
+  const web3 = await sendWeb3Form({
     subject,
     from_name: "مخزن الوثائق",
-    email: ADMIN_EMAIL,
+    name: `${pendingUser.firstName} ${pendingUser.lastName}`,
+    email: pendingUser.email,
     message,
-  })) {
+  });
+  if (web3.ok) {
     return { sent: true, method: "email" };
   }
-
-  const workflowTriggered = await triggerSignupEmailWorkflow();
 
   if (await sendGitHubIssueNotification(
     `[Signup] Approve user: ${pendingUser.username}`,
@@ -232,25 +214,19 @@ export async function sendApprovalRequestEmail(pendingUser) {
   )) {
     return {
       sent: true,
-      method: workflowTriggered ? "github-workflow" : "github",
-      note: workflowTriggered
-        ? "تم إرسال طلب بريد إلى GitHub Actions. تحقق من صندوق الوارد خلال دقيقة."
-        : "تم إنشاء تنبيه GitHub Issue. فعّل إشعارات البريد في GitHub أو أضف سر Gmail في المستودع.",
-    };
-  }
-
-  if (workflowTriggered) {
-    return {
-      sent: true,
-      method: "github-workflow",
-      note: "تم إرسال طلب بريد عبر GitHub Actions. تحقق من صندوق الوارد خلال دقيقة.",
+      method: "github",
+      note: web3.error
+        ? `تعذّر Web3Forms: ${web3.error}. تم إنشاء GitHub Issue كبديل.`
+        : "تم إنشاء تنبيه GitHub Issue.",
     };
   }
 
   return {
     sent: false,
     method: "none",
-    note: "تعذّر إرسال البريد. أضف MAIL_USERNAME و MAIL_PASSWORD في إعدادات المستودع (Gmail App Password).",
+    note: web3.error
+      ? `تعذّر إرسال البريد: ${web3.error}`
+      : "تعذّر إرسال البريد. وافق من لوحة التحكم داخل التطبيق.",
   };
 }
 
@@ -261,23 +237,14 @@ export async function sendUserDecisionEmail(user, approved) {
 
   const subject = approved ? "تمت الموافقة على حسابك" : "تم رفض طلب التسجيل";
 
-  if (await sendWeb3Form({
+  const web3 = await sendWeb3Form({
     subject,
     from_name: "مخزن الوثائق",
+    name: `${user.firstName} ${user.lastName}`,
     email: user.email,
     message,
-  })) {
-    return true;
-  }
-
-  if (approved) {
-    await sendGitHubIssueNotification(
-      `[Approved] User ${user.username} can now log in`,
-      `تمت الموافقة على ${user.firstName} ${user.lastName} (${user.email}).\n\nأبلغ المستخدم بأنه يمكنه تسجيل الدخول الآن.`
-    );
-  }
-
-  return false;
+  });
+  return web3.ok;
 }
 
 export async function processApprovalAction(action, token) {
@@ -335,7 +302,25 @@ export async function listPendingUsers() {
 }
 
 export async function resendPendingSignupEmails() {
-  return triggerSignupEmailWorkflow();
+  const pending = await listPendingUsers();
+  if (!pending.length) {
+    return { sent: 0, total: 0, message: "لا توجد طلبات معلّقة." };
+  }
+  let sent = 0;
+  let lastError = "";
+  for (const user of pending) {
+    const result = await sendApprovalRequestEmail(user);
+    if (result.sent && result.method === "email") sent += 1;
+    else if (result.note) lastError = result.note;
+  }
+  return {
+    sent,
+    total: pending.length,
+    message:
+      sent > 0
+        ? `تم إرسال ${sent} بريد إلى amanyak267@gmail.com. تحقق من صندوق الوارد والرسائل غير المرغوبة.`
+        : lastError || "تعذّر إرسال البريد.",
+  };
 }
 
 export function normalizeUsers(data) {

@@ -438,14 +438,9 @@ async function renderAdminPanel() {
 if (resendEmailBtn) {
   resendEmailBtn.addEventListener("click", async () => {
     try {
-      setStatus("جارٍ إرسال بريد الموافقة…");
-      const ok = await resendPendingSignupEmails();
-      setStatus(
-        ok
-          ? "تم إرسال طلب البريد. تحقق من amanyak267@gmail.com خلال دقيقة (وراجع مجلد الرسائل غير المرغوبة)."
-          : "تعذّر إرسال البريد. أضف MAIL_USERNAME و MAIL_PASSWORD في أسرار المستودع.",
-        true
-      );
+      setStatus("جارٍ إرسال بريد الموافقة من المتصفح…");
+      const result = await resendPendingSignupEmails();
+      setStatus(result.message, true);
     } catch (error) {
       setStatus(error.message, true);
     }
