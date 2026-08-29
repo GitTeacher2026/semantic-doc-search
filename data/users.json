@@ -22,18 +22,6 @@
       "status": "approved",
       "createdAt": "2026-08-29T10:21:31.487Z",
       "approvedAt": "2026-08-29T10:21:41.670Z"
-    },
-    {
-      "id": "023c0bdd-8ce4-498b-bd0a-3d82451e660c",
-      "username": "ewe",
-      "firstName": "wewe",
-      "lastName": "wewe",
-      "email": "wew@ggfg.com",
-      "passwordHash": "9ENAagl2rhR3KqP43Yg6LRQ3xQsdcdlAs56j4a/ruOI=",
-      "role": "member",
-      "status": "approved",
-      "createdAt": "2026-08-29T10:49:33.317Z",
-      "approvedAt": "2026-08-29T10:49:41.457Z"
     }
   ],
   "pending": []
