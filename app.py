@@ -20,6 +20,8 @@ from src.document_store import (
     semantic_search,
 )
 from src.embeddings import EMBEDDING_MODEL_NAME, get_embeddings
+from src.explorer import build_explorer_tree
+from src.file_extractors import GROUP_ICONS, GROUP_LABELS_AR
 
 st.set_page_config(
     page_title="مخزن الوثائق",
@@ -152,12 +154,123 @@ st.markdown(
       [data-testid="stForm"] {
         direction: rtl;
       }
+
+      .explorer {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fff;
+        padding: 0.35rem 0.5rem;
+      }
+
+      .explorer-folder {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 0.35rem 0.55rem;
+        margin: 0.45rem 0;
+        background: var(--panel);
+      }
+
+      .explorer-subfolder {
+        margin: 0.35rem 0.8rem 0.35rem 0;
+        padding-right: 0.55rem;
+        border-right: 2px solid var(--accent-soft);
+      }
+
+      .explorer-file {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.45rem 0.55rem;
+        margin: 0.25rem 0;
+        border-radius: 8px;
+        background: #fff;
+        border: 1px solid #ece7dc;
+      }
+
+      .explorer-file-name {
+        font-weight: 600;
+        word-break: break-word;
+      }
+
+      .explorer-file-meta {
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 ALL_CATEGORIES = "جميع التصنيفات"
+UPLOAD_TYPES = [
+    "pdf",
+    "txt",
+    "md",
+    "text",
+    "log",
+    "csv",
+    "doc",
+    "docx",
+    "xls",
+    "xlsx",
+    "ppt",
+    "pptx",
+]
+
+
+def render_file_explorer(docs: list[dict], embeddings) -> None:
+    """Render a structured category → type → file tree."""
+    tree = build_explorer_tree(docs)
+    if not tree:
+        st.info("لا توجد مستندات بعد. ارفع ملفاً للبدء.")
+        return
+
+    st.markdown('<div class="explorer">', unsafe_allow_html=True)
+    for folder in tree:
+        with st.expander(
+            f"{folder['icon']} {folder['category']} ({folder['count']})",
+            expanded=True,
+        ):
+            for group in folder["groups"]:
+                st.markdown(
+                    f'<div class="explorer-subfolder">'
+                    f'<strong>{group["icon"]} {group["label"]}</strong> '
+                    f'<span class="explorer-file-meta">({len(group["files"])})</span>'
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+                for doc in group["files"]:
+                    col_info, col_actions = st.columns([5, 1])
+                    with col_info:
+                        group_label = GROUP_LABELS_AR.get(
+                            doc.get("file_group", "other"),
+                            doc.get("file_group", "other"),
+                        )
+                        icon = GROUP_ICONS.get(doc.get("file_group", "other"), "📁")
+                        st.markdown(
+                            f"""
+                            <div class="explorer-file">
+                              <div>
+                                <div class="explorer-file-name">{icon} {doc['filename']}</div>
+                                <div class="explorer-file-meta">
+                                  {group_label} · {doc['char_count']:,} حرف · {doc.get('extension', '')}
+                                </div>
+                              </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                        if doc.get("preview"):
+                            st.caption(
+                                doc["preview"]
+                                + ("…" if len(doc.get("preview", "")) >= 280 else "")
+                            )
+                    with col_actions:
+                        if st.button("حذف", key=f"del-{doc['id']}", use_container_width=True):
+                            delete_document(doc["id"], embeddings)
+                            st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def main() -> None:
@@ -192,10 +305,10 @@ def main() -> None:
     with left:
         st.subheader("رفع الملفات")
         uploaded = st.file_uploader(
-            "ملفات PDF أو نصية",
-            type=["pdf", "txt", "md", "text", "log", "csv"],
+            "ملفات PDF، Office، أو نصية",
+            type=UPLOAD_TYPES,
             accept_multiple_files=True,
-            help="تُحفظ الملفات في مجلد uploads/ وتُفهرَس في قاعدة FAISS المحلية.",
+            help="يدعم الأسماء العربية وملفات Word وExcel وPowerPoint.",
         )
 
         if uploaded:
@@ -225,7 +338,7 @@ def main() -> None:
                 if successes:
                     st.rerun()
 
-        st.subheader("المكتبة")
+        st.subheader("مستكشف الملفات")
         doc_word = "مستند" if len(docs) == 1 else "مستندات"
         st.caption(
             f"نموذج التضمين: `{EMBEDDING_MODEL_NAME}` · "
@@ -242,24 +355,7 @@ def main() -> None:
                 unsafe_allow_html=True,
             )
 
-        if not docs:
-            st.info("لا توجد مستندات بعد. ارفع ملف PDF أو نص للبدء.")
-        else:
-            for doc in reversed(docs):
-                with st.container(border=True):
-                    c1, c2 = st.columns([4, 1])
-                    with c1:
-                        st.markdown(f"**{doc['filename']}**")
-                        st.caption(
-                            f"{doc['category']} · {doc['char_count']:,} حرف · "
-                            f"محفوظ باسم `{doc['stored_as']}`"
-                        )
-                        if doc.get("preview"):
-                            st.write(doc["preview"] + ("…" if len(doc["preview"]) >= 280 else ""))
-                    with c2:
-                        if st.button("حذف", key=f"del-{doc['id']}", use_container_width=True):
-                            delete_document(doc["id"], embeddings)
-                            st.rerun()
+        render_file_explorer(docs, embeddings)
 
     with right:
         st.subheader("البحث الدلالي")

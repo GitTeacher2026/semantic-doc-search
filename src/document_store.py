@@ -15,7 +15,8 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from pypdf import PdfReader
+from src.file_extractors import SUPPORTED_EXTENSIONS, file_group, safe_storage_name
+from src.file_extractors import extract_text as extract_file_text
 
 ROOT = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = ROOT / "uploads"
@@ -56,26 +57,20 @@ def load_metadata() -> list[dict[str, Any]]:
 
 def save_metadata(docs: list[dict[str, Any]]) -> None:
     ensure_dirs()
-    META_PATH.write_text(json.dumps(docs, indent=2), encoding="utf-8")
+    META_PATH.write_text(
+        json.dumps(docs, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 def _slugify(name: str) -> str:
     base = Path(name).stem
-    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "_", base).strip("_")
+    cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "_", base).strip("_")
     return cleaned[:80] or "مستند"
 
 
 def extract_text(path: Path) -> str:
-    suffix = path.suffix.lower()
-    if suffix == ".pdf":
-        reader = PdfReader(str(path))
-        parts: list[str] = []
-        for page in reader.pages:
-            parts.append(page.extract_text() or "")
-        return "\n".join(parts).strip()
-    if suffix in {".txt", ".md", ".text", ".log", ".csv"}:
-        return path.read_text(encoding="utf-8", errors="ignore").strip()
-    raise ValueError(f"نوع الملف غير مدعوم: {suffix}")
+    return extract_file_text(path)
 
 
 def _topic_label(text: str, filename: str) -> str:
@@ -147,7 +142,7 @@ def _chunk_documents(
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
-        separators=["\n\n", "\n", ". ", " ", ""],
+        separators=["\n\n", "\n", ". ", "۔ ", "؟ ", "! ", " ", ""],
     )
     chunks = splitter.split_text(text)
     if not chunks:
@@ -182,11 +177,12 @@ def ingest_file(
     """Save an uploaded file, categorize it, and index chunks into FAISS."""
     ensure_dirs()
     suffix = Path(uploaded_name).suffix.lower()
-    if suffix not in {".pdf", ".txt", ".md", ".text", ".log", ".csv"}:
-        raise ValueError("يُدعم فقط ملفات PDF والنص.")
+    if suffix not in SUPPORTED_EXTENSIONS:
+        supported = ", ".join(sorted(SUPPORTED_EXTENSIONS))
+        raise ValueError(f"نوع الملف غير مدعوم. الأنواع المدعومة: {supported}")
 
     doc_id = uuid.uuid4().hex[:12]
-    safe_name = f"{doc_id}_{_slugify(uploaded_name)}{suffix}"
+    safe_name = safe_storage_name(uploaded_name, doc_id)
     dest = UPLOAD_DIR / safe_name
     dest.write_bytes(raw_bytes)
 
@@ -205,6 +201,8 @@ def ingest_file(
         "stored_as": safe_name,
         "path": str(dest.relative_to(ROOT)),
         "category": category,
+        "file_group": file_group(suffix),
+        "extension": suffix.lstrip("."),
         "char_count": len(text),
         "preview": preview,
         "uploaded_at": datetime.now(timezone.utc).isoformat(),

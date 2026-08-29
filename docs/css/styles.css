@@ -138,6 +138,56 @@ select {
 
 .library { display: grid; gap: 0.75rem; }
 
+.explorer { display: grid; gap: 0.55rem; }
+
+.explorer-folder {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.explorer-folder > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0.75rem 0.9rem;
+  font-weight: 700;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.explorer-folder > summary::-webkit-details-marker { display: none; }
+
+.explorer-body { padding: 0.55rem 0.75rem 0.75rem; }
+
+.explorer-group {
+  margin: 0.45rem 0;
+  padding-right: 0.65rem;
+  border-right: 2px solid var(--accent-soft);
+}
+
+.explorer-group-title {
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+  color: var(--muted);
+}
+
+.explorer-file {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.55rem 0.65rem;
+  margin: 0.25rem 0;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #ece7dc;
+}
+
+.explorer-file-title { font-weight: 700; word-break: break-word; }
+.explorer-file-meta { color: var(--muted); font-size: 0.85rem; margin-top: 0.2rem; }
+.explorer-file-preview { color: var(--muted); font-size: 0.85rem; margin-top: 0.35rem; }
+
 .doc-card {
   border: 1px solid var(--line);
   border-radius: 12px;

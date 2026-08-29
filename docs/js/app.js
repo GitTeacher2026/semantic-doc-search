@@ -1,7 +1,7 @@
 import { pipeline, cos_sim } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
 
 const AUTH_KEY = "docshelf_auth";
-const STORE_KEY = "docshelf_store_v1";
+const STORE_KEY = "docshelf_store_v2";
 const USERNAME = "admin";
 const PASSWORD = "docshelf2024";
 const MODEL_ID = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
@@ -13,6 +13,45 @@ const STOPWORDS = new Set(
   `في من إلى عن على أن أو كان كانت هذا هذه ذلك تلك التي الذي الذين ما لم لن إن أنه إذا ثم قد لقد حيث عند بين حتى بعد قبل كل بعض أي نحو عبر حول خلال ضمن دون فوق تحت مستند ملف صفحة نص محتوى
   a an the and or but if in on at to for of with by from as is are was were be document file pdf txt`.split(/\s+/)
 );
+
+const EXT_GROUPS = {
+  pdf: [".pdf"],
+  word: [".doc", ".docx"],
+  excel: [".xls", ".xlsx"],
+  powerpoint: [".ppt", ".pptx"],
+  text: [".txt", ".md", ".text", ".log", ".csv"],
+};
+
+const GROUP_LABELS = {
+  pdf: "PDF",
+  word: "Word",
+  excel: "Excel",
+  powerpoint: "PowerPoint",
+  text: "نص",
+  other: "أخرى",
+};
+
+const GROUP_ICONS = {
+  pdf: "📄",
+  word: "📝",
+  excel: "📊",
+  powerpoint: "📽️",
+  text: "📃",
+  other: "📁",
+};
+
+function fileGroup(filename) {
+  const lower = filename.toLowerCase();
+  for (const [group, extensions] of Object.entries(EXT_GROUPS)) {
+    if (extensions.some((ext) => lower.endsWith(ext))) return group;
+  }
+  return "other";
+}
+
+function fileExtension(filename) {
+  const match = filename.toLowerCase().match(/\.([a-z0-9]+)$/);
+  return match ? match[1] : "";
+}
 
 let embedder = null;
 let pendingFiles = [];
@@ -164,6 +203,51 @@ function chunkText(text) {
   return chunks.length ? chunks : [text || ""];
 }
 
+async function extractDocxText(file) {
+  const mammoth = await import("https://cdn.jsdelivr.net/npm/mammoth@1.8.0/+esm");
+  const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+  return (result.value || "").trim();
+}
+
+async function extractExcelText(file) {
+  const XLSX = await import("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm");
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+  const parts = [];
+  for (const sheetName of workbook.SheetNames) {
+    parts.push(`## ${sheetName}`);
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+      header: 1,
+      defval: "",
+    });
+    for (const row of rows) {
+      const cells = row.map((cell) => String(cell).trim()).filter(Boolean);
+      if (cells.length) parts.push(cells.join(" | "));
+    }
+  }
+  return parts.join("\n").trim();
+}
+
+async function extractPptxText(file) {
+  const JSZip = (await import("https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm")).default;
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const slidePaths = Object.keys(zip.files)
+    .filter((path) => /ppt\/slides\/slide\d+\.xml$/i.test(path))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const parts = [];
+  for (const [index, slidePath] of slidePaths.entries()) {
+    const xml = await zip.files[slidePath].async("text");
+    const doc = new DOMParser().parseFromString(xml, "application/xml");
+    const texts = [...doc.getElementsByTagName("a:t")]
+      .map((node) => node.textContent.trim())
+      .filter(Boolean);
+    if (texts.length) {
+      parts.push(`## شريحة ${index + 1}`);
+      parts.push(texts.join(" "));
+    }
+  }
+  return parts.join("\n").trim();
+}
+
 async function extractPdfText(file) {
   const pdfjs = await import("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs");
   pdfjs.GlobalWorkerOptions.workerSrc =
@@ -182,7 +266,44 @@ async function extractPdfText(file) {
 async function extractText(file) {
   const name = file.name.toLowerCase();
   if (name.endsWith(".pdf")) return extractPdfText(file);
-  return (await file.text()).trim();
+  if (name.endsWith(".docx")) return extractDocxText(file);
+  if (name.endsWith(".xlsx") || name.endsWith(".xls")) return extractExcelText(file);
+  if (name.endsWith(".pptx")) return extractPptxText(file);
+  if (name.endsWith(".doc") || name.endsWith(".ppt")) {
+    throw new Error(
+      `${file.name}: صيغ .doc و .ppt القديمة غير مدعومة في المتصفح. استخدم docx/pptx.`
+    );
+  }
+  if (EXT_GROUPS.text.some((ext) => name.endsWith(ext))) {
+    return (await file.text()).trim();
+  }
+  throw new Error(`نوع الملف غير مدعوم: ${file.name}`);
+}
+
+function buildExplorerTree(documents) {
+  const categories = new Map();
+  for (const doc of documents) {
+    const group = doc.fileGroup || fileGroup(doc.filename);
+    if (!categories.has(doc.category)) categories.set(doc.category, new Map());
+    const groups = categories.get(doc.category);
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group).push(doc);
+  }
+
+  return [...categories.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0], "ar"))
+    .map(([category, groups]) => ({
+      category,
+      count: [...groups.values()].reduce((sum, files) => sum + files.length, 0),
+      groups: [...groups.entries()]
+        .sort((a, b) => GROUP_LABELS[a[0]].localeCompare(GROUP_LABELS[b[0]], "ar"))
+        .map(([group, files]) => ({
+          group,
+          label: GROUP_LABELS[group] || group,
+          icon: GROUP_ICONS[group] || GROUP_ICONS.other,
+          files: [...files].sort((a, b) => a.filename.localeCompare(b.filename, "ar")),
+        })),
+    }));
 }
 
 function summarizeCategories(documents) {
@@ -206,24 +327,40 @@ function renderLibrary() {
     .join("")}`;
 
   if (!docs.length) {
-    libraryList.innerHTML = `<p class="muted">لا توجد مستندات بعد. ارفع ملف PDF أو نص للبدء.</p>`;
+    libraryList.innerHTML = `<p class="muted">لا توجد مستندات بعد. ارفع ملفاً للبدء.</p>`;
     return;
   }
 
-  libraryList.innerHTML = [...docs]
-    .reverse()
+  const tree = buildExplorerTree(docs);
+  libraryList.innerHTML = tree
     .map(
-      (doc) => `
-      <article class="doc-card" data-id="${doc.id}">
-        <div class="doc-head">
-          <div>
-            <div class="doc-title">${escapeHtml(doc.filename)}</div>
-            <div class="doc-meta">${escapeHtml(doc.category)} · ${doc.charCount.toLocaleString("ar-EG")} حرف</div>
-            <p class="doc-meta">${escapeHtml(doc.preview)}${doc.preview.length >= 280 ? "…" : ""}</p>
-          </div>
-          <button class="btn ghost small delete-btn" data-id="${doc.id}" type="button">حذف</button>
+      (folder) => `
+      <details class="explorer-folder" open>
+        <summary>📁 ${escapeHtml(folder.category)} (${folder.count})</summary>
+        <div class="explorer-body">
+          ${folder.groups
+            .map(
+              (group) => `
+            <div class="explorer-group">
+              <div class="explorer-group-title">${group.icon} ${escapeHtml(group.label)} (${group.files.length})</div>
+              ${group.files
+                .map(
+                  (doc) => `
+                <article class="explorer-file" data-id="${doc.id}">
+                  <div>
+                    <div class="explorer-file-title">${GROUP_ICONS[doc.fileGroup] || "📁"} ${escapeHtml(doc.filename)}</div>
+                    <div class="explorer-file-meta">${escapeHtml(doc.category)} · ${doc.charCount.toLocaleString("ar-EG")} حرف · ${escapeHtml(doc.extension || "")}</div>
+                    <div class="explorer-file-preview">${escapeHtml(doc.preview)}${doc.preview.length >= 280 ? "…" : ""}</div>
+                  </div>
+                  <button class="btn ghost small delete-btn" data-id="${doc.id}" type="button">حذف</button>
+                </article>`
+                )
+                .join("")}
+            </div>`
+            )
+            .join("")}
         </div>
-      </article>`
+      </details>`
     )
     .join("");
 
@@ -258,6 +395,8 @@ async function ingestFiles(files) {
         id: crypto.randomUUID(),
         filename: file.name,
         category,
+        fileGroup: fileGroup(file.name),
+        extension: fileExtension(file.name),
         charCount: text.length,
         preview: text.replace(/\s+/g, " ").slice(0, 280),
         chunks: chunks.map((content, i) => ({ content, embedding: embeddings[i] })),
