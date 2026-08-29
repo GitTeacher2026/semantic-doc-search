@@ -24,5 +24,16 @@
       "approvedAt": "2026-08-29T10:21:41.670Z"
     }
   ],
-  "pending": []
+  "pending": [
+    {
+      "id": "a5b439ba-bd1f-4ae5-bc35-de2e2a78c588",
+      "username": "assa",
+      "firstName": "asas",
+      "lastName": "asas",
+      "email": "asas@gfg.com",
+      "passwordHash": "ykCVn/jaqbAq6brcNSM7fsvYWhf6PvnwH+N0x1olcnk=",
+      "approvalToken": "c700d5334ba044aaac276eebfbbaa9d5",
+      "createdAt": "2026-08-29T10:44:23.558Z"
+    }
+  ]
 }
