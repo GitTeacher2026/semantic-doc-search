@@ -22,6 +22,10 @@ permissions:
 jobs:
   notify:
     runs-on: ubuntu-latest
+    env:
+      HAS_MAIL: ${{ secrets.MAIL_USERNAME != '' && secrets.MAIL_PASSWORD != '' }}
+      HAS_WEB3FORMS: ${{ secrets.WEB3FORMS_ACCESS_KEY != '' }}
+      HAS_RESEND: ${{ secrets.RESEND_API_KEY != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -114,7 +118,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Send via Gmail SMTP
-        if: steps.check.outputs.has_email == 'true' && secrets.MAIL_USERNAME != '' && secrets.MAIL_PASSWORD != ''
+        if: steps.check.outputs.has_email == 'true' && env.HAS_MAIL == 'true'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -128,7 +132,7 @@ jobs:
           body: file://email-body.txt
 
       - name: Send via Web3Forms
-        if: steps.check.outputs.has_email == 'true' && secrets.WEB3FORMS_ACCESS_KEY != ''
+        if: steps.check.outputs.has_email == 'true' && env.HAS_WEB3FORMS == 'true'
         env:
           WEB3FORMS_ACCESS_KEY: ${{ secrets.WEB3FORMS_ACCESS_KEY }}
         run: |
@@ -155,7 +159,7 @@ jobs:
           NODE
 
       - name: Send via Resend API
-        if: steps.check.outputs.has_email == 'true' && secrets.RESEND_API_KEY != ''
+        if: steps.check.outputs.has_email == 'true' && env.HAS_RESEND == 'true'
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: |
@@ -184,7 +188,7 @@ jobs:
           NODE
 
       - name: Warn if email not configured
-        if: steps.check.outputs.has_email == 'true' && secrets.MAIL_USERNAME == '' && secrets.WEB3FORMS_ACCESS_KEY == '' && secrets.RESEND_API_KEY == ''
+        if: steps.check.outputs.has_email == 'true' && env.HAS_MAIL != 'true' && env.HAS_WEB3FORMS != 'true' && env.HAS_RESEND != 'true'
         run: |
           echo "::warning::No email secrets configured. Add one of:"
           echo "  - MAIL_USERNAME + MAIL_PASSWORD (Gmail App Password for amanyak267@gmail.com)"
