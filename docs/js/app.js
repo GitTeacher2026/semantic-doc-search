@@ -32,6 +32,7 @@ import {
   rejectPendingUser,
   resendPendingSignupEmails,
 } from "./auth-service.js";
+import { initAdminMembers } from "./admin-members.js";
 import { getVaultPassword } from "./auth-page.js";
 import {
   daysUntilPurge,
@@ -55,6 +56,7 @@ let pendingUnlockId = null;
 let pendingUnlockAction = null;
 let authApi = null;
 let currentUser = null;
+let adminMembersApi = null;
 
 const appView = document.getElementById("app-view");
 const logoutBtn = document.getElementById("logout-btn");
@@ -1019,6 +1021,12 @@ export async function startApp({ user, auth }) {
   currentUser = user;
   authApi = auth;
   sessionPassword = getVaultPassword();
+
+  adminMembersApi = initAdminMembers({
+    getActor: () => currentUser,
+    onStatus: setStatus,
+    isAdmin: () => authApi?.isAdmin?.(),
+  });
 
   try {
     await hydrateDocuments(sessionPassword);

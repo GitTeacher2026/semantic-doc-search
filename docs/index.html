@@ -146,6 +146,7 @@
       </div>
       <div class="hero-actions">
         <div id="admin-toolbar" class="admin-toolbar hidden">
+          <button id="open-members-btn" class="btn ghost small" type="button">إدارة الأعضاء</button>
           <button id="open-pending-btn" class="btn ghost small" type="button">
             طلبات التسجيل
             <span id="pending-count-badge" class="pending-badge hidden">0</span>
@@ -202,6 +203,22 @@
         <div id="search-results" class="results"></div>
       </section>
     </main>
+  </div>
+
+  <div id="members-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="members-dialog-title">
+    <div class="modal-backdrop" id="members-dialog-backdrop"></div>
+    <div class="modal-card members-dialog-card">
+      <div class="members-dialog-header">
+        <div>
+          <h2 id="members-dialog-title">إدارة الأعضاء</h2>
+          <p id="members-count" class="muted">0 عضو</p>
+        </div>
+        <button id="members-close-btn" class="btn ghost small" type="button">إغلاق</button>
+      </div>
+      <label class="sr-only" for="members-search">بحث في الأعضاء</label>
+      <input id="members-search" type="search" placeholder="ابحث بالاسم أو البريد أو اسم المستخدم…" />
+      <div id="members-list" class="members-list"></div>
+    </div>
   </div>
 
   <div id="pending-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="pending-dialog-title">

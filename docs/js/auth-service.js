@@ -46,6 +46,10 @@ export async function authenticateUser(username, password) {
     throw new Error("اسم المستخدم أو كلمة المرور غير صحيحة.");
   }
 
+  if (user.status === "suspended") {
+    throw new Error("تم تعليق حسابك. تواصل مع المسؤول.");
+  }
+
   if (user.status !== "approved") {
     throw new Error("حسابك بانتظار موافقة المسؤول. ستصلك رسالة عند التفعيل.");
   }
@@ -313,6 +317,84 @@ export async function rejectPendingUser(pendingId) {
 export async function listPendingUsers() {
   const { db } = await loadUsersDbWithSha();
   return db.pending;
+}
+
+function sanitizeMember(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    email: user.email,
+    role: user.role || "member",
+    status: user.status || "approved",
+    createdAt: user.createdAt,
+    approvedAt: user.approvedAt,
+  };
+}
+
+function assertAdminActor(actor) {
+  if (!isAdmin(actor)) throw new Error("غير مصرح لك بهذا الإجراء.");
+}
+
+function findMember(db, memberId) {
+  const user = db.users.find((item) => item.id === memberId);
+  if (!user) throw new Error("المستخدم غير موجود.");
+  return user;
+}
+
+function guardProtectedMember(user, actor) {
+  if (user.id === "admin-default" || user.username === "admin") {
+    throw new Error("لا يمكن تعديل حساب المسؤول الرئيسي.");
+  }
+  if (actor && user.id === actor.id) {
+    throw new Error("لا يمكنك تنفيذ هذا الإجراء على حسابك الحالي.");
+  }
+}
+
+export async function listMembers() {
+  const { db } = await loadUsersDbWithSha();
+  return db.users.map(sanitizeMember);
+}
+
+export async function deleteMember(memberId, actor) {
+  assertAdminActor(actor);
+  const { db, sha } = await loadUsersDbWithSha();
+  const user = findMember(db, memberId);
+  guardProtectedMember(user, actor);
+  db.users = db.users.filter((item) => item.id !== memberId);
+  await saveUsersDb(db, sha);
+  return sanitizeMember(user);
+}
+
+export async function setMemberStatus(memberId, status, actor) {
+  assertAdminActor(actor);
+  if (!["approved", "suspended"].includes(status)) {
+    throw new Error("حالة غير صالحة.");
+  }
+  const { db, sha } = await loadUsersDbWithSha();
+  const user = findMember(db, memberId);
+  guardProtectedMember(user, actor);
+  user.status = status;
+  await saveUsersDb(db, sha);
+  return sanitizeMember(user);
+}
+
+export async function setMemberRole(memberId, role, actor) {
+  assertAdminActor(actor);
+  if (!["admin", "member"].includes(role)) throw new Error("دور غير صالح.");
+  const { db, sha } = await loadUsersDbWithSha();
+  const user = findMember(db, memberId);
+  guardProtectedMember(user, actor);
+  if (role === "member" && user.role === "admin") {
+    const adminCount = db.users.filter(
+      (item) => item.role === "admin" && item.status !== "suspended"
+    ).length;
+    if (adminCount <= 1) throw new Error("يجب أن يبقى مسؤول واحد على الأقل.");
+  }
+  user.role = role;
+  await saveUsersDb(db, sha);
+  return sanitizeMember(user);
 }
 
 export async function resendPendingSignupEmails() {
