@@ -62,16 +62,6 @@
   ],
   "pending": [
     {
-      "id": "4f0dccfd-3b9a-497e-b68a-94f317e8b725",
-      "username": "365",
-      "firstName": "65",
-      "lastName": "5656",
-      "email": "545@56er.com",
-      "passwordHash": "D/xwc2m/YnySOjKV6Bzv/KR0OZt9qljpFRwWgUbgPTI=",
-      "approvalToken": "4d31d1fe1da64bc7acc7ed3d961cc702",
-      "createdAt": "2026-08-29T10:58:55.049Z"
-    },
-    {
       "id": "a0005be7-e02f-4b37-a5fe-ec9e8afefe89",
       "username": "656",
       "firstName": "565",
