@@ -188,6 +188,28 @@ select {
 .explorer-file-meta { color: var(--muted); font-size: 0.85rem; margin-top: 0.2rem; }
 .explorer-file-preview { color: var(--muted); font-size: 0.85rem; margin-top: 0.35rem; }
 
+.explorer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.hit-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+mark.query-hit, .query-hit {
+  background: #ffe566;
+  color: inherit;
+  padding: 0 0.12rem;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
 .doc-card {
   border: 1px solid var(--line);
   border-radius: 12px;

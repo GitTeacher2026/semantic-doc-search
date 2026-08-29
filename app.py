@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import sys
 from pathlib import Path
 
@@ -17,11 +18,13 @@ from src.document_store import (
     delete_document,
     ingest_file,
     load_metadata,
+    read_document_bytes,
     semantic_search,
 )
 from src.embeddings import EMBEDDING_MODEL_NAME, get_embeddings
 from src.explorer import build_explorer_tree
 from src.file_extractors import GROUP_ICONS, GROUP_LABELS_AR
+from src.highlight import highlight_text
 
 st.set_page_config(
     page_title="مخزن الوثائق",
@@ -197,6 +200,14 @@ st.markdown(
         color: var(--muted);
         font-size: 0.82rem;
       }
+
+      mark.query-hit, .query-hit {
+        background: #ffe566;
+        color: inherit;
+        padding: 0 0.12rem;
+        border-radius: 3px;
+        font-weight: 600;
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -241,7 +252,7 @@ def render_file_explorer(docs: list[dict], embeddings) -> None:
                     unsafe_allow_html=True,
                 )
                 for doc in group["files"]:
-                    col_info, col_actions = st.columns([5, 1])
+                    col_info, col_download, col_actions = st.columns([5, 1, 1])
                     with col_info:
                         group_label = GROUP_LABELS_AR.get(
                             doc.get("file_group", "other"),
@@ -266,6 +277,19 @@ def render_file_explorer(docs: list[dict], embeddings) -> None:
                                 doc["preview"]
                                 + ("…" if len(doc.get("preview", "")) >= 280 else "")
                             )
+                    with col_download:
+                        try:
+                            file_bytes = read_document_bytes(doc)
+                            st.download_button(
+                                "تنزيل",
+                                data=file_bytes,
+                                file_name=doc["filename"],
+                                mime="application/octet-stream",
+                                key=f"dl-{doc['id']}",
+                                use_container_width=True,
+                            )
+                        except FileNotFoundError:
+                            st.caption("غير متوفر")
                     with col_actions:
                         if st.button("حذف", key=f"del-{doc['id']}", use_container_width=True):
                             delete_document(doc["id"], embeddings)
@@ -385,20 +409,38 @@ def main() -> None:
                 if not hits:
                     st.info("لم يُعثر على مقاطع مطابقة. جرّب عبارة أوسع.")
                 else:
-                    for hit in hits:
-                        st.markdown(
-                            f"""
-                            <div class="hit">
-                              <div>
-                                <strong>{hit['filename']}</strong>
-                                <span class="chip">{hit['category']}</span>
-                                <span class="score">{hit['score']:.0%} تطابق</span>
-                              </div>
-                              <p style="margin:0.55rem 0 0 0; white-space:pre-wrap;">{hit['content']}</p>
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
+                    docs_by_id = {doc["id"]: doc for doc in docs}
+                    for index, hit in enumerate(hits):
+                        highlighted = highlight_text(hit["content"], query.strip())
+                        header_cols = st.columns([4, 1])
+                        with header_cols[0]:
+                            st.markdown(
+                                f"""
+                                <div class="hit">
+                                  <div>
+                                    <strong>{html.escape(hit['filename'])}</strong>
+                                    <span class="chip">{html.escape(hit['category'])}</span>
+                                    <span class="score">{hit['score']:.0%} تطابق</span>
+                                  </div>
+                                  <p style="margin:0.55rem 0 0 0; white-space:pre-wrap;">{highlighted}</p>
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+                        with header_cols[1]:
+                            doc_id = hit.get("doc_id")
+                            if doc_id and doc_id in docs_by_id:
+                                try:
+                                    st.download_button(
+                                        "تنزيل",
+                                        data=read_document_bytes(docs_by_id[doc_id]),
+                                        file_name=hit["filename"],
+                                        mime="application/octet-stream",
+                                        key=f"search-dl-{doc_id}-{index}",
+                                        use_container_width=True,
+                                    )
+                                except FileNotFoundError:
+                                    st.caption("غير متوفر")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 import { pipeline, cos_sim } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
 
 const AUTH_KEY = "docshelf_auth";
-const STORE_KEY = "docshelf_store_v2";
+const STORE_KEY = "docshelf_store_v3";
 const USERNAME = "admin";
 const PASSWORD = "docshelf2024";
 const MODEL_ID = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
@@ -352,7 +352,10 @@ function renderLibrary() {
                     <div class="explorer-file-meta">${escapeHtml(doc.category)} · ${doc.charCount.toLocaleString("ar-EG")} حرف · ${escapeHtml(doc.extension || "")}</div>
                     <div class="explorer-file-preview">${escapeHtml(doc.preview)}${doc.preview.length >= 280 ? "…" : ""}</div>
                   </div>
-                  <button class="btn ghost small delete-btn" data-id="${doc.id}" type="button">حذف</button>
+                  <div class="explorer-actions">
+                    <button class="btn ghost small download-btn" data-id="${doc.id}" type="button">تنزيل</button>
+                    <button class="btn ghost small delete-btn" data-id="${doc.id}" type="button">حذف</button>
+                  </div>
                 </article>`
                 )
                 .join("")}
@@ -371,6 +374,13 @@ function renderLibrary() {
       renderLibrary();
     });
   });
+
+  libraryList.querySelectorAll(".download-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const doc = findDocumentById(btn.dataset.id);
+      if (doc) downloadDocument(doc);
+    });
+  });
 }
 
 function escapeHtml(value) {
@@ -381,11 +391,54 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function highlightText(text, query) {
+  const escaped = escapeHtml(text);
+  const tokens = [...new Set(query.trim().split(/\s+/).filter((token) => token.length >= 2))]
+    .sort((a, b) => b.length - a.length);
+  let result = escaped;
+  for (const token of tokens) {
+    const escToken = escapeHtml(token);
+    const pattern = new RegExp(escToken.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    result = result.replace(pattern, '<mark class="query-hit">$&</mark>');
+  }
+  return result;
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function downloadDocument(doc) {
+  if (!doc.fileData) {
+    setStatus("تعذّر التنزيل: الملف غير مخزّن. أعد رفع الملف.", true);
+    return;
+  }
+  const bytes = Uint8Array.from(atob(doc.fileData), (char) => char.charCodeAt(0));
+  const blob = new Blob([bytes]);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = doc.filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function findDocumentById(id) {
+  return state.documents.find((doc) => doc.id === id);
+}
+
 async function ingestFiles(files) {
   ingestBtn.disabled = true;
   setStatus("جارٍ فهرسة الملفات…");
   try {
     for (const file of files) {
+      const arrayBuffer = await file.arrayBuffer();
       const text = await extractText(file);
       if (!text) throw new Error(`لم يُعثر على نص في ${file.name}`);
       const category = await assignCategory(text, file.name, state.documents);
@@ -399,6 +452,7 @@ async function ingestFiles(files) {
         extension: fileExtension(file.name),
         charCount: text.length,
         preview: text.replace(/\s+/g, " ").slice(0, 280),
+        fileData: arrayBufferToBase64(arrayBuffer),
         chunks: chunks.map((content, i) => ({ content, embedding: embeddings[i] })),
       };
       state.documents.push(doc);
@@ -438,6 +492,7 @@ async function runSearch() {
     if (category && doc.category !== category) continue;
     for (const chunk of doc.chunks) {
       hits.push({
+        docId: doc.id,
         filename: doc.filename,
         category: doc.category,
         content: chunk.content,
@@ -456,15 +511,25 @@ async function runSearch() {
       .map(
         (hit) => `
         <article class="hit">
-          <div>
-            <strong>${escapeHtml(hit.filename)}</strong>
-            <span class="chip">${escapeHtml(hit.category)}</span>
-            <span class="score">${Math.round(hit.score * 100)}% تطابق</span>
+          <div class="hit-header">
+            <div>
+              <strong>${escapeHtml(hit.filename)}</strong>
+              <span class="chip">${escapeHtml(hit.category)}</span>
+              <span class="score">${Math.round(hit.score * 100)}% تطابق</span>
+            </div>
+            <button class="btn ghost small search-download-btn" data-id="${escapeHtml(hit.docId)}" type="button">تنزيل</button>
           </div>
-          <p>${escapeHtml(hit.content)}</p>
+          <p>${highlightText(hit.content, query)}</p>
         </article>`
       )
       .join("");
+
+    searchResults.querySelectorAll(".search-download-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const doc = findDocumentById(btn.dataset.id);
+        if (doc) downloadDocument(doc);
+      });
+    });
   }
   searchBtn.disabled = false;
 }

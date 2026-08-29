@@ -311,6 +311,19 @@ def semantic_search(
     return results
 
 
+def get_document_file(doc: dict[str, Any]) -> Path:
+    """Return the on-disk path for an uploaded document."""
+    return ROOT / doc["path"]
+
+
+def read_document_bytes(doc: dict[str, Any]) -> bytes:
+    """Read raw bytes for download."""
+    path = get_document_file(doc)
+    if not path.exists():
+        raise FileNotFoundError(f"الملف غير موجود: {doc.get('filename', '')}")
+    return path.read_bytes()
+
+
 def category_summary(docs: list[dict[str, Any]]) -> dict[str, int]:
     counts: Counter[str] = Counter(d["category"] for d in docs)
     return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
