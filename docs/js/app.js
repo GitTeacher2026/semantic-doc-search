@@ -59,7 +59,12 @@ let currentUser = null;
 const appView = document.getElementById("app-view");
 const logoutBtn = document.getElementById("logout-btn");
 const userGreeting = document.getElementById("user-greeting");
-const adminPanel = document.getElementById("admin-panel");
+const adminToolbar = document.getElementById("admin-toolbar");
+const openPendingBtn = document.getElementById("open-pending-btn");
+const pendingCountBadge = document.getElementById("pending-count-badge");
+const pendingDialog = document.getElementById("pending-dialog");
+const pendingDialogBackdrop = document.getElementById("pending-dialog-backdrop");
+const pendingCloseBtn = document.getElementById("pending-close-btn");
 const pendingUsersList = document.getElementById("pending-users-list");
 const resendEmailBtn = document.getElementById("resend-email-btn");
 const dropZone = document.getElementById("drop-zone");
@@ -162,9 +167,44 @@ function showView() {
   if (!isHydrating && sessionPassword) {
     renderLibrary();
     renderTrash();
-    renderAdminPanel();
+    refreshAdminToolbar();
     updateStorageBanner();
   }
+}
+
+function updatePendingBadge(count) {
+  if (!pendingCountBadge) return;
+  if (count > 0) {
+    pendingCountBadge.textContent = String(count);
+    pendingCountBadge.classList.remove("hidden");
+  } else {
+    pendingCountBadge.classList.add("hidden");
+  }
+}
+
+async function refreshAdminToolbar() {
+  if (!adminToolbar) return;
+  if (!authApi?.isAdmin?.()) {
+    adminToolbar.classList.add("hidden");
+    return;
+  }
+
+  adminToolbar.classList.remove("hidden");
+  try {
+    const pending = await authApi.listPendingUsers();
+    updatePendingBadge(pending.length);
+  } catch {
+    updatePendingBadge(0);
+  }
+}
+
+function openPendingDialog() {
+  pendingDialog?.classList.remove("hidden");
+  renderPendingUsers();
+}
+
+function closePendingDialog() {
+  pendingDialog?.classList.add("hidden");
 }
 
 function setStatus(message, show = true) {
@@ -379,60 +419,63 @@ async function extractText(file, arrayBuffer) {
   throw new Error(`نوع الملف غير مدعوم: ${name}`);
 }
 
-async function renderAdminPanel() {
-  if (!adminPanel || !authApi?.isAdmin?.()) {
-    adminPanel?.classList.add("hidden");
-    return;
-  }
+async function renderPendingUsers() {
+  if (!pendingUsersList || !authApi?.isAdmin?.()) return;
 
-  const pending = await authApi.listPendingUsers();
-  adminPanel.classList.remove("hidden");
+  pendingUsersList.innerHTML = `<p class="muted">جارٍ تحميل الطلبات…</p>`;
 
-  if (!pending.length) {
-    pendingUsersList.innerHTML = `<p class="muted">لا توجد طلبات تسجيل معلّقة.</p>`;
-    return;
-  }
+  try {
+    const pending = await authApi.listPendingUsers();
+    updatePendingBadge(pending.length);
 
-  pendingUsersList.innerHTML = pending
-    .map(
-      (user) => `
-      <div class="pending-user-row" data-id="${user.id}">
-        <div>
-          <strong>${escapeHtml(user.firstName)} ${escapeHtml(user.lastName)}</strong>
-          <div class="muted">@${escapeHtml(user.username)} · ${escapeHtml(user.email)}</div>
-        </div>
-        <div class="pending-user-actions">
-          <button class="btn primary small approve-user-btn" data-id="${user.id}" type="button">موافقة</button>
-          <button class="btn ghost small reject-user-btn" data-id="${user.id}" type="button">رفض</button>
-        </div>
-      </div>`
-    )
-    .join("");
+    if (!pending.length) {
+      pendingUsersList.innerHTML = `<p class="muted">لا توجد طلبات تسجيل معلّقة.</p>`;
+      return;
+    }
 
-  pendingUsersList.querySelectorAll(".approve-user-btn").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      try {
-        await approvePendingUser(btn.dataset.id);
-        setStatus("تمت الموافقة وإرسال بريد تأكيدي للمستخدم.", true);
-        await renderAdminPanel();
-      } catch (error) {
-        setStatus(error.message, true);
-      }
+    pendingUsersList.innerHTML = pending
+      .map(
+        (user) => `
+        <div class="pending-user-row" data-id="${user.id}">
+          <div>
+            <strong>${escapeHtml(user.firstName)} ${escapeHtml(user.lastName)}</strong>
+            <div class="muted">@${escapeHtml(user.username)} · ${escapeHtml(user.email)}</div>
+          </div>
+          <div class="pending-user-actions">
+            <button class="btn primary small approve-user-btn" data-id="${user.id}" type="button">موافقة</button>
+            <button class="btn ghost small reject-user-btn" data-id="${user.id}" type="button">رفض</button>
+          </div>
+        </div>`
+      )
+      .join("");
+
+    pendingUsersList.querySelectorAll(".approve-user-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          await approvePendingUser(btn.dataset.id);
+          setStatus("تمت الموافقة وإرسال بريد تأكيدي للمستخدم.", true);
+          await renderPendingUsers();
+        } catch (error) {
+          setStatus(error.message, true);
+        }
+      });
     });
-  });
 
-  pendingUsersList.querySelectorAll(".reject-user-btn").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      if (!window.confirm("رفض هذا الطلب؟")) return;
-      try {
-        await rejectPendingUser(btn.dataset.id);
-        setStatus("تم رفض الطلب وإبلاغ المستخدم.", true);
-        await renderAdminPanel();
-      } catch (error) {
-        setStatus(error.message, true);
-      }
+    pendingUsersList.querySelectorAll(".reject-user-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!window.confirm("رفض هذا الطلب؟")) return;
+        try {
+          await rejectPendingUser(btn.dataset.id);
+          setStatus("تم رفض الطلب وإبلاغ المستخدم.", true);
+          await renderPendingUsers();
+        } catch (error) {
+          setStatus(error.message, true);
+        }
+      });
     });
-  });
+  } catch (error) {
+    pendingUsersList.innerHTML = `<p class="auth-error">${escapeHtml(error.message)}</p>`;
+  }
 }
 
 if (resendEmailBtn) {
@@ -446,6 +489,10 @@ if (resendEmailBtn) {
     }
   });
 }
+
+openPendingBtn?.addEventListener("click", openPendingDialog);
+pendingCloseBtn?.addEventListener("click", closePendingDialog);
+pendingDialogBackdrop?.addEventListener("click", closePendingDialog);
 
 function buildExplorerTree(documents) {
   const categories = new Map();

@@ -296,6 +296,45 @@
   background: #f3fbf8;
 }
 
+.admin-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.pending-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  margin-inline-start: 0.35rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: #c0392b;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.pending-users-list {
+  margin-top: 0.75rem;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.pending-dialog-card {
+  width: min(560px, 100%);
+}
+
 .admin-panel h2 {
   margin-top: 0;
   color: #0f6e56;

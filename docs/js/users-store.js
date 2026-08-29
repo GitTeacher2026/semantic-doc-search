@@ -22,8 +22,24 @@ function apiUrl() {
   return `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${USERS_PATH}`;
 }
 
+function rawUrl() {
+  return `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/${USERS_PATH}`;
+}
+
 function isConfigured() {
   return Boolean(GITHUB_TOKEN && GITHUB_OWNER && GITHUB_REPO && USERS_PATH);
+}
+
+function canReadRemote() {
+  return Boolean(GITHUB_OWNER && GITHUB_REPO && USERS_PATH);
+}
+
+async function fetchUsersFromRaw() {
+  const res = await fetch(rawUrl(), { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`تعذّر تحميل حسابات المستخدمين (${res.status})`);
+  }
+  return normalizeUsersDb(await res.json());
 }
 
 function authHeaders() {
@@ -49,12 +65,17 @@ export function normalizeUsersDb(data) {
 }
 
 export async function loadUsersDb() {
-  if (!isConfigured()) {
+  if (!canReadRemote()) {
     return normalizeUsersDb({ users: [DEFAULT_ADMIN], pending: [] });
+  }
+
+  if (!isConfigured()) {
+    return fetchUsersFromRaw();
   }
 
   const res = await fetch(`${apiUrl()}?ref=${encodeURIComponent(GITHUB_BRANCH)}`, {
     headers: authHeaders(),
+    cache: "no-store",
   });
 
   if (res.status === 404) {
@@ -79,6 +100,11 @@ export async function saveUsersDb(db, sha = usersSha) {
   if (!isConfigured()) {
     localStorage.setItem("docshelf_users_local", JSON.stringify(payload));
     return;
+  }
+
+  if (!sha) {
+    await refreshUsersSha();
+    sha = usersSha;
   }
 
   const content = btoa(unescape(encodeURIComponent(JSON.stringify(payload, null, 2))));
@@ -111,6 +137,7 @@ export async function refreshUsersSha() {
   if (!isConfigured()) return;
   const res = await fetch(`${apiUrl()}?ref=${encodeURIComponent(GITHUB_BRANCH)}`, {
     headers: authHeaders(),
+    cache: "no-store",
   });
   if (res.ok) {
     const payload = await res.json();
@@ -119,7 +146,7 @@ export async function refreshUsersSha() {
 }
 
 export async function loadUsersDbWithSha() {
-  if (!isConfigured()) {
+  if (!canReadRemote()) {
     const local = localStorage.getItem("docshelf_users_local");
     return {
       db: normalizeUsersDb(local ? JSON.parse(local) : { users: [DEFAULT_ADMIN], pending: [] }),
@@ -127,8 +154,13 @@ export async function loadUsersDbWithSha() {
     };
   }
 
+  if (!isConfigured()) {
+    return { db: await fetchUsersFromRaw(), sha: null };
+  }
+
   const res = await fetch(`${apiUrl()}?ref=${encodeURIComponent(GITHUB_BRANCH)}`, {
     headers: authHeaders(),
+    cache: "no-store",
   });
 
   if (res.status === 404) {
@@ -138,8 +170,7 @@ export async function loadUsersDbWithSha() {
   }
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || `تعذّر تحميل حسابات المستخدمين (${res.status})`);
+    return { db: await fetchUsersFromRaw(), sha: usersSha };
   }
 
   const payload = await res.json();

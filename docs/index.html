@@ -144,15 +144,16 @@
         <p id="user-greeting" class="user-greeting"></p>
         <p class="tagline">ارفع ملفات PDF وOffice والنصوص، صنّفها تلقائياً، وابحث فوراً بدون تحميل أي نموذج.</p>
       </div>
-      <button id="logout-btn" class="btn ghost" type="button">تسجيل الخروج</button>
+      <div class="hero-actions">
+        <div id="admin-toolbar" class="admin-toolbar hidden">
+          <button id="open-pending-btn" class="btn ghost small" type="button">
+            طلبات التسجيل
+            <span id="pending-count-badge" class="pending-badge hidden">0</span>
+          </button>
+        </div>
+        <button id="logout-btn" class="btn ghost" type="button">تسجيل الخروج</button>
+      </div>
     </header>
-
-    <div id="admin-panel" class="admin-panel hidden">
-      <h2>طلبات التسجيل بانتظار الموافقة</h2>
-      <p class="muted">البريد يُرسل تلقائياً عند التسجيل عبر Web3Forms. لإعادة الإرسال، استخدم الزر أدناه (يجب أن تكون مسجّل دخولك كمسؤول).</p>
-      <button id="resend-email-btn" class="btn ghost small" type="button">إعادة إرسال بريد الموافقة</button>
-      <div id="pending-users-list"></div>
-    </div>
 
     <div id="status-banner" class="status hidden"></div>
     <div id="storage-banner" class="storage-banner hidden"></div>
@@ -201,6 +202,19 @@
         <div id="search-results" class="results"></div>
       </section>
     </main>
+  </div>
+
+  <div id="pending-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="pending-dialog-title">
+    <div class="modal-backdrop" id="pending-dialog-backdrop"></div>
+    <div class="modal-card pending-dialog-card">
+      <h2 id="pending-dialog-title">طلبات التسجيل بانتظار الموافقة</h2>
+      <p class="muted">البريد يُرسل تلقائياً عند التسجيل. لإعادة الإرسال، استخدم الزر أدناه.</p>
+      <button id="resend-email-btn" class="btn ghost small" type="button">إعادة إرسال بريد الموافقة</button>
+      <div id="pending-users-list" class="pending-users-list"></div>
+      <div class="modal-actions">
+        <button id="pending-close-btn" class="btn ghost" type="button">إغلاق</button>
+      </div>
+    </div>
   </div>
 
   <div id="delete-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title">
