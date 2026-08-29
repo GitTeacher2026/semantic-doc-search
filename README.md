@@ -1,16 +1,30 @@
-# DocShelf
+# مخزن الوثائق
 
-Single-page Streamlit app for uploading PDF and text files, auto-categorizing them into projects/topics with a free local embedding model, and running semantic search over their contents with LangChain + FAISS.
+تطبيق ويب عربي لرفع ملفات PDF والنصوص، تصنيفها تلقائياً حسب المشروع/الموضوع باستخدام تضمينات محلية، والبحث الدلالي عبر المحتوى باستخدام LangChain وFAISS.
 
-## Features
+## الميزات
 
-- Upload PDF and text files (`.pdf`, `.txt`, `.md`, and similar)
-- Files are saved under `uploads/`
-- Chunking and embedding via LangChain + `sentence-transformers/all-MiniLM-L6-v2` (no API key)
-- Automatic project/topic assignment by nearest category centroid in embedding space
-- Semantic search across all document chunks stored in a local FAISS index (`data/faiss_index/`)
+- صفحة تسجيل دخول قبل الوصول إلى أي وظيفة
+- واجهة عربية كاملة مع دعم RTL
+- رفع ملفات PDF ونصية
+- تصنيف تلقائي باستخدام `paraphrase-multilingual-MiniLM-L12-v2` (مجاني، بدون مفتاح API)
+- بحث دلالي عبر FAISS (نسخة Streamlit) أو تضمينات المتصفح (نسخة GitHub Pages)
 
-## Quick start
+## بيانات الدخول الافتراضية
+
+| الحقل | القيمة |
+|-------|--------|
+| اسم المستخدم | `admin` |
+| كلمة المرور | `docshelf2024` |
+
+لتغييرها في Streamlit:
+
+```bash
+export DOCSHELF_USERNAME=your_user
+export DOCSHELF_PASSWORD=your_password
+```
+
+## التشغيل المحلي (Streamlit)
 
 ```bash
 python3 -m venv .venv
@@ -19,29 +33,63 @@ pip install -r requirements.txt
 streamlit run app.py --server.port 8512 --server.address 0.0.0.0
 ```
 
-Open the URL Streamlit prints (default here: http://127.0.0.1:8512).
+ثم افتح http://127.0.0.1:8512
 
-The first run downloads the embedding model (~90MB). Later runs use the local cache.
+## النشر على GitHub Pages
 
-## How categorization works
+يتم نشر النسخة الثابتة العربية من مجلد `docs/` تلقائياً عبر GitHub Actions.
 
-1. Each uploaded file is saved and its text extracted.
-2. The text is embedded with MiniLM.
-3. If it is close enough to an existing category centroid, it joins that project/topic.
-4. Otherwise a new topic label is derived from frequent content words.
+### 1) إنشاء حساب GitHub (إن لم يكن لديك)
 
-## Project layout
+أنشئ حساباً مجانياً على https://github.com/signup
+
+### 2) إنشاء المستودع ورفع الكود
+
+```bash
+# تثبيت GitHub CLI
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+sudo apt update && sudo apt install gh -y
+
+# تسجيل الدخول
+gh auth login
+
+# إنشاء المستودع ورفع الكود
+gh repo create semantic-doc-search --public --source=. --remote=github --push
+```
+
+### 3) تفعيل GitHub Pages
+
+```bash
+gh api repos/:owner/semantic-doc-search/pages -X POST \
+  -f build_type=workflow \
+  -f source[branch]=main \
+  -f source[path]=/docs
+```
+
+أو من واجهة GitHub: **Settings → Pages → Build and deployment → GitHub Actions**.
+
+### 4) عنوان الموقع
+
+بعد نجاح الـ workflow، سيكون الموقع متاحاً على:
+
+`https://<اسم-المستخدم>.github.io/semantic-doc-search/`
+
+## هيكل المشروع
 
 ```
-app.py                 # Streamlit UI
-src/embeddings.py      # Cached HuggingFace embeddings
-src/document_store.py  # Upload, categorize, FAISS index/search
-uploads/               # Saved files
-data/                  # Metadata + FAISS index
-requirements.txt
+app.py                    # واجهة Streamlit العربية مع تسجيل الدخول
+src/auth.py               # بوابة تسجيل الدخول
+src/document_store.py     # رفع، تصنيف، فهرس FAISS
+src/embeddings.py         # نموذج التضمين متعدد اللغات
+docs/                     # نسخة ثابتة للنشر على GitHub Pages
+.github/workflows/pages.yml
+uploads/                  # الملفات المرفوعة (Streamlit)
+data/                     # البيانات الوصفية + فهرس FAISS
 ```
 
-## Notes
+## ملاحظات
 
-- Everything runs locally — no OpenAI or other paid API is required.
-- Deleting a document removes the file and rebuilds the FAISS index from remaining uploads.
+- **GitHub Pages** يستضيف النسخة الثابتة في `docs/` (تعمل بالكامل في المتصفح).
+- **Streamlit** يتطلب خادماً Python ويُستخدم للتطوير المحلي أو النشر على Streamlit Cloud.
+- لا يمكن إنشاء حساب GitHub نيابةً عنك — يجب إكمال التسجيل بنفسك.

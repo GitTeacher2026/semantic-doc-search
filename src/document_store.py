@@ -31,11 +31,13 @@ STOPWORDS = frozenset(
     """
     a an the and or but if in on at to for of with by from as is are was were be
     been being it this that these those i you he she we they them their our your
-    my me his her its not no yes do does did done have has had will would can
+    my me his his her its not no yes do does did done have has had will would can
     could should may might must shall about into over under again further then
     once here there when where why how all each few more most other some such
-    than too very just also only own same so than too very document file pdf txt
-    page pages text content
+    than too very just also only own same so document file pdf txt page pages text
+    content في من إلى عن على أن أو كان كانت هذا هذه ذلك تلك التي الذي الذين
+    ما لم لن إن أنه إذا ثم قد لقد حيث عند بين حتى بعد قبل كل بعض أي نحو عبر
+    حول خلال ضمن دون فوق تحت مستند ملف صفحة نص محتوى
     """.split()
 )
 
@@ -60,7 +62,7 @@ def save_metadata(docs: list[dict[str, Any]]) -> None:
 def _slugify(name: str) -> str:
     base = Path(name).stem
     cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "_", base).strip("_")
-    return cleaned[:80] or "document"
+    return cleaned[:80] or "مستند"
 
 
 def extract_text(path: Path) -> str:
@@ -73,17 +75,17 @@ def extract_text(path: Path) -> str:
         return "\n".join(parts).strip()
     if suffix in {".txt", ".md", ".text", ".log", ".csv"}:
         return path.read_text(encoding="utf-8", errors="ignore").strip()
-    raise ValueError(f"Unsupported file type: {suffix}")
+    raise ValueError(f"نوع الملف غير مدعوم: {suffix}")
 
 
 def _topic_label(text: str, filename: str) -> str:
     """Derive a short topic label from frequent content words."""
-    tokens = re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", text.lower())
+    tokens = re.findall(r"[\u0600-\u06FF]{3,}|[A-Za-z][A-Za-z0-9_-]{2,}", text.lower())
     counts = Counter(t for t in tokens if t not in STOPWORDS and not t.isdigit())
     if not counts:
-        return _slugify(filename).replace("_", " ").title() or "General"
+        return _slugify(filename).replace("_", " ") or "عام"
     top = [word for word, _ in counts.most_common(3)]
-    return " / ".join(w.title() for w in top)
+    return " / ".join(top)
 
 
 def _mean_embedding(embeddings: HuggingFaceEmbeddings, texts: list[str]) -> np.ndarray:
@@ -181,7 +183,7 @@ def ingest_file(
     ensure_dirs()
     suffix = Path(uploaded_name).suffix.lower()
     if suffix not in {".pdf", ".txt", ".md", ".text", ".log", ".csv"}:
-        raise ValueError("Only PDF and text files are supported.")
+        raise ValueError("يُدعم فقط ملفات PDF والنص.")
 
     doc_id = uuid.uuid4().hex[:12]
     safe_name = f"{doc_id}_{_slugify(uploaded_name)}{suffix}"
@@ -191,7 +193,7 @@ def ingest_file(
     text = extract_text(dest)
     if not text:
         dest.unlink(missing_ok=True)
-        raise ValueError("No extractable text found in that file.")
+        raise ValueError("لم يُعثر على نص قابل للاستخراج في هذا الملف.")
 
     existing = load_metadata()
     category = assign_category(text, uploaded_name, existing, embeddings)
@@ -300,7 +302,7 @@ def semantic_search(
             {
                 "content": doc.page_content,
                 "filename": meta.get("filename", "unknown"),
-                "category": meta.get("category", "Uncategorized"),
+                "category": meta.get("category", "غير مصنّف"),
                 "doc_id": meta.get("doc_id"),
                 "score": similarity,
                 "distance": float(score),
