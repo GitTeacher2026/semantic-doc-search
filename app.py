@@ -18,9 +18,9 @@ from src.document_store import (
     delete_document,
     ingest_file,
     load_metadata,
-    read_document_bytes,
     semantic_search,
 )
+from src.downloads import read_document_bytes
 from src.embeddings import EMBEDDING_MODEL_NAME, get_embeddings
 from src.explorer import build_explorer_tree
 from src.file_extractors import GROUP_ICONS, GROUP_LABELS_AR
