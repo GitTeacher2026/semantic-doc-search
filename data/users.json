@@ -10,9 +10,7 @@
       "role": "admin",
       "status": "approved",
       "createdAt": "2026-01-01T00:00:00.000Z"
-    }
-  ],
-  "pending": [
+    },
     {
       "id": "8b0478bd-546a-438b-ab64-d791d2e16eb5",
       "username": "ralf",
@@ -20,8 +18,11 @@
       "lastName": "ralf",
       "email": "jour@togor.com",
       "passwordHash": "65bp7xlFvrfF1AWhx09z49EQOllmxiOcNV+i+4X3VIE=",
-      "approvalToken": "d3e35567caba4e51b1fc89d4e37b0658",
-      "createdAt": "2026-08-29T10:21:31.487Z"
+      "role": "member",
+      "status": "approved",
+      "createdAt": "2026-08-29T10:21:31.487Z",
+      "approvedAt": "2026-08-29T10:21:41.670Z"
     }
-  ]
+  ],
+  "pending": []
 }
