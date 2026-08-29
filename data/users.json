@@ -34,9 +34,7 @@
       "status": "approved",
       "createdAt": "2026-08-29T10:44:23.558Z",
       "approvedAt": "2026-08-29T10:44:38.184Z"
-    }
-  ],
-  "pending": [
+    },
     {
       "id": "023c0bdd-8ce4-498b-bd0a-3d82451e660c",
       "username": "ewe",
@@ -44,8 +42,11 @@
       "lastName": "wewe",
       "email": "wew@ggfg.com",
       "passwordHash": "9ENAagl2rhR3KqP43Yg6LRQ3xQsdcdlAs56j4a/ruOI=",
-      "approvalToken": "c9906c96cc0546989c48124232270298",
-      "createdAt": "2026-08-29T10:49:33.317Z"
+      "role": "member",
+      "status": "approved",
+      "createdAt": "2026-08-29T10:49:33.317Z",
+      "approvedAt": "2026-08-29T10:49:41.457Z"
     }
-  ]
+  ],
+  "pending": []
 }
