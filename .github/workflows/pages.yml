@@ -44,8 +44,8 @@ jobs:
           const web3formsKey = process.env.WEB3FORMS_ACCESS_KEY || "";
           const googleClientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
           const geminiApiKey = (process.env.GEMINI_API_KEY || "").trim();
-          if (geminiApiKey && !/^AIza/.test(geminiApiKey)) {
-            console.warn("WARNING: GEMINI_API_KEY does not look like a Google AI Studio key (should start with AIzaSy)");
+          if (geminiApiKey && !/^(AIza|AQ\.)/.test(geminiApiKey)) {
+            console.warn("WARNING: GEMINI_API_KEY does not look like a Google AI Studio key (expected AIza… or AQ.…)");
           }
           const config = `/** Generated during deploy — do not edit manually. */
           export const GITHUB_OWNER = "amany-moh-sy";

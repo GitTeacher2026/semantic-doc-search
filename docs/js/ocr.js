@@ -13,7 +13,7 @@ const IMAGE_EXTENSIONS = new Set([
 
 const MAX_EDGE = 1600;
 const OCR_TIMEOUT_MS = 45_000;
-const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash"];
+const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
 
 const STAGE_LABELS = {
   prepare: "جارٍ تحضير الصورة",
@@ -41,8 +41,12 @@ export function formatOcrProgress({ stage, pct } = {}) {
   return label;
 }
 
-function isValidGeminiStudioKey(key) {
-  return /^AIza[0-9A-Za-z_-]{20,}$/.test(String(key || "").trim());
+function isValidGeminiKey(key) {
+  const trimmed = String(key || "").trim();
+  return (
+    /^AIza[0-9A-Za-z_-]{20,}$/.test(trimmed) ||
+    /^AQ\.[A-Za-z0-9_-]{20,}$/.test(trimmed)
+  );
 }
 
 async function resolveGeminiApiKey() {
@@ -82,17 +86,11 @@ function missingKeyMessage() {
   ].join(" ");
 }
 
-function invalidKeyMessage(key) {
-  const prefix = String(key || "").trim().slice(0, 8);
-  const prefixHint = prefix
-    ? `المفتاح المُنشَر حالياً يبدأ بـ «${prefix}…» — هذا ليس مفتاح AI Studio.`
-    : "المفتاح المُنشَر غير صالح.";
+function invalidKeyMessage() {
   return [
     "مفتاح Gemini غير صالح.",
-    prefixHint,
-    "يجب أن يكون من Google AI Studio ويبدأ بـ AIzaSy",
-    "لا تستخدم Client Secret ولا OAuth token (مثل AQ.) ولا مفتاح Vertex.",
-    "أنشئ مفتاحاً جديداً: https://aistudio.google.com/apikey",
+    "أنشئ مفتاحاً من Google AI Studio: https://aistudio.google.com/apikey",
+    "المفاتيح الجديدة تبدأ بـ AQ. والقديمة بـ AIzaSy — كلاهما مقبول.",
     "ثم حدّث GEMINI_API_KEY في GitHub Secrets وأعد تشغيل «Deploy GitHub Pages».",
   ].join(" ");
 }
@@ -181,8 +179,13 @@ function extractGeminiText(payload) {
 
 function formatGeminiError(status, payload, apiKey) {
   const message = payload?.error?.message || `Google AI (${status})`;
-  if (status === 401 || status === 403 || /API key/i.test(message)) {
-    return invalidKeyMessage(apiKey);
+  if (status === 401 || status === 403) {
+    if (!isValidGeminiKey(apiKey)) {
+      return invalidKeyMessage();
+    }
+    if (/API key/i.test(message)) {
+      return `رفض Google AI المفتاح: ${message}`;
+    }
   }
   if (status === 429) {
     return "تم تجاوز حد استخدام Google AI. حاول بعد قليل.";
@@ -191,10 +194,13 @@ function formatGeminiError(status, payload, apiKey) {
 }
 
 async function callGeminiVision(apiKey, base64, mimeType, model) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
     body: JSON.stringify({
       contents: [
         {
@@ -226,8 +232,8 @@ async function extractWithGemini(base64, mimeType, onProgress) {
   if (!apiKey) {
     throw new Error(missingKeyMessage());
   }
-  if (!isValidGeminiStudioKey(apiKey)) {
-    throw new Error(invalidKeyMessage(apiKey));
+  if (!isValidGeminiKey(apiKey)) {
+    throw new Error(invalidKeyMessage());
   }
 
   onProgress?.({ stage: "upload", pct: 20 });

@@ -84,13 +84,10 @@ export DOCSHELF_PASSWORD=your_password
 بدلاً من OCR المحلي البطيء، تُرسل الصور إلى **Google Gemini Vision** (نفس تقنية Google Lens) لاستخراج النص بسرعة.
 
 1. افتح [Google AI Studio](https://aistudio.google.com/apikey) وسجّل الدخول بحساب Google
-2. اضغط **Create API key** — المفتاح الصحيح يبدأ بـ **`AIzaSy`**
+2. اضغط **Create API key** — المفاتيح الجديدة تبدأ بـ **`AQ.`** (المفاتيح القديمة بـ **`AIzaSy`**)
 3. في GitHub: **Settings** → **Secrets and variables** → **Actions** → أضف سراً باسم **`GEMINI_API_KEY`** (بالضبط)
-4. **لا تستخدم** Client Secret ولا OAuth token (مثل مفتاح يبدأ بـ `AQ.`) — فقط مفتاح AI Studio (`AIzaSy…`)
-5. أعد تشغيل workflow **Deploy GitHub Pages** (Actions → Re-run all jobs) — إضافة السر وحده لا يكفي
-6. حدّث الموقع تحديثاً قوياً: **Ctrl+Shift+R**
-
-إذا ظهر خطأ «مفتاح غير صالح» رغم إضافة السر: المفتاح المُنشَر على الموقع ما زال خاطئاً. أنشئ مفتاحاً جديداً من الرابط أعلاه (يبدأ بـ `AIzaSy`) واستبدل السر ثم أعد النشر.
+4. أعد تشغيل workflow **Deploy GitHub Pages** (Actions → Re-run all jobs) — إضافة السر وحده لا يكفي
+5. حدّث الموقع تحديثاً قوياً: **Ctrl+Shift+R**
 
 بدون `GEMINI_API_KEY` لن يعمل رفع الصور (باقي أنواع الملفات تعمل طبيعياً).
 
