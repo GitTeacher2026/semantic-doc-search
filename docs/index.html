@@ -248,17 +248,33 @@
       <main class="grid">
         <section class="panel">
           <h2>رفع الملفات</h2>
-          <div id="drive-connect-panel" class="drive-connect-panel hidden">
-            <div class="drive-connect-info">
-              <span class="drive-connect-icon" aria-hidden="true">☁️</span>
-              <div>
-                <strong>Google Drive</strong>
-                <p id="drive-status-text" class="muted">غير متصل — سجّل الدخول قبل رفع الملفات.</p>
+          <div id="storage-settings-panel" class="storage-settings-panel hidden">
+            <div id="storage-mode-picker" class="storage-mode-picker hidden">
+              <span class="storage-mode-label">مكان التخزين</span>
+              <div class="storage-mode-options" role="radiogroup" aria-label="مكان التخزين">
+                <label class="storage-mode-option">
+                  <input type="radio" name="storage-mode" value="github" />
+                  <span>GitHub</span>
+                </label>
+                <label class="storage-mode-option">
+                  <input type="radio" name="storage-mode" value="drive" />
+                  <span>Google Drive</span>
+                </label>
               </div>
             </div>
-            <div class="drive-connect-actions">
-              <button id="drive-login-btn" class="btn primary small" type="button">تسجيل الدخول إلى Google Drive</button>
-              <button id="drive-logout-btn" class="btn ghost small hidden" type="button">قطع الاتصال</button>
+            <p id="storage-mode-status" class="storage-mode-status muted"></p>
+            <div id="drive-connect-panel" class="drive-connect-panel hidden">
+              <div class="drive-connect-info">
+                <span class="drive-connect-icon" aria-hidden="true">☁️</span>
+                <div>
+                  <strong>Google Drive</strong>
+                  <p id="drive-status-text" class="muted">غير متصل — سجّل الدخول قبل رفع الملفات.</p>
+                </div>
+              </div>
+              <div class="drive-connect-actions">
+                <button id="drive-login-btn" class="btn primary small" type="button">تسجيل الدخول إلى Google Drive</button>
+                <button id="drive-logout-btn" class="btn ghost small hidden" type="button">قطع الاتصال</button>
+              </div>
             </div>
           </div>
           <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="منطقة رفع الملفات">
@@ -405,6 +421,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/main.js?v=20260830-img"></script>
+  <script type="module" src="js/main.js?v=20260830-storage"></script>
 </body>
 </html>
