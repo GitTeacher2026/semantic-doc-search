@@ -10,3 +10,4 @@ export const SITE_URL = "https://amany-moh-sy.github.io/semantic-doc-search/";
 export const VAULT_PASSWORD = "docshelf2024";
 export const WEB3FORMS_ACCESS_KEY = "";
 export const GOOGLE_CLIENT_ID = "";
+export const GEMINI_API_KEY = "";

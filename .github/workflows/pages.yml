@@ -35,6 +35,7 @@ jobs:
           DOCSHELF_VAULT_PASSWORD: ${{ secrets.DOCSHELF_VAULT_PASSWORD }}
           WEB3FORMS_ACCESS_KEY: ${{ secrets.WEB3FORMS_ACCESS_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           node <<'NODE'
           const fs = require("fs");
@@ -42,6 +43,7 @@ jobs:
           const vaultPassword = process.env.DOCSHELF_VAULT_PASSWORD || "docshelf2024";
           const web3formsKey = process.env.WEB3FORMS_ACCESS_KEY || "";
           const googleClientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
+          const geminiApiKey = (process.env.GEMINI_API_KEY || "").trim();
           const config = `/** Generated during deploy — do not edit manually. */
           export const GITHUB_OWNER = "amany-moh-sy";
           export const GITHUB_REPO = "semantic-doc-search";
@@ -54,6 +56,7 @@ jobs:
           export const VAULT_PASSWORD = ${JSON.stringify(vaultPassword)};
           export const WEB3FORMS_ACCESS_KEY = ${JSON.stringify(web3formsKey)};
           export const GOOGLE_CLIENT_ID = ${JSON.stringify(googleClientId)};
+          export const GEMINI_API_KEY = ${JSON.stringify(geminiApiKey)};
           `;
           fs.writeFileSync("docs/js/config.js", config);
           NODE

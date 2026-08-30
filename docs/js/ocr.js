@@ -1,3 +1,5 @@
+import { GEMINI_API_KEY } from "./config.js";
+
 const IMAGE_EXTENSIONS = new Set([
   ".jpg",
   ".jpeg",
@@ -9,24 +11,19 @@ const IMAGE_EXTENSIONS = new Set([
   ".tiff",
 ]);
 
-const MAX_EDGE = 1200;
-const OCR_TIMEOUT_MS = 120000;
-
-const TESSERACT_CDN = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1";
-const TESSERACT_CORE_CDN = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.0";
-
-const TESS_OPTS = {
-  workerPath: `${TESSERACT_CDN}/dist/worker.min.js`,
-  corePath: `${TESSERACT_CORE_CDN}/tesseract-core.wasm.js`,
-  langPath: "https://tessdata.projectnaptha.com/4.0.0_best",
-};
+const MAX_EDGE = 1600;
+const OCR_TIMEOUT_MS = 45_000;
+const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash"];
 
 const STAGE_LABELS = {
   prepare: "جارٍ تحضير الصورة",
-  load: "جارٍ تحميل محرك OCR",
-  language: "جارٍ تحميل بيانات اللغة",
-  ocr: "جارٍ قراءة النص من الصورة",
+  upload: "جارٍ إرسال الصورة لـ Google AI",
+  ocr: "جارٍ استخراج النص من الصورة",
 };
+
+const OCR_PROMPT =
+  "Extract every visible word from this image exactly as shown (like Google Lens). " +
+  "Return raw text only in reading order. Support Arabic and English. No commentary.";
 
 export function isImageFile(filename) {
   const dot = String(filename || "").lastIndexOf(".");
@@ -36,35 +33,21 @@ export function isImageFile(filename) {
 
 export function formatOcrProgress({ stage, pct } = {}) {
   const label = STAGE_LABELS[stage] || "جارٍ معالجة الصورة";
-  if (stage === "ocr" || stage === "language" || stage === "load") {
-    return `${label}: ${pct ?? 0}%`;
+  if (stage === "ocr" || stage === "upload") {
+    return `${label}${typeof pct === "number" ? `: ${pct}%` : "…"}`;
   }
   return label;
 }
 
-async function loadRecognize() {
-  const mod = await import(`${TESSERACT_CDN}/+esm`);
-  const recognize = mod.recognize ?? mod.default?.recognize;
-  if (typeof recognize !== "function") {
-    throw new Error("تعذّر تحميل محرك OCR.");
-  }
-  return recognize;
-}
-
 async function prepareImageBlob(blob) {
   if (!globalThis.createImageBitmap || !globalThis.document) {
-    return blob;
+    return { blob, mimeType: blob.type || "image/jpeg" };
   }
 
   try {
     const bitmap = await createImageBitmap(blob);
     const longest = Math.max(bitmap.width, bitmap.height);
-    if (longest <= MAX_EDGE) {
-      bitmap.close();
-      return blob;
-    }
-
-    const scale = MAX_EDGE / longest;
+    const scale = longest > MAX_EDGE ? MAX_EDGE / longest : 1;
     const width = Math.max(1, Math.round(bitmap.width * scale));
     const height = Math.max(1, Math.round(bitmap.height * scale));
     const canvas = document.createElement("canvas");
@@ -73,7 +56,7 @@ async function prepareImageBlob(blob) {
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) {
       bitmap.close();
-      return blob;
+      return { blob, mimeType: blob.type || "image/jpeg" };
     }
 
     ctx.fillStyle = "#ffffff";
@@ -81,17 +64,28 @@ async function prepareImageBlob(blob) {
     ctx.drawImage(bitmap, 0, 0, width, height);
     bitmap.close();
 
-    const resized = await new Promise((resolve, reject) => {
+    const prepared = await new Promise((resolve, reject) => {
       canvas.toBlob(
         (next) => (next ? resolve(next) : reject(new Error("تعذّر تصغير الصورة."))),
         "image/jpeg",
-        0.9
+        0.92
       );
     });
-    return resized;
+    return { blob: prepared, mimeType: "image/jpeg" };
   } catch {
-    return blob;
+    return { blob, mimeType: blob.type || "image/jpeg" };
   }
+}
+
+async function blobToBase64(blob) {
+  const buffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
 }
 
 function withTimeout(promise, ms, message) {
@@ -112,58 +106,103 @@ function withTimeout(promise, ms, message) {
 
 function normalizeOcrText(text) {
   return String(text || "")
-    .replace(/\s+/g, " ")
-    .replace(/[^\S\u0600-\u06FFa-zA-Z0-9.,،؛:!?؟()\-+/]+/g, " ")
+    .replace(/\r/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
     .trim();
 }
 
-function buildLogger(onProgress) {
-  return (message) => {
-    if (!onProgress || !message?.status) return;
-    const pct = Math.round((message.progress || 0) * 100);
-    if (message.status === "loading tesseract core" || message.status === "initializing tesseract") {
-      onProgress({ stage: "load", pct });
-      return;
-    }
-    if (message.status === "loading language traineddata") {
-      onProgress({ stage: "language", pct });
-      return;
-    }
-    if (message.status === "recognizing text") {
-      onProgress({ stage: "ocr", pct });
-    }
-  };
+function extractGeminiText(payload) {
+  const parts = payload?.candidates?.[0]?.content?.parts || [];
+  return parts
+    .map((part) => part.text || "")
+    .join("\n")
+    .trim();
 }
 
-async function runRecognize(recognize, blob, lang, onProgress) {
-  return withTimeout(
-    recognize(blob, lang, {
-      ...TESS_OPTS,
-      logger: buildLogger(onProgress),
+function formatGeminiError(status, payload) {
+  const message = payload?.error?.message || `Google AI (${status})`;
+  if (status === 403 || message.includes("API key")) {
+    return "مفتاح Gemini غير صالح. أضف GEMINI_API_KEY في GitHub Secrets ثم أعد النشر.";
+  }
+  if (status === 429) {
+    return "تم تجاوز حد استخدام Google AI. حاول بعد قليل.";
+  }
+  return message;
+}
+
+async function callGeminiVision(apiKey, base64, mimeType, model) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [
+            { text: OCR_PROMPT },
+            { inline_data: { mime_type: mimeType, data: base64 } },
+          ],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 8192,
+      },
     }),
-    OCR_TIMEOUT_MS,
-    "استغرق استخراج النص وقتاً طويلاً. جرّب صورة أصغر أو أوضح."
-  );
+  });
+
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const error = new Error(formatGeminiError(res.status, payload));
+    error.status = res.status;
+    throw error;
+  }
+
+  return extractGeminiText(payload);
+}
+
+async function extractWithGemini(base64, mimeType, onProgress) {
+  const apiKey = String(GEMINI_API_KEY || "").trim();
+  if (!apiKey) {
+    throw new Error(
+      "استخراج النص من الصور يتطلب GEMINI_API_KEY. أنشئ مفتاحاً من Google AI Studio وأضفه في GitHub Secrets."
+    );
+  }
+
+  onProgress?.({ stage: "upload", pct: 20 });
+
+  let lastError = null;
+  for (const model of GEMINI_MODELS) {
+    try {
+      onProgress?.({ stage: "ocr", pct: 40 });
+      const text = await withTimeout(
+        callGeminiVision(apiKey, base64, mimeType, model),
+        OCR_TIMEOUT_MS,
+        "استغرق استخراج النص وقتاً طويلاً. جرّب صورة أصغر أو أوضح."
+      );
+      onProgress?.({ stage: "ocr", pct: 100 });
+      return text;
+    } catch (error) {
+      lastError = error;
+      if (error.status === 404) continue;
+      throw error;
+    }
+  }
+
+  throw lastError || new Error("تعذّر استخراج النص من الصورة.");
 }
 
 export async function extractImageText(file, onProgress) {
   const source = file instanceof Blob ? file : new Blob([file]);
   onProgress?.({ stage: "prepare", pct: 0 });
 
-  const prepared = await prepareImageBlob(source);
-  const recognize = await loadRecognize();
+  const { blob, mimeType } = await prepareImageBlob(source);
+  const base64 = await blobToBase64(blob);
+  const text = normalizeOcrText(await extractWithGemini(base64, mimeType, onProgress));
 
-  onProgress?.({ stage: "load", pct: 0 });
-  let result = await runRecognize(recognize, prepared, "ara", onProgress);
-  let text = normalizeOcrText(result?.data?.text);
-
-  if (text.length < 2) {
-    onProgress?.({ stage: "language", pct: 0 });
-    result = await runRecognize(recognize, prepared, "eng", onProgress);
-    text = normalizeOcrText(result?.data?.text);
-  }
-
-  if (!text) {
+  if (!text || text.length < 2) {
     throw new Error("لم يُعثر على نص في الصورة. جرّب صورة أوضح، إضاءة أفضل، أو نص أكبر.");
   }
 
