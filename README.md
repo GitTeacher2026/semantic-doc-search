@@ -6,7 +6,7 @@
 
 - صفحة تسجيل دخول قبل الوصول إلى أي وظيفة
 - واجهة عربية كاملة مع دعم RTL
-- رفع ملفات PDF ونصية وOffice (Word وExcel وPowerPoint) **والصور** (OCR عربي + إنجليزي)
+- رفع ملفات PDF ونصية وOffice (Word وExcel وPowerPoint) **والصور** (استخراج نص عبر Google AI — مثل Google Lens)
 - دعم أسماء الملفات العربية
 - مستكشف ملفات منظم حسب التصنيف ونوع الملف
 - تصنيف تلقائي حسب تداخل الكلمات المفتاحية
@@ -78,6 +78,20 @@ export DOCSHELF_PASSWORD=your_password
 ```
 
 > **ملاحظة:** إذا لم يُضبط `GOOGLE_CLIENT_ID`، يعود التطبيق إلى التخزين المحلي أو GitHub (إن وُجد `DOCSHELF_GITHUB_TOKEN`).
+
+### استخراج النص من الصور (Google AI / Gemini)
+
+بدلاً من OCR المحلي البطيء، تُرسل الصور إلى **Google Gemini Vision** (نفس تقنية Google Lens) لاستخراج النص بسرعة.
+
+1. افتح [Google AI Studio](https://aistudio.google.com/apikey) وسجّل الدخول بحساب Google
+2. أنشئ **API key**
+3. في GitHub: **Settings** → **Secrets** → **Actions** → أضف سراً باسم `GEMINI_API_KEY`
+4. (موصى به) من Google Cloud قيّد المفتاح على:
+   - API: **Generative Language API**
+   - HTTP referrers: `https://amany-moh-sy.github.io/*`
+5. أعد نشر GitHub Pages
+
+بدون `GEMINI_API_KEY` لن يعمل رفع الصور (باقي أنواع الملفات تعمل طبيعياً).
 
 ## التشغيل المحلي (Streamlit)
 
