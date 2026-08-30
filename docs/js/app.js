@@ -4,7 +4,7 @@ import {
   allChunksFromDocuments,
 } from "./bm25-search.js";
 import { bindSearchResults, renderSearchResults } from "./search-results.js";
-import { extractImageText, isImageFile } from "./ocr.js";
+import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js";
 import {
   EXT_GROUPS,
   GROUP_ICONS,
@@ -906,9 +906,9 @@ async function ingestFiles(files) {
         setStatus(`جارٍ استخراج النص من الصورة (OCR): ${file.name}…`);
       }
       const text = await extractText(file, arrayBuffer, {
-        onOcrProgress: (pct) => {
+        onOcrProgress: (progress) => {
           if (isImageFile(file.name)) {
-            setStatus(`جارٍ استخراج النص من الصورة: ${pct}% — ${file.name}`);
+            setStatus(`${formatOcrProgress(progress)} — ${file.name}`);
           }
         },
       });
