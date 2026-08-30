@@ -11,7 +11,7 @@ const K1 = 1.5;
 const B = 0.75;
 const CATEGORY_OVERLAP_THRESHOLD = 0.08;
 
-export const BROAD_TOPICS = [
+const BROAD_TOPICS = [
   {
     label: "إدارة ومشاريع",
     keywords: ["مشروع", "إداري", "إدارة", "تقرير", "خطة", "اجتماع", "موظف", "project", "management", "plan"],

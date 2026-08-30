@@ -1,11 +1,9 @@
 import {
+  BM25Index,
+  assignCategory,
   allChunksFromDocuments,
 } from "./bm25-search.js";
-import { classifyDocument, previewText } from "./engines/classifiers.js";
-import { chunkDocument } from "./engines/chunkers.js";
-import { runDocumentSearch } from "./engines/search.js";
-import { SEARCH_ENGINES } from "./engines/registry.js";
-import { bindSettingsForm, renderSettingsForm } from "./engines/settings-ui.js";
+import { bindSearchResults, renderSearchResults } from "./search-results.js";
 import {
   EXT_GROUPS,
   GROUP_ICONS,
@@ -49,6 +47,9 @@ import {
   TRASH_RETENTION_DAYS,
 } from "./trash.js";
 
+const CHUNK_SIZE = 800;
+const CHUNK_OVERLAP = 120;
+
 let pendingFiles = [];
 let state = normalizeState({});
 let sessionPassword = "";
@@ -80,18 +81,12 @@ const libraryList = document.getElementById("library-list");
 const trashMeta = document.getElementById("trash-meta");
 const trashList = document.getElementById("trash-list");
 const libraryPage = document.getElementById("library-page");
-const settingsPage = document.getElementById("settings-page");
 const trashPage = document.getElementById("trash-page");
 const navLibraryBtn = document.getElementById("nav-library-btn");
-const navSettingsBtn = document.getElementById("nav-settings-btn");
 const navTrashBtn = document.getElementById("nav-trash-btn");
-const settingsBackBtn = document.getElementById("settings-back-btn");
-const settingsFormRoot = document.getElementById("settings-form-root");
 const trashBackBtn = document.getElementById("trash-back-btn");
 const trashCountBadge = document.getElementById("trash-count-badge");
 const categoryFilter = document.getElementById("category-filter");
-const searchEngineSelect = document.getElementById("search-engine-select");
-const searchEngineDesc = document.getElementById("search-engine-desc");
 const searchQuery = document.getElementById("search-query");
 const searchBtn = document.getElementById("search-btn");
 const searchResults = document.getElementById("search-results");
@@ -129,7 +124,6 @@ async function hydrateDocuments(password) {
   setStatus("جارٍ تحميل المستندات…");
   try {
     state = normalizeState(await loadDocuments(password));
-    syncSearchEngineSelect();
     renderLibrary();
     renderTrash();
     setStatus("", false);
@@ -139,32 +133,6 @@ async function hydrateDocuments(password) {
   } finally {
     isHydrating = false;
   }
-}
-
-function syncSearchEngineSelect() {
-  if (!searchEngineSelect) return;
-  const current = state.settings?.searchEngine || "bm25";
-  searchEngineSelect.innerHTML = Object.values(SEARCH_ENGINES)
-    .map(
-      (engine) =>
-        `<option value="${engine.id}" ${engine.id === current ? "selected" : ""}>${engine.label}</option>`
-    )
-    .join("");
-  if (searchEngineDesc) {
-    searchEngineDesc.textContent = SEARCH_ENGINES[current]?.description || "";
-  }
-}
-
-async function updateSearchEngine(engineId) {
-  if (!SEARCH_ENGINES[engineId]) return;
-  state = {
-    ...state,
-    settings: { ...state.settings, searchEngine: engineId },
-  };
-  if (searchEngineDesc) {
-    searchEngineDesc.textContent = SEARCH_ENGINES[engineId].description;
-  }
-  await persistState();
 }
 
 async function persistState() {
@@ -330,21 +298,15 @@ async function loadJsZip() {
 }
 
 function chunkText(text) {
-  return chunkDocument(state.settings?.chunkingEngine || "fixed", text);
-}
-
-function initSettingsPage() {
-  if (!settingsFormRoot) return;
-  settingsFormRoot.innerHTML = renderSettingsForm(state.settings);
-  bindSettingsForm(settingsFormRoot, {
-    getSettings: () => state.settings,
-    onSave: async (nextSettings) => {
-      state = { ...state, settings: nextSettings };
-      await persistState();
-      syncSearchEngineSelect();
-    },
-    onStatus: setStatus,
-  });
+  const chunks = [];
+  let start = 0;
+  while (start < text.length) {
+    const end = Math.min(text.length, start + CHUNK_SIZE);
+    chunks.push(text.slice(start, end));
+    if (end === text.length) break;
+    start = Math.max(end - CHUNK_OVERLAP, start + 1);
+  }
+  return chunks.length ? chunks : [text || ""];
 }
 
 function extractDocxXmlText(xml) {
@@ -545,17 +507,12 @@ function buildExplorerTree(documents) {
 }
 
 function switchAppPage(page) {
-  const isLibrary = page === "library";
-  const isSettings = page === "settings";
   const isTrash = page === "trash";
-  libraryPage?.classList.toggle("hidden", !isLibrary);
-  settingsPage?.classList.toggle("hidden", !isSettings);
+  libraryPage?.classList.toggle("hidden", isTrash);
   trashPage?.classList.toggle("hidden", !isTrash);
-  navLibraryBtn?.classList.toggle("active", isLibrary);
-  navSettingsBtn?.classList.toggle("active", isSettings);
+  navLibraryBtn?.classList.toggle("active", !isTrash);
   navTrashBtn?.classList.toggle("active", isTrash);
   if (isTrash) renderTrash();
-  if (isSettings) initSettingsPage();
 }
 
 function updateTrashBadge() {
@@ -570,9 +527,7 @@ function updateTrashBadge() {
 }
 
 navLibraryBtn?.addEventListener("click", () => switchAppPage("library"));
-navSettingsBtn?.addEventListener("click", () => switchAppPage("settings"));
 navTrashBtn?.addEventListener("click", () => switchAppPage("trash"));
-settingsBackBtn?.addEventListener("click", () => switchAppPage("library"));
 trashBackBtn?.addEventListener("click", () => switchAppPage("library"));
 
 function summarizeCategories(documents) {
@@ -615,7 +570,6 @@ function renderTreeFile(doc) {
 function renderLibrary() {
   const docs = state.documents;
   const categories = summarizeCategories(docs);
-  syncSearchEngineSelect();
 
   categoryFilter.innerHTML = `<option value="">جميع التصنيفات</option>${categories
     .map(([name]) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
@@ -744,21 +698,6 @@ function renderTrash() {
       }
     });
   });
-}
-
-function highlightText(text, query) {
-  const escaped = escapeHtml(String(text || ""));
-  const safeQuery = String(query || "").trim();
-  if (!safeQuery) return escaped;
-  const tokens = [...new Set(safeQuery.split(/\s+/).filter((token) => token.length >= 2))]
-    .sort((a, b) => b.length - a.length);
-  let result = escaped;
-  for (const token of tokens) {
-    const escToken = escapeHtml(token);
-    const pattern = new RegExp(escToken.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
-    result = result.replace(pattern, '<mark class="query-hit">$&</mark>');
-  }
-  return result;
 }
 
 function arrayBufferToBase64(buffer) {
@@ -960,12 +899,7 @@ async function ingestFiles(files) {
       const arrayBuffer = await file.arrayBuffer();
       const text = await extractText(file, arrayBuffer);
       if (!text) throw new Error(`لم يُعثر على نص في ${file.name}`);
-      const category = classifyDocument(
-        state.settings.classificationEngine,
-        text,
-        file.name,
-        state.documents
-      );
+      const category = assignCategory(text, file.name, state.documents);
       const chunks = chunkText(text).map((content) => ({ content }));
       let driveFileId = null;
       if (isUsingDriveStorage()) {
@@ -983,7 +917,7 @@ async function ingestFiles(files) {
         fileGroup: fileGroup(file.name),
         extension: fileExtension(file.name),
         charCount: text.length,
-        preview: previewText(text),
+        preview: text.replace(/\s+/g, " ").slice(0, 280),
         fileData: driveFileId ? null : arrayBufferToBase64(arrayBuffer),
         driveFileId,
         chunks,
@@ -1012,63 +946,30 @@ async function ingestFiles(files) {
   }
 }
 
-async function runSearch() {
+function runSearch() {
   const query = searchQuery.value.trim();
   if (!query) {
-    searchResults.innerHTML = `<p class="muted">أدخل عبارة البحث.</p>`;
+    searchResults.innerHTML = `<p class="muted search-empty">أدخل عبارة البحث.</p>`;
     return;
   }
   const searchable = accessibleDocuments(state.documents);
   if (!searchable.length) {
-    searchResults.innerHTML = `<p class="muted">ارفع مستندات أو افتح الملفات المقفلة قبل البحث.</p>`;
+    searchResults.innerHTML = `<p class="muted search-empty">ارفع مستندات أو افتح الملفات المقفلة قبل البحث.</p>`;
     return;
   }
 
   searchBtn.disabled = true;
   const category = categoryFilter.value || null;
   const k = Number(resultCount.value);
-  const chunks = allChunksFromDocuments(searchable);
+  const index = new BM25Index(allChunksFromDocuments(searchable));
+  const top = index.search(query, k, category);
+  const docMeta = new Map(
+    searchable.map((doc) => [doc.id, { fileGroup: doc.fileGroup, extension: doc.extension }])
+  );
 
-  try {
-    const top = await runDocumentSearch({
-      engineId: state.settings.searchEngine,
-      query,
-      chunks,
-      k,
-      category,
-      onStatus: setStatus,
-    });
-
-    if (!top.length) {
-      searchResults.innerHTML = `<p class="muted">لم يُعثر على مقاطع مطابقة. جرّب عبارة أوسع أو محرك بحث آخر.</p>`;
-    } else {
-      searchResults.innerHTML = top
-        .map(
-          (hit) => `
-        <article class="hit">
-          <div class="hit-header">
-            <div>
-              <strong>${escapeHtml(hit.filename)}</strong>
-              <span class="chip">${escapeHtml(hit.category)}</span>
-              <span class="score">${Math.round(hit.score * 100)}% تطابق</span>
-            </div>
-            <button class="btn ghost small search-download-btn" data-id="${escapeHtml(hit.docId)}" type="button">تنزيل</button>
-          </div>
-          <p>${highlightText(hit.content, query)}</p>
-        </article>`
-        )
-        .join("");
-
-      searchResults.querySelectorAll(".search-download-btn").forEach((btn) => {
-        btn.addEventListener("click", () => handleDownload(btn.dataset.id));
-      });
-    }
-  } catch (error) {
-    searchResults.innerHTML = `<p class="muted">تعذّر البحث: ${escapeHtml(error.message)}</p>`;
-  } finally {
-    searchBtn.disabled = false;
-    setStatus("", false);
-  }
+  searchResults.innerHTML = renderSearchResults(top, query, docMeta);
+  bindSearchResults(searchResults, { onDownload: handleDownload });
+  searchBtn.disabled = false;
 }
 
 logoutBtn.addEventListener("click", () => {
@@ -1086,9 +987,6 @@ ingestBtn.addEventListener("click", () => {
 });
 
 searchBtn.addEventListener("click", runSearch);
-searchEngineSelect?.addEventListener("change", () => {
-  updateSearchEngine(searchEngineSelect.value);
-});
 resultCount.addEventListener("input", () => {
   resultCountLabel.textContent = resultCount.value;
 });
