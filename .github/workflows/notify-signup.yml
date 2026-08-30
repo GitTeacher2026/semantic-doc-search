@@ -28,9 +28,14 @@ jobs:
       HAS_RESEND: ${{ secrets.RESEND_API_KEY != '' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
 
       - name: Detect new pending signups
         run: |
@@ -119,7 +124,7 @@ jobs:
 
       - name: Send via Gmail SMTP
         if: steps.check.outputs.has_email == 'true' && env.HAS_MAIL == 'true'
-        uses: dawidd6/action-send-mail@v3
+        uses: dawidd6/action-send-mail@v4
         with:
           server_address: smtp.gmail.com
           server_port: 465
