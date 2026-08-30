@@ -9,7 +9,9 @@
       "passwordHash": "0CyXaA8SKulgVIMYzjZfnQytpjWb9G+qNPFQiaCmkLY=",
       "role": "admin",
       "status": "approved",
-      "createdAt": "2026-01-01T00:00:00.000Z"
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "resetToken": "fcef3f35933b420ea43668a12fe3b8e6",
+      "resetExpiresAt": "2026-08-30T02:07:41.352Z"
     }
   ],
   "pending": []
