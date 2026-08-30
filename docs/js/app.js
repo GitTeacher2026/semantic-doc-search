@@ -24,9 +24,12 @@ import {
 import {
   clearStorageSession,
   isCloudSyncEnabled,
+  isUsingDriveStorage,
   loadDocuments,
   saveDocuments,
 } from "./storage.js";
+import { clearDriveSession, ensureDriveAccess } from "./drive-auth.js";
+import { uploadDocumentFile, downloadDriveFile } from "./drive-storage.js";
 import {
   approvePendingUser,
   rejectPendingUser,
@@ -725,19 +728,30 @@ function findDocumentById(id) {
   return state.documents.find((doc) => doc.id === id);
 }
 
-function downloadDocument(doc) {
-  if (!doc.fileData) {
-    setStatus("تعذّر التنزيل: الملف غير مخزّن. أعد رفع الملف.", true);
-    return;
+async function downloadDocument(doc) {
+  try {
+    let bytes;
+    if (doc.fileData) {
+      bytes = Uint8Array.from(atob(doc.fileData), (char) => char.charCodeAt(0));
+    } else if (doc.driveFileId && isUsingDriveStorage()) {
+      setStatus("جارٍ تنزيل الملف من Google Drive…");
+      const buffer = await downloadDriveFile(doc.driveFileId);
+      bytes = new Uint8Array(buffer);
+      setStatus("", false);
+    } else {
+      setStatus("تعذّر التنزيل: الملف غير مخزّن. أعد رفع الملف.", true);
+      return;
+    }
+    const blob = new Blob([bytes]);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = doc.filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    setStatus(error.message, true);
   }
-  const bytes = Uint8Array.from(atob(doc.fileData), (char) => char.charCodeAt(0));
-  const blob = new Blob([bytes]);
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = doc.filename;
-  link.click();
-  URL.revokeObjectURL(url);
 }
 
 function handleDownload(docId) {
@@ -901,6 +915,15 @@ async function ingestFiles(files) {
       if (!text) throw new Error(`لم يُعثر على نص في ${file.name}`);
       const category = assignCategory(text, file.name, state.documents);
       const chunks = chunkText(text).map((content) => ({ content }));
+      let driveFileId = null;
+      if (isUsingDriveStorage()) {
+        await ensureDriveAccess();
+        driveFileId = await uploadDocumentFile(
+          category,
+          file.name,
+          new Blob([arrayBuffer], { type: file.type || "application/octet-stream" })
+        );
+      }
       state.documents.push({
         id: crypto.randomUUID(),
         filename: file.name,
@@ -909,7 +932,8 @@ async function ingestFiles(files) {
         extension: fileExtension(file.name),
         charCount: text.length,
         preview: text.replace(/\s+/g, " ").slice(0, 280),
-        fileData: arrayBufferToBase64(arrayBuffer),
+        fileData: driveFileId ? null : arrayBufferToBase64(arrayBuffer),
+        driveFileId,
         chunks,
         isLocked: false,
         lockHash: null,
@@ -918,9 +942,11 @@ async function ingestFiles(files) {
     await persistState();
     renderLibrary();
     setStatus(
-      isCloudSyncEnabled()
-        ? "اكتملت الفهرسة وحُفظت في التخزين السحابي."
-        : "اكتملت الفهرسة.",
+      isUsingDriveStorage()
+        ? "اكتملت الفهرسة وحُفظت في Google Drive حسب التصنيف."
+        : isCloudSyncEnabled()
+          ? "اكتملت الفهرسة وحُفظت في التخزين السحابي."
+          : "اكتملت الفهرسة.",
       true
     );
     setTimeout(() => setStatus("", false), 2500);
@@ -984,6 +1010,7 @@ logoutBtn.addEventListener("click", () => {
   state = normalizeState({});
   currentUser = null;
   clearStorageSession();
+  clearDriveSession();
   clearUnlockSession();
   authApi?.logout?.();
 });
@@ -1030,6 +1057,10 @@ export async function startApp({ user, auth }) {
   });
 
   try {
+    if (isUsingDriveStorage()) {
+      setStatus("جارٍ الاتصال بـ Google Drive…");
+      await ensureDriveAccess();
+    }
     await hydrateDocuments(sessionPassword);
     showView();
   } catch (error) {

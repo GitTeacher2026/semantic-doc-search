@@ -77,10 +77,10 @@ def extract_text(path: Path) -> str:
 def _topic_label(text: str, filename: str) -> str:
     tokens = re.findall(r"[\u0600-\u06FF]{3,}|[A-Za-z][A-Za-z0-9_-]{2,}", text.lower())
     counts = Counter(t for t in tokens if t not in STOPWORDS and not t.isdigit())
-    if not counts:
-        return _slugify(filename).replace("_", " ") or "عام"
-    top = [word for word, _ in counts.most_common(3)]
-    return " / ".join(top)
+    if counts:
+        word, _ = counts.most_common(1)[0]
+        return word
+    return _slugify(filename).replace("_", " ")[:32] or "عام"
 
 
 def _chunk_text(text: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:

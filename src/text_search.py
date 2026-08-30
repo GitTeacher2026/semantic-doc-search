@@ -14,7 +14,7 @@ CHUNKS_PATH = ROOT / "data" / "search_chunks.json"
 TOKEN_PATTERN = re.compile(r"[\u0600-\u06FF]{2,}|[A-Za-z][A-Za-z0-9_-]{1,}")
 K1 = 1.5
 B = 0.75
-CATEGORY_OVERLAP_THRESHOLD = 0.12
+CATEGORY_OVERLAP_THRESHOLD = 0.08
 
 
 def tokenize(text: str) -> list[str]:
@@ -107,6 +107,7 @@ def assign_category_by_overlap(
     for record in existing:
         preview = record.get("preview") or record.get("filename") or ""
         by_category.setdefault(record["category"], set()).update(tokenize(preview[:2000]))
+        by_category[record["category"]].update(tokenize(record["category"]))
 
     best_category = None
     best_score = 0.0

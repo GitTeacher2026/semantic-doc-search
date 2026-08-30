@@ -11,7 +11,7 @@
 - مستكشف ملفات منظم حسب التصنيف ونوع الملف
 - تصنيف تلقائي حسب تداخل الكلمات المفتاحية
 - بحث فوري BM25 (نسخة Streamlit ونسخة GitHub Pages)
-- **تخزين سحابي مشترك** على GitHub Pages — المستندات تبقى محفوظة عبر جميع المتصفحات
+- **تخزين سحابي على Google Drive** — الملفات تُحفظ في مجلدات حسب التصنيف على حساب amanyak267@gmail.com
 
 ## بيانات الدخول الافتراضية
 
@@ -27,24 +27,35 @@ export DOCSHELF_USERNAME=your_user
 export DOCSHELF_PASSWORD=your_password
 ```
 
-## التخزين السحابي (GitHub Pages)
+## التخزين السحابي (Google Drive)
 
-نسخة GitHub Pages تحفظ المستندات في ملف مشفّر داخل المستودع (`data/browser-store.enc.json`). المحتوى مشفّر بكلمة مرور الدخول، ويُشارك بين جميع المتصفحات والأجهزة.
+نسخة GitHub Pages تحفظ الملفات على **Google Drive** في مجلد `مخزن الوثائق`، داخل مجلدات فرعية حسب **التصنيف** الذي يختاره النظام عند الفهرسة. الفهرس المشفّر (`docshelf-index.enc.json`) يُحفظ في نفس المجلد الجذري.
 
-### إعداد التخزين السحابي (مرة واحدة)
+### إعداد Google Drive (مرة واحدة)
 
-1. أنشئ **Personal Access Token** من GitHub:
-   - **Settings** → **Developer settings** → **Personal access tokens**
-   - الصلاحيات المطلوبة: `repo` (أو صلاحية الكتابة على محتوى المستودع فقط)
-2. أضف الرمز كسرّ في المستودع:
-   - **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
-   - الاسم: `DOCSHELF_GITHUB_TOKEN`
-   - القيمة: رمز PAT الذي أنشأته
-3. أعد تشغيل workflow النشر: **Actions** → **Deploy GitHub Pages** → **Re-run**
+1. أنشئ مشروعاً في [Google Cloud Console](https://console.cloud.google.com/)
+2. فعّل **Google Drive API**
+3. أنشئ **OAuth 2.0 Client ID** من نوع **Web application**
+4. أضف في **Authorized JavaScript origins**:
+   - `https://amany-moh-sy.github.io`
+   - `http://localhost` (للتجربة المحلية)
+5. أضف معرّف العميل كسرّ في المستودع:
+   - **Settings** → **Secrets and variables** → **Actions**
+   - الاسم: `GOOGLE_CLIENT_ID`
+   - القيمة: معرّف OAuth Client ID
+6. أعد تشغيل workflow النشر: **Actions** → **Deploy GitHub Pages** → **Re-run**
 
-بعد ذلك، عند رفع ملفات من أي متصفح، تُحفظ في المستودع وتظهر في جميع المتصفحات بعد تسجيل الدخول.
+عند أول تسجيل دخول بعد النشر، سيُطلب ربط Google Drive بحساب **amanyak267@gmail.com**. الملفات تُرفع تلقائياً إلى:
 
-> **ملاحظة:** Streamlit يحفظ الملفات محلياً على الخادم في مجلد `uploads/` ولا يحتاج هذا الإعداد.
+```
+مخزن الوثائق/
+  ├── إدارة ومشاريع/
+  ├── مالية ومحاسبة/
+  ├── docshelf-index.enc.json
+  └── ...
+```
+
+> **ملاحظة:** إذا لم يُضبط `GOOGLE_CLIENT_ID`، يعود التطبيق إلى التخزين المحلي أو GitHub (إن وُجد `DOCSHELF_GITHUB_TOKEN`).
 
 ## التشغيل المحلي (Streamlit)
 

@@ -1,8 +1,14 @@
 import { base64ToBytes, bytesToBase64, decryptJson, deriveKey, encryptJson } from "./crypto.js";
 import {
-  fetchEncryptedStore,
+  fetchEncryptedStore as fetchDriveStore,
+  isDriveStorageConfigured,
+  uploadEncryptedStore as uploadDriveStore,
+} from "./drive-storage.js";
+import { ensureDriveAccess } from "./drive-auth.js";
+import {
+  fetchEncryptedStore as fetchGitHubStore,
   isGitHubStorageConfigured,
-  uploadEncryptedStore,
+  uploadEncryptedStore as uploadGitHubStore,
 } from "./github-storage.js";
 import { normalizeState, purgeExpiredTrash } from "./trash.js";
 
@@ -11,6 +17,7 @@ const LOCAL_CACHE_KEY = "docshelf_store_v5";
 let sessionKey = null;
 let currentSalt = null;
 let remoteSha = null;
+let remoteFileId = null;
 
 function loadLocalDocuments() {
   try {
@@ -29,15 +36,43 @@ function finalizeState(state) {
 }
 
 export function isCloudSyncEnabled() {
-  return isGitHubStorageConfigured();
+  return isDriveStorageConfigured() || isGitHubStorageConfigured();
+}
+
+export function isUsingDriveStorage() {
+  return isDriveStorageConfigured();
+}
+
+async function fetchRemoteStore() {
+  if (isDriveStorageConfigured()) {
+    await ensureDriveAccess();
+    const { envelope, fileId } = await fetchDriveStore();
+    return { envelope, fileId, sha: null };
+  }
+  if (isGitHubStorageConfigured()) {
+    const { envelope, sha } = await fetchGitHubStore();
+    return { envelope, fileId: null, sha };
+  }
+  return { envelope: null, fileId: null, sha: null };
+}
+
+async function uploadRemoteStore(envelope) {
+  if (isDriveStorageConfigured()) {
+    remoteFileId = await uploadDriveStore(envelope, remoteFileId);
+    return;
+  }
+  if (isGitHubStorageConfigured()) {
+    remoteSha = await uploadGitHubStore(envelope, remoteSha);
+  }
 }
 
 export async function loadDocuments(password) {
-  if (!isGitHubStorageConfigured()) {
+  if (!isCloudSyncEnabled()) {
     return finalizeState(loadLocalDocuments());
   }
 
-  const { envelope, sha } = await fetchEncryptedStore();
+  const { envelope, fileId, sha } = await fetchRemoteStore();
+  remoteFileId = fileId;
   remoteSha = sha;
 
   if (!envelope) {
@@ -64,7 +99,7 @@ export async function loadDocuments(password) {
 
 export async function saveDocuments(password, state) {
   const payload = finalizeState(state);
-  if (!isGitHubStorageConfigured()) {
+  if (!isCloudSyncEnabled()) {
     saveLocalDocuments(payload);
     return;
   }
@@ -83,12 +118,16 @@ export async function saveDocuments(password, state) {
   };
 
   try {
-    remoteSha = await uploadEncryptedStore(envelope, remoteSha);
+    await uploadRemoteStore(envelope);
   } catch (error) {
-    if (String(error.message || "").includes("sha") || String(error.message || "").includes("409")) {
-      const latest = await fetchEncryptedStore();
-      remoteSha = await uploadEncryptedStore(envelope, latest.sha);
-      return;
+    if (isGitHubStorageConfigured()) {
+      const message = String(error.message || "");
+      if (message.includes("sha") || message.includes("409")) {
+        const latest = await fetchGitHubStore();
+        remoteSha = latest.sha;
+        await uploadGitHubStore(envelope, remoteSha);
+        return;
+      }
     }
     throw error;
   }
@@ -98,4 +137,5 @@ export function clearStorageSession() {
   sessionKey = null;
   currentSalt = null;
   remoteSha = null;
+  remoteFileId = null;
 }
