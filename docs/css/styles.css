@@ -313,41 +313,6 @@ mark.query-hit, .query-hit {
   border: 1px solid #b9dfd2;
 }
 
-.model-status {
-  margin: -0.35rem 0 1rem 0;
-  padding: 0.55rem 0.85rem;
-  border-radius: 10px;
-  background: #fff8e6;
-  border: 1px solid #ecdca4;
-  color: #6a5612;
-  font-size: 0.92rem;
-}
-
-.model-status.ready {
-  background: #eef7f3;
-  border-color: #b9dfd2;
-  color: #0f6e56;
-}
-
-.storage-banner {
-  margin: -0.35rem 0 1rem 0;
-  padding: 0.55rem 0.85rem;
-  border-radius: 10px;
-  font-size: 0.92rem;
-}
-
-.storage-banner.ready {
-  background: #eef7f3;
-  border: 1px solid #b9dfd2;
-  color: #0f6e56;
-}
-
-.storage-banner.warn {
-  background: #fff1f1;
-  border: 1px solid #f0c4c4;
-  color: #9b2c2c;
-}
-
 .section-gap { margin-top: 1.5rem; }
 
 .drop-zone {

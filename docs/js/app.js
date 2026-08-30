@@ -85,8 +85,6 @@ const searchResults = document.getElementById("search-results");
 const resultCount = document.getElementById("result-count");
 const resultCountLabel = document.getElementById("result-count-label");
 const statusBanner = document.getElementById("status-banner");
-const modelStatus = document.getElementById("model-status");
-const storageBanner = document.getElementById("storage-banner");
 
 const deleteDialog = document.getElementById("delete-dialog");
 const deleteDialogTitle = document.getElementById("delete-dialog-title");
@@ -118,7 +116,6 @@ async function hydrateDocuments(password) {
   setStatus("جارٍ تحميل المستندات…");
   try {
     state = normalizeState(await loadDocuments(password));
-    updateStorageBanner();
     renderLibrary();
     renderTrash();
     setStatus("", false);
@@ -134,22 +131,6 @@ async function persistState() {
   if (!sessionPassword) return;
   state = normalizeState(state);
   await saveDocuments(sessionPassword, state);
-  updateStorageBanner();
-}
-
-function updateStorageBanner() {
-  if (!storageBanner) return;
-  if (isCloudSyncEnabled()) {
-    storageBanner.textContent =
-      "التخزين السحابي مفعّل — المستندات محفوظة ومشتركة بين جميع المتصفحات.";
-    storageBanner.classList.remove("hidden", "warn");
-    storageBanner.classList.add("ready");
-    return;
-  }
-  storageBanner.textContent =
-    "تحذير: التخزين السحابي غير مفعّل. المستندات تُحفظ في هذا المتصفح فقط.";
-  storageBanner.classList.remove("hidden", "ready");
-  storageBanner.classList.add("warn");
 }
 
 function isAuthed() {
@@ -162,15 +143,10 @@ function showView() {
   if (userGreeting && currentUser) {
     userGreeting.textContent = `مرحباً ${currentUser.firstName} ${currentUser.lastName} (@${currentUser.username})`;
   }
-  if (modelStatus) {
-    modelStatus.textContent = "البحث فوري — لا حاجة لتحميل نموذج ذكاء اصطناعي";
-    modelStatus.classList.add("ready");
-  }
   if (!isHydrating && sessionPassword) {
     renderLibrary();
     renderTrash();
     refreshAdminToolbar();
-    updateStorageBanner();
   }
 }
 
