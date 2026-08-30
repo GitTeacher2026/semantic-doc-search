@@ -45,9 +45,13 @@ export function isUsingDriveStorage() {
 
 async function fetchRemoteStore() {
   if (isDriveStorageConfigured()) {
-    await ensureDriveAccess();
-    const { envelope, fileId } = await fetchDriveStore();
-    return { envelope, fileId, sha: null };
+    try {
+      await ensureDriveAccess();
+      const { envelope, fileId } = await fetchDriveStore();
+      return { envelope, fileId, sha: null };
+    } catch (error) {
+      if (!isGitHubStorageConfigured()) throw error;
+    }
   }
   if (isGitHubStorageConfigured()) {
     const { envelope, sha } = await fetchGitHubStore();
@@ -58,8 +62,12 @@ async function fetchRemoteStore() {
 
 async function uploadRemoteStore(envelope) {
   if (isDriveStorageConfigured()) {
-    remoteFileId = await uploadDriveStore(envelope, remoteFileId);
-    return;
+    try {
+      remoteFileId = await uploadDriveStore(envelope, remoteFileId);
+      return;
+    } catch (error) {
+      if (!isGitHubStorageConfigured()) throw error;
+    }
   }
   if (isGitHubStorageConfigured()) {
     remoteSha = await uploadGitHubStore(envelope, remoteSha);

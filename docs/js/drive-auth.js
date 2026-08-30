@@ -2,6 +2,7 @@ import { ADMIN_EMAIL, GOOGLE_CLIENT_ID } from "./config.js";
 
 const TOKEN_KEY = "docshelf_drive_token";
 const TOKEN_EXPIRY_KEY = "docshelf_drive_expiry";
+const CLIENT_ID_PATTERN = /^[\w-]+\.apps\.googleusercontent\.com$/;
 
 const DRIVE_SCOPES = [
   "https://www.googleapis.com/auth/drive.file",
@@ -10,8 +11,12 @@ const DRIVE_SCOPES = [
 
 let tokenClient = null;
 
+export function getGoogleClientId() {
+  return String(GOOGLE_CLIENT_ID || "").trim();
+}
+
 export function isDriveConfigured() {
-  return Boolean(GOOGLE_CLIENT_ID);
+  return CLIENT_ID_PATTERN.test(getGoogleClientId());
 }
 
 export function getStoredAccessToken() {
@@ -87,16 +92,27 @@ export async function ensureDriveAccess({ interactive = true } = {}) {
     throw new Error("يلزم ربط Google Drive أولاً.");
   }
 
+  if (!isDriveConfigured()) {
+    throw new Error(
+      "Google Drive غير مضبوط. أضف GOOGLE_CLIENT_ID الصحيح في GitHub Secrets ثم أعد نشر الموقع."
+    );
+  }
+
   await loadGoogleScript();
+  const clientId = getGoogleClientId();
 
   return new Promise((resolve, reject) => {
     tokenClient = window.google.accounts.oauth2.initTokenClient({
-      client_id: GOOGLE_CLIENT_ID,
+      client_id: clientId,
       scope: DRIVE_SCOPES,
       hint: ADMIN_EMAIL,
       callback: async (response) => {
         if (response.error) {
-          reject(new Error(response.error));
+          const message =
+            response.error === "invalid_client"
+              ? "معرّف Google OAuth غير صالح. أنشئ OAuth Client ID من نوع Web application في Google Cloud، ثم ضعه في GitHub Secret باسم GOOGLE_CLIENT_ID."
+              : response.error_description || response.error;
+          reject(new Error(message));
           return;
         }
         try {

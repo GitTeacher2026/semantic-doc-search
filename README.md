@@ -33,19 +33,31 @@ export DOCSHELF_PASSWORD=your_password
 
 ### إعداد Google Drive (مرة واحدة)
 
-1. أنشئ مشروعاً في [Google Cloud Console](https://console.cloud.google.com/)
-2. فعّل **Google Drive API**
-3. أنشئ **OAuth 2.0 Client ID** من نوع **Web application**
-4. أضف في **Authorized JavaScript origins**:
-   - `https://amany-moh-sy.github.io`
-   - `http://localhost` (للتجربة المحلية)
-5. أضف معرّف العميل كسرّ في المستودع:
-   - **Settings** → **Secrets and variables** → **Actions**
+1. افتح [Google Cloud Console](https://console.cloud.google.com/) وسجّل الدخول بحساب **amanyak267@gmail.com**
+2. أنشئ مشروعاً جديداً (أو اختر مشروعاً موجوداً)
+3. من **APIs & Services** → **Library**، فعّل **Google Drive API**
+4. من **APIs & Services** → **OAuth consent screen**:
+   - اختر **External** (أو Internal إن كان Workspace)
+   - أضف بريدك `amanyak267@gmail.com` كمستخدم اختبار إذا كان التطبيق في وضع Testing
+5. من **APIs & Services** → **Credentials** → **Create Credentials** → **OAuth client ID**:
+   - نوع التطبيق: **Web application**
+   - **Authorized JavaScript origins** (مهم جداً):
+     - `https://amany-moh-sy.github.io`
+   - لا تستخدم Client Secret في هذا المشروع — المطلوب **Client ID** فقط
+6. انسخ **Client ID** (ينتهي بـ `.apps.googleusercontent.com`)
+7. في GitHub: **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
    - الاسم: `GOOGLE_CLIENT_ID`
-   - القيمة: معرّف OAuth Client ID
-6. أعد تشغيل workflow النشر: **Actions** → **Deploy GitHub Pages** → **Re-run**
+   - القيمة: الصق Client ID كاملاً بدون مسافات
+8. أعد تشغيل workflow النشر: **Actions** → **Deploy GitHub Pages** → **Re-run all jobs**
+9. بعد النشر، افتح الموقع واضغط **Hard refresh** (Ctrl+Shift+R)
 
-عند أول تسجيل دخول بعد النشر، سيُطلب ربط Google Drive بحساب **amanyak267@gmail.com**. الملفات تُرفع تلقائياً إلى:
+**إذا ظهر `Error 401: invalid_client`:**
+- الـ Client ID غير موجود في Google أو لم يُنشر بعد في الموقع
+- تأكد أن السرّ اسمه بالضبط `GOOGLE_CLIENT_ID` وليس Client Secret
+- تأكد أن origin `https://amany-moh-sy.github.io` مضاف في OAuth client
+- تأكد أنك أعدت نشر GitHub Pages بعد إضافة السرّ
+
+عند أول تسجيل دخول بعد الإعداد الصحيح، سيُطلب ربط Google Drive بحساب **amanyak267@gmail.com**. الملفات تُرفع تلقائياً إلى:
 
 ```
 مخزن الوثائق/

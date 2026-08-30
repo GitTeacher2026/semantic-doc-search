@@ -41,7 +41,7 @@ jobs:
           const token = process.env.DOCSHELF_GITHUB_TOKEN || "";
           const vaultPassword = process.env.DOCSHELF_VAULT_PASSWORD || "docshelf2024";
           const web3formsKey = process.env.WEB3FORMS_ACCESS_KEY || "";
-          const googleClientId = process.env.GOOGLE_CLIENT_ID || "";
+          const googleClientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
           const config = `/** Generated during deploy — do not edit manually. */
           export const GITHUB_OWNER = "amany-moh-sy";
           export const GITHUB_REPO = "semantic-doc-search";

@@ -1057,10 +1057,6 @@ export async function startApp({ user, auth }) {
   });
 
   try {
-    if (isUsingDriveStorage()) {
-      setStatus("جارٍ الاتصال بـ Google Drive…");
-      await ensureDriveAccess();
-    }
     await hydrateDocuments(sessionPassword);
     showView();
   } catch (error) {
