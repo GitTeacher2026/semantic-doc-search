@@ -131,6 +131,12 @@ function approvalLink(action, token) {
   return `${base}/?action=${action}&token=${encodeURIComponent(token)}`;
 }
 
+function resetPasswordLink(token) {
+  return approvalLink("reset-password", token);
+}
+
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+
 async function sendWeb3Form(payload) {
   if (!WEB3FORMS_ACCESS_KEY) return { ok: false, error: "missing_key" };
   try {
@@ -263,6 +269,116 @@ export async function sendUserDecisionEmail(user, approved) {
     message,
   });
   return web3.ok;
+}
+
+function findApprovedUser(db, identifier) {
+  const normalized = String(identifier || "").trim().toLowerCase();
+  return db.users.find(
+    (item) =>
+      item.username?.toLowerCase() === normalized ||
+      item.email?.toLowerCase() === normalized
+  );
+}
+
+async function sendPasswordResetEmail(user, resetToken) {
+  const resetUrl = resetPasswordLink(resetToken);
+  const message = [
+    `مرحباً ${user.firstName},`,
+    "",
+    "تلقّينا طلباً لإعادة تعيين كلمة المرور في مخزن الوثائق.",
+    "",
+    "لتعيين كلمة مرور جديدة، افتح الرابط التالي (صالح لمدة ساعة واحدة):",
+    resetUrl,
+    "",
+    "إذا لم تطلب ذلك، تجاهل هذه الرسالة.",
+  ].join("\n");
+
+  const web3 = await sendWeb3Form({
+    subject: "إعادة تعيين كلمة المرور — مخزن الوثائق",
+    from_name: "مخزن الوثائق",
+    name: `${user.firstName} ${user.lastName}`,
+    email: user.email,
+    replyto: user.email,
+    reset_link: resetUrl,
+    "Reset link": resetUrl,
+    message,
+  });
+
+  if (web3.ok) return { sent: true, method: "email" };
+
+  if (
+    await sendGitHubIssueNotification(
+      `[Password Reset] ${user.username}`,
+      message
+    )
+  ) {
+    return { sent: true, method: "github" };
+  }
+
+  return {
+    sent: false,
+    method: "none",
+    note: web3.error || "تعذّر إرسال البريد.",
+  };
+}
+
+export async function requestPasswordReset(identifier) {
+  const { db, sha } = await loadUsersDbWithSha();
+  const user = findApprovedUser(db, identifier);
+  const genericMessage =
+    "إذا كان البريد أو اسم المستخدم مسجّلاً لدينا، ستصلك رسالة تحتوي رابط إعادة التعيين. تحقق من صندوق الوارد والرسائل غير المرغوبة.";
+
+  if (!user || user.status !== "approved") {
+    return { sent: true, message: genericMessage };
+  }
+
+  const resetToken = crypto.randomUUID().replace(/-/g, "");
+  user.resetToken = resetToken;
+  user.resetExpiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS).toISOString();
+  await saveUsersDb(db, sha);
+
+  const notification = await sendPasswordResetEmail(user, resetToken);
+  if (!notification.sent) {
+    return {
+      sent: false,
+      message: notification.note || "تعذّر إرسال البريد. حاول مرة أخرى لاحقاً.",
+    };
+  }
+
+  return { sent: true, message: genericMessage };
+}
+
+export async function resetPasswordWithToken(token, password, confirmPassword) {
+  const nextPassword = String(password || "");
+  const confirm = String(confirmPassword || "");
+  if (nextPassword.length < 8) {
+    throw new Error("كلمة المرور يجب أن تكون 8 أحرف على الأقل.");
+  }
+  if (nextPassword !== confirm) {
+    throw new Error("كلمتا المرور غير متطابقتين.");
+  }
+
+  const { db, sha } = await loadUsersDbWithSha();
+  const user = db.users.find((item) => item.resetToken === token);
+  if (!user) {
+    throw new Error("رابط إعادة التعيين غير صالح أو منتهٍ.");
+  }
+  if (!user.resetExpiresAt || new Date(user.resetExpiresAt) < new Date()) {
+    delete user.resetToken;
+    delete user.resetExpiresAt;
+    await saveUsersDb(db, sha);
+    throw new Error("انتهت صلاحية الرابط. اطلب رابطاً جديداً من صفحة نسيت كلمة المرور.");
+  }
+
+  user.passwordHash = await hashPassword(nextPassword);
+  delete user.resetToken;
+  delete user.resetExpiresAt;
+  await saveUsersDb(db, sha);
+
+  return {
+    username: user.username,
+    email: user.email,
+  };
 }
 
 export async function processApprovalAction(action, token) {

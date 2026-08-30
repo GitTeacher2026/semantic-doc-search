@@ -6,12 +6,18 @@ import {
   listPendingUsers,
   processApprovalAction,
   registerUser,
+  requestPasswordReset,
+  resetPasswordWithToken,
   setStoredUser,
 } from "./auth-service.js";
 
 const AUTH_KEY = "docshelf_auth";
 
-let captchaAnswer = 0;
+const captchaState = {
+  signup: { answer: 0, labelId: "captcha-label", inputId: "signup-captcha" },
+  forgot: { answer: 0, labelId: "forgot-captcha-label", inputId: "forgot-captcha" },
+  reset: { answer: 0, labelId: "reset-captcha-label", inputId: "reset-captcha" },
+};
 
 export function getVaultPassword() {
   return VAULT_PASSWORD;
@@ -34,25 +40,44 @@ function showAuthMessage(el, message, isError = true) {
 }
 
 function switchAuthPanel(panel) {
-  document.getElementById("login-panel")?.classList.toggle("hidden", panel !== "login");
-  document.getElementById("signup-panel")?.classList.toggle("hidden", panel !== "signup");
+  const panels = ["login", "signup", "forgot", "reset"];
+  for (const name of panels) {
+    document.getElementById(`${name}-panel`)?.classList.toggle("hidden", panel !== name);
+  }
 }
 
-function refreshCaptcha() {
+function refreshCaptcha(kind = "signup") {
+  const config = captchaState[kind];
+  if (!config) return;
   const a = Math.floor(Math.random() * 9) + 1;
   const b = Math.floor(Math.random() * 9) + 1;
-  captchaAnswer = a + b;
-  const label = document.getElementById("captcha-label");
+  config.answer = a + b;
+  const label = document.getElementById(config.labelId);
   if (label) label.textContent = `كم يساوي ${a} + ${b}؟`;
-  const input = document.getElementById("signup-captcha");
+  const input = document.getElementById(config.inputId);
   if (input) input.value = "";
+}
+
+function validateCaptcha(kind, value) {
+  const config = captchaState[kind];
+  return Number(value) === config?.answer;
+}
+
+export function handleResetFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const action = params.get("action");
+  const token = params.get("token");
+  if (action !== "reset-password" || !token) return null;
+  window.history.replaceState({}, "", window.location.pathname);
+  return token;
 }
 
 export async function handleApprovalFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const action = params.get("action");
   const token = params.get("token");
-  if (!action || !token) return null;
+  if (!action || !token || action === "reset-password") return null;
+  if (action !== "approve" && action !== "reject") return null;
 
   window.history.replaceState({}, "", window.location.pathname);
   try {
@@ -78,39 +103,89 @@ export async function handleApprovalFromUrl() {
   }
 }
 
+function clearAuthMessages() {
+  showAuthMessage(document.getElementById("login-error"), "");
+  showAuthMessage(document.getElementById("login-pending-notice"), "", false);
+  showAuthMessage(document.getElementById("signup-error"), "");
+  showAuthMessage(document.getElementById("signup-success"), "", false);
+  showAuthMessage(document.getElementById("forgot-error"), "");
+  showAuthMessage(document.getElementById("forgot-success"), "", false);
+  showAuthMessage(document.getElementById("reset-error"), "");
+  showAuthMessage(document.getElementById("reset-success"), "", false);
+}
+
 export function initAuthPage({ onLoginSuccess }) {
   const loginView = document.getElementById("login-view");
   const appView = document.getElementById("app-view");
   const loginForm = document.getElementById("login-form");
   const signupForm = document.getElementById("signup-form");
+  const forgotForm = document.getElementById("forgot-form");
+  const resetForm = document.getElementById("reset-form");
   const loginError = document.getElementById("login-error");
   const loginPendingNotice = document.getElementById("login-pending-notice");
   const signupError = document.getElementById("signup-error");
   const signupSuccess = document.getElementById("signup-success");
+  const forgotError = document.getElementById("forgot-error");
+  const forgotSuccess = document.getElementById("forgot-success");
+  const resetError = document.getElementById("reset-error");
+  const resetSuccess = document.getElementById("reset-success");
   const showSignupBtn = document.getElementById("show-signup");
   const showLoginBtn = document.getElementById("show-login");
+  const showForgotBtn = document.getElementById("show-forgot");
+  const forgotToLoginBtn = document.getElementById("forgot-to-login");
+  const resetToLoginBtn = document.getElementById("reset-to-login");
   const refreshCaptchaBtn = document.getElementById("refresh-captcha");
+  const refreshForgotCaptchaBtn = document.getElementById("refresh-forgot-captcha");
+  const refreshResetCaptchaBtn = document.getElementById("refresh-reset-captcha");
+  const resetTokenInput = document.getElementById("reset-token");
+
+  function goToLogin() {
+    clearAuthMessages();
+    switchAuthPanel("login");
+  }
 
   showSignupBtn?.addEventListener("click", (event) => {
     event.preventDefault();
+    clearAuthMessages();
     switchAuthPanel("signup");
-    showAuthMessage(loginError, "");
-    showAuthMessage(loginPendingNotice, "", false);
-    showAuthMessage(signupError, "");
-    showAuthMessage(signupSuccess, "", false);
-    refreshCaptcha();
+    refreshCaptcha("signup");
   });
 
   showLoginBtn?.addEventListener("click", (event) => {
     event.preventDefault();
-    switchAuthPanel("login");
-    showAuthMessage(signupError, "");
-    showAuthMessage(signupSuccess, "", false);
+    goToLogin();
+  });
+
+  showForgotBtn?.addEventListener("click", (event) => {
+    event.preventDefault();
+    clearAuthMessages();
+    switchAuthPanel("forgot");
+    refreshCaptcha("forgot");
+  });
+
+  forgotToLoginBtn?.addEventListener("click", (event) => {
+    event.preventDefault();
+    goToLogin();
+  });
+
+  resetToLoginBtn?.addEventListener("click", (event) => {
+    event.preventDefault();
+    goToLogin();
   });
 
   refreshCaptchaBtn?.addEventListener("click", (event) => {
     event.preventDefault();
-    refreshCaptcha();
+    refreshCaptcha("signup");
+  });
+
+  refreshForgotCaptchaBtn?.addEventListener("click", (event) => {
+    event.preventDefault();
+    refreshCaptcha("forgot");
+  });
+
+  refreshResetCaptchaBtn?.addEventListener("click", (event) => {
+    event.preventDefault();
+    refreshCaptcha("reset");
   });
 
   loginForm?.addEventListener("submit", async (event) => {
@@ -129,12 +204,72 @@ export function initAuthPage({ onLoginSuccess }) {
     }
   });
 
+  forgotForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const captchaValue = document.getElementById("forgot-captcha").value;
+    if (!validateCaptcha("forgot", captchaValue)) {
+      showAuthMessage(forgotError, "إجابة التحقق غير صحيحة.");
+      refreshCaptcha("forgot");
+      return;
+    }
+
+    try {
+      const result = await requestPasswordReset(
+        document.getElementById("forgot-identifier").value
+      );
+      forgotForm.reset();
+      refreshCaptcha("forgot");
+      showAuthMessage(forgotError, "");
+      showAuthMessage(forgotSuccess, result.message, !result.sent);
+      if (!result.sent) refreshCaptcha("forgot");
+    } catch (error) {
+      showAuthMessage(forgotError, error.message);
+      refreshCaptcha("forgot");
+    }
+  });
+
+  resetForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const captchaValue = document.getElementById("reset-captcha").value;
+    if (!validateCaptcha("reset", captchaValue)) {
+      showAuthMessage(resetError, "إجابة التحقق غير صحيحة.");
+      refreshCaptcha("reset");
+      return;
+    }
+
+    try {
+      const result = await resetPasswordWithToken(
+        resetTokenInput?.value,
+        document.getElementById("reset-password").value,
+        document.getElementById("reset-password-confirm").value
+      );
+      resetForm.reset();
+      refreshCaptcha("reset");
+      showAuthMessage(resetError, "");
+      showAuthMessage(
+        resetSuccess,
+        `تم تغيير كلمة المرور بنجاح. يمكنك تسجيل الدخول الآن باسم @${result.username}.`,
+        false
+      );
+      const banner = document.getElementById("auth-action-banner");
+      if (banner) {
+        banner.classList.remove("hidden", "auth-error");
+        banner.classList.add("auth-success");
+        banner.textContent = "تم تغيير كلمة المرور بنجاح. سجّل دخولك الآن.";
+      }
+      setTimeout(() => goToLogin(), 2500);
+    } catch (error) {
+      showAuthMessage(resetError, error.message);
+      refreshCaptcha("reset");
+    }
+  });
+
   signupForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const captchaValue = Number(document.getElementById("signup-captcha").value);
-    if (captchaValue !== captchaAnswer) {
+    if (!validateCaptcha("signup", captchaValue)) {
       showAuthMessage(signupError, "إجابة التحقق غير صحيحة.");
-      refreshCaptcha();
+      refreshCaptcha("signup");
       return;
     }
 
@@ -149,7 +284,7 @@ export function initAuthPage({ onLoginSuccess }) {
         acceptTerms: document.getElementById("signup-terms").checked,
       });
       signupForm.reset();
-      refreshCaptcha();
+      refreshCaptcha("signup");
       showAuthMessage(signupError, "");
       showAuthMessage(signupSuccess, "", false);
 
@@ -172,11 +307,11 @@ export function initAuthPage({ onLoginSuccess }) {
       switchAuthPanel("login");
     } catch (error) {
       showAuthMessage(signupError, error.message);
-      refreshCaptcha();
+      refreshCaptcha("signup");
     }
   });
 
-  refreshCaptcha();
+  refreshCaptcha("signup");
 
   return {
     showLogin() {
@@ -184,6 +319,15 @@ export function initAuthPage({ onLoginSuccess }) {
       loginView?.classList.remove("hidden");
       appView?.classList.add("hidden");
       switchAuthPanel("login");
+    },
+    showResetPassword(token) {
+      document.body.classList.add("auth-body");
+      loginView?.classList.remove("hidden");
+      appView?.classList.add("hidden");
+      clearAuthMessages();
+      if (resetTokenInput) resetTokenInput.value = token;
+      switchAuthPanel("reset");
+      refreshCaptcha("reset");
     },
     showApp() {
       document.body.classList.remove("auth-body");

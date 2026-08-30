@@ -2,12 +2,14 @@ import {
   getCurrentUser,
   getVaultPassword,
   handleApprovalFromUrl,
+  handleResetFromUrl,
   initAuthPage,
   isAuthenticated,
 } from "./auth-page.js";
 import { startApp } from "./app.js";
 
 async function main() {
+  const resetToken = handleResetFromUrl();
   await handleApprovalFromUrl();
 
   const auth = initAuthPage({
@@ -16,6 +18,11 @@ async function main() {
       await startApp({ user, auth });
     },
   });
+
+  if (resetToken) {
+    auth.showResetPassword(resetToken);
+    return;
+  }
 
   if (isAuthenticated()) {
     const user = getCurrentUser();

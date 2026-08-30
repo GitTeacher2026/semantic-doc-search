@@ -224,6 +224,12 @@
   text-decoration: underline;
 }
 
+.auth-forgot-row {
+  margin: 0.35rem 0 0.75rem;
+  text-align: left;
+  font-size: 0.86rem;
+}
+
 .auth-error,
 .auth-success,
 .auth-action-banner {

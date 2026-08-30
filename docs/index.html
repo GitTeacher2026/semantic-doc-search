@@ -64,12 +64,87 @@
             <span class="input-icon">🔒</span>
             <input id="login-password" name="password" type="password" placeholder="••••••••" autocomplete="current-password" required />
           </div>
+          <p class="auth-forgot-row">
+            <a href="#" id="show-forgot" class="auth-link">نسيت كلمة المرور؟</a>
+          </p>
           <button type="submit" class="auth-btn">دخول</button>
           <p id="login-error" class="auth-error hidden"></p>
           <p id="login-pending-notice" class="auth-success hidden"></p>
         </form>
         <p class="auth-footer">
           ليس لديك حساب؟ <a href="#" id="show-signup" class="auth-link">إنشاء حساب</a>
+        </p>
+      </div>
+
+      <div id="forgot-panel" class="auth-card hidden">
+        <div class="auth-hero-icon" aria-hidden="true">
+          <svg viewBox="0 0 120 120" fill="none">
+            <circle cx="60" cy="60" r="54" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+            <path d="M28 78c6-22 16-34 32-38s26 16 32 38" stroke="#d4af37" stroke-width="2.5" stroke-linecap="round"/>
+            <ellipse cx="60" cy="52" rx="18" ry="22" stroke="#f5f8ff" stroke-width="2"/>
+          </svg>
+        </div>
+        <h1>نسيت كلمة المرور</h1>
+        <p class="auth-subtitle">أدخل بريدك أو اسم المستخدم وسنرسل لك رابط إعادة التعيين</p>
+        <form id="forgot-form" class="auth-form">
+          <label for="forgot-identifier">البريد أو اسم المستخدم</label>
+          <div class="auth-input-wrap">
+            <span class="input-icon">✉️</span>
+            <input id="forgot-identifier" name="identifier" type="text" placeholder="you@example.com" autocomplete="username" required />
+          </div>
+          <label id="forgot-captcha-label" for="forgot-captcha">التحقق</label>
+          <div class="captcha-row">
+            <div class="auth-input-wrap" style="flex:1">
+              <span class="input-icon">🔢</span>
+              <input id="forgot-captcha" name="captcha" type="number" inputmode="numeric" placeholder="الإجابة" required />
+            </div>
+            <button id="refresh-forgot-captcha" class="captcha-refresh" type="button" title="تحديث">↻</button>
+          </div>
+          <button type="submit" class="auth-btn">إرسال رابط إعادة التعيين</button>
+          <p id="forgot-error" class="auth-error hidden"></p>
+          <p id="forgot-success" class="auth-success hidden"></p>
+        </form>
+        <p class="auth-footer">
+          <a href="#" id="forgot-to-login" class="auth-link">العودة لتسجيل الدخول</a>
+        </p>
+      </div>
+
+      <div id="reset-panel" class="auth-card hidden">
+        <div class="auth-hero-icon" aria-hidden="true">
+          <svg viewBox="0 0 120 120" fill="none">
+            <circle cx="60" cy="60" r="54" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+            <path d="M28 78c6-22 16-34 32-38s26 16 32 38" stroke="#d4af37" stroke-width="2.5" stroke-linecap="round"/>
+            <ellipse cx="60" cy="52" rx="18" ry="22" stroke="#f5f8ff" stroke-width="2"/>
+          </svg>
+        </div>
+        <h1>كلمة مرور جديدة</h1>
+        <p class="auth-subtitle">أدخل كلمة المرور الجديدة وأكّدها</p>
+        <form id="reset-form" class="auth-form">
+          <input id="reset-token" name="token" type="hidden" />
+          <label for="reset-password">كلمة المرور الجديدة</label>
+          <div class="auth-input-wrap">
+            <span class="input-icon">🔒</span>
+            <input id="reset-password" name="password" type="password" placeholder="8 أحرف على الأقل" autocomplete="new-password" required />
+          </div>
+          <label for="reset-password-confirm">تأكيد كلمة المرور</label>
+          <div class="auth-input-wrap">
+            <span class="input-icon">🔒</span>
+            <input id="reset-password-confirm" name="confirmPassword" type="password" placeholder="أعد إدخال كلمة المرور" autocomplete="new-password" required />
+          </div>
+          <label id="reset-captcha-label" for="reset-captcha">التحقق</label>
+          <div class="captcha-row">
+            <div class="auth-input-wrap" style="flex:1">
+              <span class="input-icon">🔢</span>
+              <input id="reset-captcha" name="captcha" type="number" inputmode="numeric" placeholder="الإجابة" required />
+            </div>
+            <button id="refresh-reset-captcha" class="captcha-refresh" type="button" title="تحديث">↻</button>
+          </div>
+          <button type="submit" class="auth-btn">حفظ كلمة المرور</button>
+          <p id="reset-error" class="auth-error hidden"></p>
+          <p id="reset-success" class="auth-success hidden"></p>
+        </form>
+        <p class="auth-footer">
+          <a href="#" id="reset-to-login" class="auth-link">العودة لتسجيل الدخول</a>
         </p>
       </div>
 
