@@ -160,6 +160,18 @@ export async function downloadDriveFile(fileId) {
   return res.arrayBuffer();
 }
 
+export async function renameDriveFile(fileId, newName) {
+  const safeName = String(newName || "document").replace(/[\\/:*?"<>|]/g, "_").trim();
+  if (!safeName) {
+    throw new Error("اسم الملف غير صالح.");
+  }
+  await driveJson(`/files/${fileId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name: safeName }),
+  });
+  return safeName;
+}
+
 export async function fetchEncryptedStore() {
   const rootId = await getRootFolderId();
   const existing = await findChildFile(rootId, INDEX_FILE_NAME);

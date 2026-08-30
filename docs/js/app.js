@@ -70,7 +70,7 @@ import {
   loginToGoogleDrive,
   logoutGoogleDrive,
 } from "./drive-auth.js";
-import { uploadDocumentFile, downloadDriveFile } from "./drive-storage.js";
+import { uploadDocumentFile, downloadDriveFile, renameDriveFile } from "./drive-storage.js";
 import {
   approvePendingUser,
   rejectPendingUser,
@@ -96,6 +96,7 @@ let state = normalizeState({});
 let sessionPassword = "";
 let isHydrating = false;
 let pendingDeleteId = null;
+let pendingRenameId = null;
 let pendingLockId = null;
 let pendingUnlockId = null;
 let pendingUnlockAction = null;
@@ -154,6 +155,15 @@ const deleteDialogTitle = document.getElementById("delete-dialog-title");
 const deleteConfirmBtn = document.getElementById("delete-confirm-btn");
 const deleteCancelBtn = document.getElementById("delete-cancel-btn");
 const deleteDialogBackdrop = document.getElementById("delete-dialog-backdrop");
+
+const renameDialog = document.getElementById("rename-dialog");
+const renameDialogTitle = document.getElementById("rename-dialog-title");
+const renameDialogSub = document.getElementById("rename-dialog-sub");
+const renameFilename = document.getElementById("rename-filename");
+const renameDialogError = document.getElementById("rename-dialog-error");
+const renameConfirmBtn = document.getElementById("rename-confirm-btn");
+const renameCancelBtn = document.getElementById("rename-cancel-btn");
+const renameDialogBackdrop = document.getElementById("rename-dialog-backdrop");
 
 const lockDialog = document.getElementById("lock-dialog");
 const lockDialogTitle = document.getElementById("lock-dialog-title");
@@ -806,6 +816,7 @@ function renderDocActions(doc) {
     : `<button class="btn ghost small lock-btn" data-id="${doc.id}" type="button">قفل</button>`;
   return `
     <button class="btn ghost small download-btn" data-id="${doc.id}" type="button">تنزيل</button>
+    <button class="btn ghost small rename-btn" data-id="${doc.id}" type="button">إعادة تسمية</button>
     ${lockBtn}
     <button class="btn ghost small delete-btn" data-id="${doc.id}" type="button">حذف</button>`;
 }
@@ -915,6 +926,10 @@ function bindLibraryActions() {
 
   libraryList.querySelectorAll(".download-btn").forEach((btn) => {
     btn.addEventListener("click", () => handleDownload(btn.dataset.id));
+  });
+
+  libraryList.querySelectorAll(".rename-btn").forEach((btn) => {
+    btn.addEventListener("click", () => openRenameDialog(btn.dataset.id));
   });
 
   libraryList.querySelectorAll(".lock-btn").forEach((btn) => {
@@ -1055,6 +1070,91 @@ function handleUnlockButton(docId) {
     return;
   }
   openUnlockDialog(docId, "unlock");
+}
+
+function sanitizeFilenameInput(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, " ")
+    .slice(0, 180);
+}
+
+function hasDuplicateFilename(filename, excludeId = null) {
+  const target = filename.trim().toLowerCase();
+  return state.documents.some(
+    (doc) => doc.id !== excludeId && String(doc.filename || "").trim().toLowerCase() === target
+  );
+}
+
+function openRenameDialog(docId) {
+  const doc = findDocumentById(docId);
+  if (!doc || !renameDialog) return;
+  pendingRenameId = docId;
+  renameDialogTitle.textContent = "إعادة تسمية الملف";
+  renameDialogSub.textContent = `الاسم الحالي: ${doc.filename}`;
+  renameFilename.value = doc.filename;
+  renameDialogError.classList.add("hidden");
+  renameDialog.classList.remove("hidden");
+  renameFilename.focus();
+  renameFilename.select();
+}
+
+function closeRenameDialog() {
+  pendingRenameId = null;
+  if (renameDialog) renameDialog.classList.add("hidden");
+  if (renameFilename) renameFilename.value = "";
+  renameDialogError?.classList.add("hidden");
+}
+
+async function confirmRename() {
+  if (!pendingRenameId) return;
+  const doc = findDocumentById(pendingRenameId);
+  if (!doc) return closeRenameDialog();
+
+  const nextName = sanitizeFilenameInput(renameFilename.value);
+  if (!nextName) {
+    renameDialogError.textContent = "أدخل اسماً صالحاً للملف.";
+    renameDialogError.classList.remove("hidden");
+    return;
+  }
+  if (nextName === doc.filename) {
+    closeRenameDialog();
+    return;
+  }
+  if (hasDuplicateFilename(nextName, doc.id)) {
+    renameDialogError.textContent = "يوجد ملف آخر بنفس الاسم.";
+    renameDialogError.classList.remove("hidden");
+    return;
+  }
+
+  renameConfirmBtn.disabled = true;
+  renameDialogError.classList.add("hidden");
+  setStatus(`جارٍ إعادة تسمية «${doc.filename}»…`);
+
+  try {
+    if (doc.driveFileId) {
+      if (!isDriveConnected()) {
+        throw new Error("هذا الملف مخزّن في Google Drive. سجّل الدخول إلى Drive لإعادة تسميته.");
+      }
+      await renameDriveFile(doc.driveFileId, nextName);
+    }
+
+    doc.filename = nextName;
+    doc.extension = fileExtension(nextName);
+    doc.fileGroup = fileGroup(nextName);
+    await persistState();
+    closeRenameDialog();
+    renderLibrary();
+    setStatus(`تمت إعادة التسمية إلى «${nextName}».`, true);
+    setTimeout(() => setStatus("", false), 2500);
+  } catch (error) {
+    renameDialogError.textContent = error.message;
+    renameDialogError.classList.remove("hidden");
+    setStatus(`تعذّرت إعادة التسمية: ${error.message}`, true);
+  } finally {
+    renameConfirmBtn.disabled = false;
+  }
 }
 
 function openDeleteDialog(docId) {
@@ -1346,6 +1446,13 @@ resultCount.addEventListener("input", () => {
 if (deleteConfirmBtn) deleteConfirmBtn.addEventListener("click", confirmDelete);
 if (deleteCancelBtn) deleteCancelBtn.addEventListener("click", closeDeleteDialog);
 if (deleteDialogBackdrop) deleteDialogBackdrop.addEventListener("click", closeDeleteDialog);
+
+if (renameConfirmBtn) renameConfirmBtn.addEventListener("click", confirmRename);
+if (renameCancelBtn) renameCancelBtn.addEventListener("click", closeRenameDialog);
+if (renameDialogBackdrop) renameDialogBackdrop.addEventListener("click", closeRenameDialog);
+renameFilename?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") confirmRename();
+});
 
 if (lockConfirmBtn) lockConfirmBtn.addEventListener("click", confirmLock);
 if (lockCancelBtn) lockCancelBtn.addEventListener("click", closeLockDialog);

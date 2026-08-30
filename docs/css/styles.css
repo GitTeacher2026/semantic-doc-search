@@ -1241,6 +1241,7 @@ body.image-preview-open {
   margin-top: 0.75rem;
 }
 
+.modal-card input[type="text"],
 .modal-card input[type="password"] {
   width: 100%;
   padding: 0.65rem 0.75rem;
@@ -1248,6 +1249,7 @@ body.image-preview-open {
   border-radius: 10px;
   background: var(--surface);
   font: inherit;
+  color: var(--ink);
 }
 
 @media (max-width: 900px) {

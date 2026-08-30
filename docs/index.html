@@ -390,6 +390,21 @@
     </div>
   </div>
 
+  <div id="rename-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="rename-dialog-title">
+    <div class="modal-backdrop" id="rename-dialog-backdrop"></div>
+    <div class="modal-card">
+      <h2 id="rename-dialog-title">إعادة تسمية الملف</h2>
+      <p id="rename-dialog-sub" class="muted">أدخل الاسم الجديد مع الامتداد إن وُجد (مثل report.pdf).</p>
+      <label for="rename-filename">اسم الملف</label>
+      <input id="rename-filename" type="text" autocomplete="off" />
+      <p id="rename-dialog-error" class="error hidden"></p>
+      <div class="modal-actions">
+        <button id="rename-cancel-btn" class="btn ghost" type="button">إلغاء</button>
+        <button id="rename-confirm-btn" class="btn primary" type="button">حفظ</button>
+      </div>
+    </div>
+  </div>
+
   <div id="delete-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title">
     <div class="modal-backdrop" id="delete-dialog-backdrop"></div>
     <div class="modal-card">
@@ -454,6 +469,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/main.js?v=20260830b"></script>
+  <script type="module" src="js/main.js?v=20260830-rename"></script>
 </body>
 </html>
