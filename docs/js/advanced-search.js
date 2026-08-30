@@ -1,39 +1,59 @@
-import { BM25Index, allChunksFromDocuments, tokenize } from "./bm25-search.js";
+import { BM25Index, tokenize } from "./bm25-search.js";
 import { DEFAULT_SEARCH_OPTIONS } from "./search-options.js";
 
 function escapeRegex(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function normalizeComparable(text, matchCase) {
-  return matchCase ? String(text || "") : String(text || "").toLowerCase();
+function queryTerms(query, options) {
+  if (options.exactPhrase) {
+    return [String(query || "").trim()].filter(Boolean);
+  }
+  if (options.wholeWords) {
+    return String(query || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+  }
+  return tokenize(query, { matchCase: options.matchCase });
+}
+
+function containsWholeTerm(text, term, matchCase) {
+  const flags = matchCase ? "u" : "iu";
+  const pattern = new RegExp(
+    `(^|[^\\p{L}\\p{N}_])${escapeRegex(term)}([^\\p{L}\\p{N}_]|$)`,
+    flags
+  );
+  return pattern.test(String(text || ""));
 }
 
 function textMatchesQuery(text, query, options) {
-  const haystack = normalizeComparable(text, options.matchCase);
-  const needle = normalizeComparable(query, options.matchCase);
-  if (!needle) return false;
+  const source = String(text || "");
+  const trimmed = String(query || "").trim();
+  if (!trimmed || !source) return false;
 
   if (options.exactPhrase) {
-    return haystack.includes(needle);
+    return options.matchCase
+      ? source.includes(trimmed)
+      : source.toLowerCase().includes(trimmed.toLowerCase());
   }
 
-  const terms = options.wholeWords
-    ? needle.split(/\s+/).filter(Boolean)
-    : tokenize(query, { matchCase: options.matchCase });
-
+  const terms = queryTerms(query, options);
   if (!terms.length) return false;
 
   return terms.every((term) => {
     if (options.wholeWords) {
-      const pattern = new RegExp(
-        `(?:^|[\\s\\p{P}\\p{S}])${escapeRegex(term)}(?:$|[\\s\\p{P}\\p{S}])`,
-        options.matchCase ? "u" : "iu"
-      );
-      return pattern.test(` ${haystack} `);
+      return containsWholeTerm(source, term, options.matchCase);
     }
-    return haystack.includes(normalizeComparable(term, options.matchCase));
+    if (options.matchCase) {
+      return source.includes(term);
+    }
+    return source.toLowerCase().includes(String(term).toLowerCase());
   });
+}
+
+function needsTextFilter(options) {
+  return Boolean(options.matchCase || options.wholeWords || options.exactPhrase);
 }
 
 function buildSearchChunks(documents, options) {
@@ -69,38 +89,47 @@ function buildSearchChunks(documents, options) {
   return chunks;
 }
 
-function exactSearch(chunks, query, options, category, limit) {
-  const hits = [];
-  for (const chunk of chunks) {
-    if (category && chunk.category !== category) continue;
-    if (!textMatchesQuery(chunk.content, query, options)) continue;
-    hits.push({
-      chunk,
-      score: chunk.source === "filename" ? 2 : 1,
-      docId: chunk.docId,
-      filename: chunk.filename,
-      category: chunk.category,
-      content: chunk.content,
-    });
-  }
-
-  hits.sort((a, b) => b.score - a.score || a.filename.localeCompare(b.filename, "ar"));
-  return hits.slice(0, limit);
+function toHit(chunk, score) {
+  return {
+    chunk,
+    score,
+    docId: chunk.docId,
+    filename: chunk.filename,
+    category: chunk.category,
+    content: chunk.content,
+  };
 }
 
-function bm25Search(chunks, query, options, category, limit) {
-  const index = new BM25Index(chunks);
-  const hits = index.search(query, limit * 3, category, {
+function rankHits(matches, query, options, limit) {
+  if (!matches.length) return [];
+
+  const index = new BM25Index(matches);
+  const ranked = index.search(query, matches.length, null, {
     matchCase: options.matchCase,
   });
 
-  if (!options.wholeWords && !options.exactPhrase) {
-    return hits.slice(0, limit);
-  }
+  const hits = ranked.length
+    ? ranked
+    : matches
+        .map((chunk) => toHit(chunk, chunk.source === "filename" ? 2 : 1))
+        .sort((a, b) => b.score - a.score || a.filename.localeCompare(b.filename, "ar"));
 
   return hits
     .filter((hit) => textMatchesQuery(hit.content, query, options))
     .slice(0, limit);
+}
+
+function textFilteredSearch(chunks, query, options, category, limit) {
+  let pool = chunks;
+  if (category) pool = pool.filter((chunk) => chunk.category === category);
+
+  const matches = pool.filter((chunk) => textMatchesQuery(chunk.content, query, options));
+  return rankHits(matches, query, options, limit);
+}
+
+function bm25Search(chunks, query, options, category, limit) {
+  const index = new BM25Index(chunks);
+  return index.search(query, limit, category, { matchCase: options.matchCase });
 }
 
 export function advancedSearch(documents, query, rawOptions = {}) {
@@ -117,8 +146,8 @@ export function advancedSearch(documents, query, rawOptions = {}) {
   const chunks = buildSearchChunks(documents, options);
   if (!chunks.length) return [];
 
-  if (options.exactPhrase) {
-    return exactSearch(chunks, trimmed, options, category, limit);
+  if (needsTextFilter(options)) {
+    return textFilteredSearch(chunks, trimmed, options, category, limit);
   }
 
   return bm25Search(chunks, trimmed, options, category, limit);

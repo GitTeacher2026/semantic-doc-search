@@ -8,6 +8,10 @@
   --danger: #9b2c2c;
   --surface: #ffffff;
   --surface-muted: #faf8f3;
+  --hover-bg: #f7f3ea;
+  --tree-bg: #ffffff;
+  --folder-count-bg: #f3efe6;
+  --on-accent: #ffffff;
 }
 
 * { box-sizing: border-box; }
@@ -81,7 +85,7 @@ select {
 
 .btn.primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   width: 100%;
   margin-top: 1rem;
 }
@@ -455,7 +459,7 @@ select {
 .folder-tree {
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #fff;
+  background: var(--tree-bg);
   padding: 0.5rem;
   overflow: hidden;
 }
@@ -491,7 +495,7 @@ select {
 }
 
 .tree-folder > summary.tree-folder-label:hover {
-  background: #f7f3ea;
+  background: var(--hover-bg);
 }
 
 .tree-chevron {
@@ -522,7 +526,7 @@ select {
   font-size: 0.78rem;
   font-weight: 700;
   color: var(--muted);
-  background: #f3efe6;
+  background: var(--folder-count-bg);
   border-radius: 999px;
   padding: 0.1rem 0.45rem;
 }
@@ -535,7 +539,7 @@ select {
   list-style: none;
   margin: 0.2rem 0 0;
   padding: 0 0 0 1.25rem;
-  border-right: 1px dashed #ddd5c8;
+  border-right: 1px dashed var(--line);
 }
 
 .tree-file {
@@ -551,7 +555,7 @@ select {
 }
 
 .tree-file-row:hover {
-  background: #faf8f4;
+  background: var(--hover-bg);
 }
 
 .tree-file-icon {
@@ -808,7 +812,8 @@ mark.query-hit, .query-hit {
   padding: 0.45rem 0.8rem;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: #faf8f3;
+  background: var(--surface-muted);
+  color: var(--ink);
   cursor: pointer;
   font-weight: 600;
   font-size: 0.88rem;
@@ -837,9 +842,26 @@ mark.query-hit, .query-hit {
   gap: 0.85rem;
   margin-bottom: 1rem;
   padding: 0.9rem 1rem;
-  border: 1px solid #c8def7;
+  border: 1px solid var(--line);
   border-radius: 12px;
-  background: linear-gradient(135deg, #f5f9ff 0%, #eef7f3 100%);
+  background: var(--surface-muted);
+  color: var(--ink);
+}
+
+.drive-connect-panel strong {
+  color: var(--ink);
+}
+
+.drive-connect-panel .btn.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  border: 1px solid transparent;
+}
+
+.drive-connect-panel .btn.ghost {
+  color: var(--ink);
+  border-color: var(--line);
+  background: var(--surface);
 }
 
 .drive-connect-info {
@@ -896,7 +918,7 @@ mark.query-hit, .query-hit {
   padding: 0.85rem 0.5rem;
   border: 1px solid var(--line);
   border-radius: 14px;
-  background: #fff;
+  background: var(--surface);
   text-align: center;
 }
 
@@ -1332,11 +1354,15 @@ html[data-theme="dark"] {
   --muted: #9aa8ba;
   --panel: #162033;
   --line: #2f3b50;
-  --accent: #3dd6a0;
+  --accent: #34d399;
   --accent-soft: #123b30;
   --danger: #ff9b9b;
   --surface: #101828;
   --surface-muted: #1a2438;
+  --hover-bg: #243044;
+  --tree-bg: #141d2e;
+  --folder-count-bg: #243044;
+  --on-accent: #052e1d;
 }
 
 html[data-theme="dark"] body {
@@ -1351,16 +1377,55 @@ html[data-theme="dark"] .pending-file-card,
 html[data-theme="dark"] .storage-mode-picker,
 html[data-theme="dark"] .advanced-search-panel,
 html[data-theme="dark"] .tree-storage-label,
-html[data-theme="dark"] .tree-folder-label,
-html[data-theme="dark"] .tree-file,
+html[data-theme="dark"] .tree-folder > summary.tree-folder-label,
+html[data-theme="dark"] .tree-file-row,
 html[data-theme="dark"] .search-result-card,
 html[data-theme="dark"] .trash-item {
   background: var(--surface-muted);
 }
 
+html[data-theme="dark"] .folder-tree {
+  background: var(--tree-bg);
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .tree-storage-label:hover,
+html[data-theme="dark"] .tree-folder > summary.tree-folder-label:hover,
+html[data-theme="dark"] .tree-file-row:hover {
+  background: var(--hover-bg);
+}
+
 html[data-theme="dark"] .drive-connect-panel {
-  background: linear-gradient(135deg, #132033 0%, #102a24 100%);
-  border-color: #2f4d67;
+  background: var(--surface-muted);
+  border-color: #3b5f82;
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .drive-connect-panel .btn.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+}
+
+html[data-theme="dark"] .drive-connect-panel .btn.primary:hover {
+  filter: brightness(1.08);
+}
+
+html[data-theme="dark"] .drive-connect-panel .btn.ghost {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .storage-mode-option {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .storage-mode-option:has(input:checked) {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 html[data-theme="dark"] .storage-badge.storage-github {
