@@ -30,7 +30,13 @@ import {
   loadDocuments,
   saveDocuments,
 } from "./storage.js";
-import { clearDriveSession, ensureDriveAccess } from "./drive-auth.js";
+import {
+  clearDriveSession,
+  isDriveConnected,
+  isDriveConfigured,
+  loginToGoogleDrive,
+  logoutGoogleDrive,
+} from "./drive-auth.js";
 import { uploadDocumentFile, downloadDriveFile } from "./drive-storage.js";
 import {
   approvePendingUser,
@@ -76,6 +82,10 @@ const pendingUsersList = document.getElementById("pending-users-list");
 const resendEmailBtn = document.getElementById("resend-email-btn");
 const dropZone = document.getElementById("drop-zone");
 const fileInput = document.getElementById("file-input");
+const driveConnectPanel = document.getElementById("drive-connect-panel");
+const driveStatusText = document.getElementById("drive-status-text");
+const driveLoginBtn = document.getElementById("drive-login-btn");
+const driveLogoutBtn = document.getElementById("drive-logout-btn");
 const pendingFilesEl = document.getElementById("pending-files");
 const ingestBtn = document.getElementById("ingest-btn");
 const libraryList = document.getElementById("library-list");
@@ -128,6 +138,8 @@ async function hydrateDocuments(password) {
     state = normalizeState(await loadDocuments(password));
     renderLibrary();
     renderTrash();
+    updateDrivePanel();
+    updateUploadAccess();
     setStatus("", false);
   } catch (error) {
     setStatus(`تعذّر تحميل المستندات: ${error.message}`, true);
@@ -147,6 +159,67 @@ function isAuthed() {
   return Boolean(currentUser);
 }
 
+function requiresDriveLogin() {
+  return isUsingDriveStorage();
+}
+
+function canUploadFiles() {
+  return !requiresDriveLogin() || isDriveConnected();
+}
+
+function updateDrivePanel() {
+  if (!driveConnectPanel) return;
+  if (!isDriveConfigured()) {
+    driveConnectPanel.classList.add("hidden");
+    return;
+  }
+
+  driveConnectPanel.classList.remove("hidden");
+  const connected = isDriveConnected();
+  if (driveStatusText) {
+    driveStatusText.textContent = connected
+      ? "متصل — يمكنك رفع الملفات وحفظها في Google Drive."
+      : "غير متصل — سجّل الدخول إلى Google Drive قبل رفع أي ملف.";
+  }
+  driveLoginBtn?.classList.toggle("hidden", connected);
+  driveLogoutBtn?.classList.toggle("hidden", !connected);
+}
+
+function updateUploadAccess() {
+  const allowed = canUploadFiles();
+  dropZone?.classList.toggle("is-disabled", !allowed);
+  if (fileInput) fileInput.disabled = !allowed;
+  ingestBtn.disabled = !allowed || !pendingFiles.length;
+}
+
+async function handleDriveLogin() {
+  if (!driveLoginBtn) return;
+  driveLoginBtn.disabled = true;
+  setStatus("جارٍ ربط Google Drive…");
+  try {
+    await loginToGoogleDrive();
+    await hydrateDocuments(sessionPassword);
+    updateDrivePanel();
+    updateUploadAccess();
+    setStatus("تم ربط Google Drive بنجاح.", true);
+    setTimeout(() => setStatus("", false), 2500);
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    driveLoginBtn.disabled = false;
+  }
+}
+
+function handleDriveLogout() {
+  logoutGoogleDrive();
+  pendingFiles = [];
+  renderPendingFiles();
+  updateDrivePanel();
+  updateUploadAccess();
+  setStatus("تم قطع اتصال Google Drive. لن يمكن رفع ملفات جديدة حتى تسجيل الدخول مجدداً.", true);
+  setTimeout(() => setStatus("", false), 3000);
+}
+
 function showView() {
   if (!isAuthed()) return;
   appView.classList.remove("hidden");
@@ -157,6 +230,8 @@ function showView() {
     renderLibrary();
     renderTrash();
     refreshAdminToolbar();
+    updateDrivePanel();
+    updateUploadAccess();
     switchAppPage("library");
   }
 }
@@ -221,7 +296,7 @@ function largeIconMarkup(group) {
 function setPendingFiles(files) {
   pendingFiles = [...files];
   renderPendingFiles();
-  ingestBtn.disabled = !pendingFiles.length;
+  updateUploadAccess();
 }
 
 function renderPendingFiles() {
@@ -250,7 +325,7 @@ function renderPendingFiles() {
       const index = Number(btn.dataset.index);
       pendingFiles = pendingFiles.filter((_, i) => i !== index);
       renderPendingFiles();
-      ingestBtn.disabled = !pendingFiles.length;
+      updateUploadAccess();
     });
   });
 }
@@ -258,12 +333,24 @@ function renderPendingFiles() {
 function setupDropZone() {
   const addFiles = (fileList) => {
     if (!fileList?.length) return;
+    if (!canUploadFiles()) {
+      setStatus("يرجى تسجيل الدخول إلى Google Drive قبل رفع الملفات.", true);
+      return;
+    }
     const merged = [...pendingFiles];
     for (const file of fileList) merged.push(file);
     setPendingFiles(merged);
   };
 
+  dropZone.addEventListener("click", (event) => {
+    if (!canUploadFiles()) {
+      event.preventDefault();
+      setStatus("يرجى تسجيل الدخول إلى Google Drive قبل رفع الملفات.", true);
+    }
+  });
+
   dropZone.addEventListener("keydown", (event) => {
+    if (!canUploadFiles()) return;
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       fileInput.click();
@@ -278,6 +365,7 @@ function setupDropZone() {
   ["dragenter", "dragover"].forEach((type) => {
     dropZone.addEventListener(type, (event) => {
       event.preventDefault();
+      if (!canUploadFiles()) return;
       dropZone.classList.add("drag-over");
     });
   });
@@ -290,6 +378,11 @@ function setupDropZone() {
   });
 
   dropZone.addEventListener("drop", (event) => {
+    if (!canUploadFiles()) {
+      event.preventDefault();
+      setStatus("يرجى تسجيل الدخول إلى Google Drive قبل رفع الملفات.", true);
+      return;
+    }
     addFiles([...event.dataTransfer.files]);
   });
 }
@@ -897,6 +990,11 @@ async function confirmUnlock() {
 }
 
 async function ingestFiles(files) {
+  if (!canUploadFiles()) {
+    setStatus("يرجى تسجيل الدخول إلى Google Drive قبل رفع الملفات.", true);
+    return;
+  }
+
   ingestBtn.disabled = true;
   setStatus("جارٍ فهرسة الملفات…");
   try {
@@ -917,7 +1015,6 @@ async function ingestFiles(files) {
       const chunks = chunkText(text).map((content) => ({ content }));
       let driveFileId = null;
       if (isUsingDriveStorage()) {
-        await ensureDriveAccess();
         driveFileId = await uploadDocumentFile(
           category,
           file.name,
@@ -1043,6 +1140,9 @@ lockPasswordConfirm?.addEventListener("keydown", (event) => {
   if (event.key === "Enter") confirmLock();
 });
 
+driveLoginBtn?.addEventListener("click", handleDriveLogin);
+driveLogoutBtn?.addEventListener("click", handleDriveLogout);
+
 setupDropZone();
 
 export async function startApp({ user, auth }) {
@@ -1058,6 +1158,8 @@ export async function startApp({ user, auth }) {
 
   try {
     await hydrateDocuments(sessionPassword);
+    updateDrivePanel();
+    updateUploadAccess();
     showView();
   } catch (error) {
     setStatus(`تعذّر تحميل المستندات: ${error.message}`, true);

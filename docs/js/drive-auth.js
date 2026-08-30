@@ -10,6 +10,7 @@ const DRIVE_SCOPES = [
 ].join(" ");
 
 let tokenClient = null;
+let loginPromise = null;
 
 export function getGoogleClientId() {
   return String(GOOGLE_CLIENT_ID || "").trim();
@@ -26,9 +27,15 @@ export function getStoredAccessToken() {
   return token;
 }
 
+export function isDriveConnected() {
+  return Boolean(getStoredAccessToken());
+}
+
 export function clearDriveSession() {
   sessionStorage.removeItem(TOKEN_KEY);
   sessionStorage.removeItem(TOKEN_EXPIRY_KEY);
+  tokenClient = null;
+  loginPromise = null;
 }
 
 function loadGoogleScript() {
@@ -95,7 +102,48 @@ function storeAccessToken(response) {
   );
 }
 
-export async function ensureDriveAccess({ interactive = true } = {}) {
+async function requestDriveToken() {
+  if (!isDriveConfigured()) {
+    throw new Error(
+      "Google Drive غير مضبوط. أضف GOOGLE_CLIENT_ID الصحيح في GitHub Secrets ثم أعد نشر الموقع."
+    );
+  }
+
+  await loadGoogleScript();
+  const clientId = getGoogleClientId();
+  tokenClient = null;
+
+  return new Promise((resolve, reject) => {
+    tokenClient = window.google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: DRIVE_SCOPES,
+      hint: ADMIN_EMAIL,
+      callback: async (response) => {
+        loginPromise = null;
+        if (response.error) {
+          reject(new Error(formatOAuthError(response)));
+          return;
+        }
+        try {
+          storeAccessToken(response);
+          const profile = await verifyDriveAccount(response.access_token);
+          resolve({ token: response.access_token, profile });
+        } catch (error) {
+          reject(error);
+        }
+      },
+    });
+    tokenClient.requestAccessToken({ prompt: "select_account" });
+  });
+}
+
+export async function loginToGoogleDrive() {
+  if (loginPromise) return loginPromise;
+  loginPromise = requestDriveToken();
+  return loginPromise;
+}
+
+export async function getDriveAccessToken({ interactive = false } = {}) {
   const existing = getStoredAccessToken();
   if (existing) {
     try {
@@ -105,39 +153,19 @@ export async function ensureDriveAccess({ interactive = true } = {}) {
       clearDriveSession();
     }
   }
+  if (!interactive) return null;
+  const { token } = await loginToGoogleDrive();
+  return token;
+}
 
-  if (!interactive) {
-    throw new Error("يلزم ربط Google Drive أولاً.");
+export async function ensureDriveAccess({ interactive = false } = {}) {
+  const token = await getDriveAccessToken({ interactive });
+  if (!token) {
+    throw new Error("يلزم تسجيل الدخول إلى Google Drive أولاً.");
   }
+  return token;
+}
 
-  if (!isDriveConfigured()) {
-    throw new Error(
-      "Google Drive غير مضبوط. أضف GOOGLE_CLIENT_ID الصحيح في GitHub Secrets ثم أعد نشر الموقع."
-    );
-  }
-
-  await loadGoogleScript();
-  const clientId = getGoogleClientId();
-
-  return new Promise((resolve, reject) => {
-    tokenClient = window.google.accounts.oauth2.initTokenClient({
-      client_id: clientId,
-      scope: DRIVE_SCOPES,
-      hint: ADMIN_EMAIL,
-      callback: async (response) => {
-        if (response.error) {
-          reject(new Error(formatOAuthError(response)));
-          return;
-        }
-        try {
-          storeAccessToken(response);
-          await verifyDriveAccount(response.access_token);
-          resolve(response.access_token);
-        } catch (error) {
-          reject(error);
-        }
-      },
-    });
-    tokenClient.requestAccessToken({ prompt: "select_account" });
-  });
+export function logoutGoogleDrive() {
+  clearDriveSession();
 }

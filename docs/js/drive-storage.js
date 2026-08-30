@@ -1,4 +1,4 @@
-import { ensureDriveAccess, getStoredAccessToken, isDriveConfigured } from "./drive-auth.js";
+import { getStoredAccessToken, isDriveConfigured } from "./drive-auth.js";
 
 const ROOT_FOLDER_NAME = "مخزن الوثائق";
 const INDEX_FILE_NAME = "docshelf-index.enc.json";
@@ -27,8 +27,16 @@ export function sanitizeFolderName(name) {
   );
 }
 
+function requireDriveToken() {
+  const token = getStoredAccessToken();
+  if (!token) {
+    throw new Error("يلزم تسجيل الدخول إلى Google Drive أولاً.");
+  }
+  return token;
+}
+
 async function driveJson(path, options = {}) {
-  const token = getStoredAccessToken() || (await ensureDriveAccess());
+  const token = requireDriveToken();
   const res = await fetch(`https://www.googleapis.com/drive/v3${path}`, {
     ...options,
     headers: {
@@ -100,7 +108,7 @@ async function findChildFile(parentId, name) {
 }
 
 async function uploadBinary(fileId, blob) {
-  const token = getStoredAccessToken() || (await ensureDriveAccess());
+  const token = requireDriveToken();
   const res = await fetch(
     `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
     {
@@ -142,7 +150,7 @@ export async function uploadDocumentFile(category, filename, blob) {
 }
 
 export async function downloadDriveFile(fileId) {
-  const token = getStoredAccessToken() || (await ensureDriveAccess());
+  const token = requireDriveToken();
   const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
     headers: { Authorization: `Bearer ${token}` },
   });

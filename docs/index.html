@@ -245,6 +245,19 @@
       <main class="grid">
         <section class="panel">
           <h2>رفع الملفات</h2>
+          <div id="drive-connect-panel" class="drive-connect-panel hidden">
+            <div class="drive-connect-info">
+              <span class="drive-connect-icon" aria-hidden="true">☁️</span>
+              <div>
+                <strong>Google Drive</strong>
+                <p id="drive-status-text" class="muted">غير متصل — سجّل الدخول قبل رفع الملفات.</p>
+              </div>
+            </div>
+            <div class="drive-connect-actions">
+              <button id="drive-login-btn" class="btn primary small" type="button">تسجيل الدخول إلى Google Drive</button>
+              <button id="drive-logout-btn" class="btn ghost small hidden" type="button">قطع الاتصال</button>
+            </div>
+          </div>
           <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="منطقة رفع الملفات">
             <input id="file-input" class="drop-zone-input" type="file" accept=".pdf,.txt,.md,.text,.log,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.gif,.bmp,.tif,.tiff" multiple />
             <div class="drop-zone-content">

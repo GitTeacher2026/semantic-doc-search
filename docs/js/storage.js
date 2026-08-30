@@ -4,7 +4,7 @@ import {
   isDriveStorageConfigured,
   uploadEncryptedStore as uploadDriveStore,
 } from "./drive-storage.js";
-import { ensureDriveAccess } from "./drive-auth.js";
+import { getStoredAccessToken, isDriveConfigured } from "./drive-auth.js";
 import {
   fetchEncryptedStore as fetchGitHubStore,
   isGitHubStorageConfigured,
@@ -44,9 +44,8 @@ export function isUsingDriveStorage() {
 }
 
 async function fetchRemoteStore() {
-  if (isDriveStorageConfigured()) {
+  if (isDriveStorageConfigured() && getStoredAccessToken()) {
     try {
-      await ensureDriveAccess();
       const { envelope, fileId } = await fetchDriveStore();
       return { envelope, fileId, sha: null };
     } catch (error) {
@@ -62,6 +61,9 @@ async function fetchRemoteStore() {
 
 async function uploadRemoteStore(envelope) {
   if (isDriveStorageConfigured()) {
+    if (!getStoredAccessToken()) {
+      throw new Error("يلزم تسجيل الدخول إلى Google Drive قبل حفظ الملفات.");
+    }
     try {
       remoteFileId = await uploadDriveStore(envelope, remoteFileId);
       return;
