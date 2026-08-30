@@ -25,6 +25,8 @@ const OCR_PROMPT =
   "Extract every visible word from this image exactly as shown (like Google Lens). " +
   "Return raw text only in reading order. Support Arabic and English. No commentary.";
 
+let cachedApiKey = null;
+
 export function isImageFile(filename) {
   const dot = String(filename || "").lastIndexOf(".");
   if (dot < 0) return false;
@@ -37,6 +39,62 @@ export function formatOcrProgress({ stage, pct } = {}) {
     return `${label}${typeof pct === "number" ? `: ${pct}%` : "…"}`;
   }
   return label;
+}
+
+function isValidGeminiStudioKey(key) {
+  return /^AIza[0-9A-Za-z_-]{20,}$/.test(String(key || "").trim());
+}
+
+async function resolveGeminiApiKey() {
+  if (cachedApiKey) return cachedApiKey;
+
+  const imported = String(GEMINI_API_KEY || "").trim();
+  if (imported) {
+    cachedApiKey = imported;
+    return cachedApiKey;
+  }
+
+  try {
+    const res = await fetch(`./js/config.js?cb=${Date.now()}`, { cache: "no-store" });
+    if (res.ok) {
+      const text = await res.text();
+      const match = text.match(/GEMINI_API_KEY\s*=\s*"([^"]*)"/);
+      const fetched = match?.[1]?.trim() || "";
+      if (fetched) {
+        cachedApiKey = fetched;
+        return cachedApiKey;
+      }
+    }
+  } catch {
+    // ignore — fall through to error below
+  }
+
+  return "";
+}
+
+function missingKeyMessage() {
+  return [
+    "مفتاح Gemini غير موجود في التطبيق.",
+    "1) أنشئ مفتاحاً من Google AI Studio: https://aistudio.google.com/apikey",
+    "2) أضفه في GitHub → Settings → Secrets → GEMINI_API_KEY",
+    "3) أعد تشغيل workflow «Deploy GitHub Pages»",
+    "4) حدّث الصفحة تحديثاً قوياً (Ctrl+Shift+R)",
+  ].join(" ");
+}
+
+function invalidKeyMessage(key) {
+  const prefix = String(key || "").trim().slice(0, 8);
+  const prefixHint = prefix
+    ? `المفتاح المُنشَر حالياً يبدأ بـ «${prefix}…» — هذا ليس مفتاح AI Studio.`
+    : "المفتاح المُنشَر غير صالح.";
+  return [
+    "مفتاح Gemini غير صالح.",
+    prefixHint,
+    "يجب أن يكون من Google AI Studio ويبدأ بـ AIzaSy",
+    "لا تستخدم Client Secret ولا OAuth token (مثل AQ.) ولا مفتاح Vertex.",
+    "أنشئ مفتاحاً جديداً: https://aistudio.google.com/apikey",
+    "ثم حدّث GEMINI_API_KEY في GitHub Secrets وأعد تشغيل «Deploy GitHub Pages».",
+  ].join(" ");
 }
 
 async function prepareImageBlob(blob) {
@@ -121,10 +179,10 @@ function extractGeminiText(payload) {
     .trim();
 }
 
-function formatGeminiError(status, payload) {
+function formatGeminiError(status, payload, apiKey) {
   const message = payload?.error?.message || `Google AI (${status})`;
-  if (status === 403 || message.includes("API key")) {
-    return "مفتاح Gemini غير صالح. أضف GEMINI_API_KEY في GitHub Secrets ثم أعد النشر.";
+  if (status === 401 || status === 403 || /API key/i.test(message)) {
+    return invalidKeyMessage(apiKey);
   }
   if (status === 429) {
     return "تم تجاوز حد استخدام Google AI. حاول بعد قليل.";
@@ -155,7 +213,7 @@ async function callGeminiVision(apiKey, base64, mimeType, model) {
 
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const error = new Error(formatGeminiError(res.status, payload));
+    const error = new Error(formatGeminiError(res.status, payload, apiKey));
     error.status = res.status;
     throw error;
   }
@@ -164,11 +222,12 @@ async function callGeminiVision(apiKey, base64, mimeType, model) {
 }
 
 async function extractWithGemini(base64, mimeType, onProgress) {
-  const apiKey = String(GEMINI_API_KEY || "").trim();
+  const apiKey = await resolveGeminiApiKey();
   if (!apiKey) {
-    throw new Error(
-      "استخراج النص من الصور يتطلب GEMINI_API_KEY. أنشئ مفتاحاً من Google AI Studio وأضفه في GitHub Secrets."
-    );
+    throw new Error(missingKeyMessage());
+  }
+  if (!isValidGeminiStudioKey(apiKey)) {
+    throw new Error(invalidKeyMessage(apiKey));
   }
 
   onProgress?.({ stage: "upload", pct: 20 });
