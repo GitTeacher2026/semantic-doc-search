@@ -385,6 +385,26 @@
     </div>
   </div>
 
-  <script type="module" src="js/main.js?v=20260830"></script>
+  <div id="image-preview-modal" class="image-preview-modal hidden" role="dialog" aria-modal="true" aria-labelledby="image-preview-title">
+    <div class="image-preview-backdrop" data-close aria-hidden="true"></div>
+    <div class="image-preview-shell">
+      <header class="image-preview-toolbar">
+        <p id="image-preview-title" class="image-preview-title"></p>
+        <div class="image-preview-zoom-controls">
+          <button id="image-preview-zoom-out" class="image-preview-zoom-btn" type="button" aria-label="تصغير">−</button>
+          <span id="image-preview-zoom-level" class="image-preview-zoom-level">100%</span>
+          <button id="image-preview-zoom-in" class="image-preview-zoom-btn" type="button" aria-label="تكبير">+</button>
+          <button id="image-preview-zoom-reset" class="btn ghost image-preview-fit-btn" type="button">ملاءمة</button>
+        </div>
+        <button id="image-preview-close" class="image-preview-close" type="button" aria-label="إغلاق">✕</button>
+      </header>
+      <div id="image-preview-stage" class="image-preview-stage">
+        <img id="image-preview-img" alt="" draggable="false" />
+      </div>
+      <p class="image-preview-hint muted">عجلة الفأرة أو الإيماءات للتكبير · اسحب للتحريك · نقرتان للتبديل</p>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js?v=20260830-img"></script>
 </body>
 </html>

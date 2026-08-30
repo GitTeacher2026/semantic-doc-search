@@ -6,6 +6,13 @@ import {
 import { bindSearchResults, renderSearchResults } from "./search-results.js";
 import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js?v=20260830";
 import {
+  ensurePreviewUrl,
+  initImagePreview,
+  openImagePreview,
+  revokeAllPreviewUrls,
+  syncPreviewUrls,
+} from "./image-preview.js";
+import {
   EXT_GROUPS,
   GROUP_ICONS,
   GROUP_LABELS,
@@ -212,6 +219,7 @@ async function handleDriveLogin() {
 
 function handleDriveLogout() {
   logoutGoogleDrive();
+  revokeAllPreviewUrls();
   pendingFiles = [];
   renderPendingFiles();
   updateDrivePanel();
@@ -294,9 +302,28 @@ function largeIconMarkup(group) {
 }
 
 function setPendingFiles(files) {
+  syncPreviewUrls(files, isImageFile);
   pendingFiles = [...files];
   renderPendingFiles();
   updateUploadAccess();
+}
+
+function renderPendingFileCard(file, index) {
+  const image = isImageFile(file.name);
+  const previewUrl = image ? ensurePreviewUrl(file) : "";
+  const visual = image
+    ? `<button type="button" class="pending-file-thumb" data-preview-index="${index}" aria-label="معاينة ${escapeHtml(file.name)}">
+        <img src="${previewUrl}" alt="" loading="lazy" />
+      </button>`
+    : largeIconMarkup(fileGroup(file.name));
+
+  return `
+    <article class="pending-file-card${image ? " is-image" : ""}">
+      ${visual}
+      <div class="pending-file-name">${escapeHtml(file.name)}</div>
+      <div class="pending-file-size">${formatFileSize(file.size)}${image ? " · OCR" : ""}</div>
+      <button class="pending-file-remove" type="button" data-index="${index}">إزالة</button>
+    </article>`;
 }
 
 function renderPendingFiles() {
@@ -308,24 +335,25 @@ function renderPendingFiles() {
 
   pendingFilesEl.classList.remove("hidden");
   pendingFilesEl.innerHTML = pendingFiles
-    .map(
-      (file, index) => `
-      <article class="pending-file-card">
-        ${largeIconMarkup(fileGroup(file.name))}
-        <div class="pending-file-name">${escapeHtml(file.name)}</div>
-        <div class="pending-file-size">${formatFileSize(file.size)}${isImageFile(file.name) ? " · OCR" : ""}</div>
-        <button class="pending-file-remove" type="button" data-index="${index}">إزالة</button>
-      </article>`
-    )
+    .map((file, index) => renderPendingFileCard(file, index))
     .join("");
+
+  pendingFilesEl.querySelectorAll(".pending-file-thumb").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const index = Number(btn.dataset.previewIndex);
+      const file = pendingFiles[index];
+      if (!file) return;
+      const url = ensurePreviewUrl(file);
+      if (url) openImagePreview(url, file.name);
+    });
+  });
 
   pendingFilesEl.querySelectorAll(".pending-file-remove").forEach((btn) => {
     btn.addEventListener("click", (event) => {
       event.stopPropagation();
       const index = Number(btn.dataset.index);
-      pendingFiles = pendingFiles.filter((_, i) => i !== index);
-      renderPendingFiles();
-      updateUploadAccess();
+      setPendingFiles(pendingFiles.filter((_, i) => i !== index));
     });
   });
 }
@@ -1051,6 +1079,7 @@ async function ingestFiles(files) {
     setStatus(`خطأ: ${error.message}`, true);
   } finally {
     ingestBtn.disabled = !pendingFiles.length;
+    revokeAllPreviewUrls();
     pendingFiles = [];
     renderPendingFiles();
     fileInput.value = "";
@@ -1144,6 +1173,7 @@ driveLoginBtn?.addEventListener("click", handleDriveLogin);
 driveLogoutBtn?.addEventListener("click", handleDriveLogout);
 
 setupDropZone();
+initImagePreview();
 
 export async function startApp({ user, auth }) {
   currentUser = user;
