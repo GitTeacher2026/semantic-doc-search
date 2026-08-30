@@ -45,3 +45,17 @@ export function applySearchOptionsToForm(options, root = document) {
   set("#search-opt-filename", options.searchInFilename);
   set("#search-opt-content", options.searchInContent);
 }
+
+export function describeActiveSearchOptions(options = DEFAULT_SEARCH_OPTIONS) {
+  const labels = [];
+  if (options.matchCase) labels.push("مطابقة حالة الأحرف");
+  if (options.wholeWords) labels.push("كلمات كاملة");
+  if (options.exactPhrase) labels.push("عبارة حرفية");
+  if (options.searchInFilename && !options.searchInContent) labels.push("أسماء الملفات فقط");
+  else if (!options.searchInFilename && options.searchInContent) labels.push("المحتوى فقط");
+  else {
+    if (options.searchInFilename) labels.push("أسماء الملفات");
+    if (options.searchInContent) labels.push("المحتوى");
+  }
+  return labels;
+}

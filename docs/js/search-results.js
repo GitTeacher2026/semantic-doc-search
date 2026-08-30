@@ -146,13 +146,22 @@ export function renderSearchResults(hits, query, docMeta = new Map(), searchOpti
     .filter((hit) => hit.chunk.content.trim());
 
   if (!normalizedHits.length) {
-    return `<p class="muted search-empty">لم يُعثر على مقاطع مطابقة. جرّب عبارة أوسع.</p>`;
+    return `<p class="muted search-empty">لم يُعثر على مقاطع مطابقة. جرّب عبارة أوسع أو عدّل خيارات البحث.</p>`;
   }
 
   const scored = normalizeScores(normalizedHits);
   const groups = groupHits(scored);
   const docCount = groups.length;
   const snippetCount = scored.length;
+  const optionLabels = Array.isArray(searchOptions.labels)
+    ? searchOptions.labels
+    : [];
+
+  const optionChips = optionLabels.length
+    ? `<div class="search-active-options">${optionLabels
+        .map((label) => `<span class="search-option-chip">${escapeHtml(label)}</span>`)
+        .join("")}</div>`
+    : "";
 
   const cards = groups
     .map((group, index) => {
@@ -196,6 +205,7 @@ export function renderSearchResults(hits, query, docMeta = new Map(), searchOpti
         <span class="search-summary-stat"><strong>${docCount}</strong> مستند</span>
         <span class="search-summary-query muted">لـ «${escapeHtml(query)}»</span>
       </div>
+      ${optionChips}
       <div class="search-results-grid">${cards}</div>
     </div>`;
 }

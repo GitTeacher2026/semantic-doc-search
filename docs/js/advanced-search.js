@@ -5,26 +5,41 @@ function escapeRegex(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function compareToken(token, term, matchCase) {
+  return matchCase ? token === term : token.toLowerCase() === term.toLowerCase();
+}
+
 function queryTerms(query, options) {
+  const trimmed = String(query || "").trim();
+  if (!trimmed) return [];
+
   if (options.exactPhrase) {
-    return [String(query || "").trim()].filter(Boolean);
+    return [trimmed];
   }
+
   if (options.wholeWords) {
-    return String(query || "")
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean);
+    const tokens = tokenize(trimmed, { matchCase: options.matchCase });
+    if (tokens.length) return tokens;
+    return trimmed.split(/\s+/).filter(Boolean);
   }
-  return tokenize(query, { matchCase: options.matchCase });
+
+  return tokenize(trimmed, { matchCase: options.matchCase });
+}
+
+function sourceTokens(text, matchCase) {
+  return tokenize(String(text || ""), { matchCase });
 }
 
 function containsWholeTerm(text, term, matchCase) {
-  const flags = matchCase ? "u" : "iu";
-  const pattern = new RegExp(
-    `(^|[^\\p{L}\\p{N}_])${escapeRegex(term)}([^\\p{L}\\p{N}_]|$)`,
-    flags
-  );
-  return pattern.test(String(text || ""));
+  const tokens = sourceTokens(text, matchCase);
+  return tokens.some((token) => compareToken(token, term, matchCase));
+}
+
+function containsTerm(text, term, matchCase) {
+  const source = String(text || "");
+  if (!term) return false;
+  if (matchCase) return source.includes(term);
+  return source.toLowerCase().includes(String(term).toLowerCase());
 }
 
 function textMatchesQuery(text, query, options) {
@@ -45,10 +60,7 @@ function textMatchesQuery(text, query, options) {
     if (options.wholeWords) {
       return containsWholeTerm(source, term, options.matchCase);
     }
-    if (options.matchCase) {
-      return source.includes(term);
-    }
-    return source.toLowerCase().includes(String(term).toLowerCase());
+    return containsTerm(source, term, options.matchCase);
   });
 }
 
@@ -103,6 +115,13 @@ function toHit(chunk, score) {
 function rankHits(matches, query, options, limit) {
   if (!matches.length) return [];
 
+  if (options.exactPhrase) {
+    return matches
+      .map((chunk) => toHit(chunk, chunk.source === "filename" ? 3 : 2))
+      .sort((a, b) => b.score - a.score || a.filename.localeCompare(b.filename, "ar"))
+      .slice(0, limit);
+  }
+
   const index = new BM25Index(matches);
   const ranked = index.search(query, matches.length, null, {
     matchCase: options.matchCase,
@@ -114,22 +133,26 @@ function rankHits(matches, query, options, limit) {
         .map((chunk) => toHit(chunk, chunk.source === "filename" ? 2 : 1))
         .sort((a, b) => b.score - a.score || a.filename.localeCompare(b.filename, "ar"));
 
-  return hits
-    .filter((hit) => textMatchesQuery(hit.content, query, options))
-    .slice(0, limit);
+  return hits.slice(0, limit);
 }
 
 function textFilteredSearch(chunks, query, options, category, limit) {
   let pool = chunks;
   if (category) pool = pool.filter((chunk) => chunk.category === category);
-
   const matches = pool.filter((chunk) => textMatchesQuery(chunk.content, query, options));
   return rankHits(matches, query, options, limit);
 }
 
 function bm25Search(chunks, query, options, category, limit) {
   const index = new BM25Index(chunks);
-  return index.search(query, limit, category, { matchCase: options.matchCase });
+  const hits = index.search(query, limit, category, { matchCase: options.matchCase });
+  if (hits.length) return hits;
+
+  let pool = category ? chunks.filter((chunk) => chunk.category === category) : chunks;
+  return pool
+    .filter((chunk) => containsTerm(chunk.content, query, options.matchCase))
+    .slice(0, limit)
+    .map((chunk) => toHit(chunk, chunk.source === "filename" ? 2 : 1));
 }
 
 export function advancedSearch(documents, query, rawOptions = {}) {

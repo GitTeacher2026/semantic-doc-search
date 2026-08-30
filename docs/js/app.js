@@ -1,13 +1,14 @@
 import {
   assignCategory,
 } from "./bm25-search.js";
-import { advancedSearch } from "./advanced-search.js";
+import { advancedSearch } from "./advanced-search.js?v=20260830b";
 import {
   applySearchOptionsToForm,
+  describeActiveSearchOptions,
   loadSearchOptions,
   readSearchOptionsFromForm,
   saveSearchOptions,
-} from "./search-options.js";
+} from "./search-options.js?v=20260830b";
 import {
   documentMatchesActiveStorage,
   getActiveStorageBackend,
@@ -18,7 +19,7 @@ import {
   STORAGE_BACKENDS,
 } from "./document-storage.js";
 import { initTheme, toggleTheme } from "./theme.js";
-import { bindSearchResults, renderSearchResults } from "./search-results.js";
+import { bindSearchResults, renderSearchResults } from "./search-results.js?v=20260830b";
 import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js?v=20260830";
 import {
   ensurePreviewUrl,
@@ -1304,7 +1305,12 @@ function runSearch() {
       searchable.map((doc) => [doc.id, { fileGroup: doc.fileGroup, extension: doc.extension }])
     );
 
-    setSearchResults(renderSearchResults(top, query, docMeta, searchOptions));
+    setSearchResults(
+      renderSearchResults(top, query, docMeta, {
+        ...searchOptions,
+        labels: describeActiveSearchOptions(searchOptions),
+      })
+    );
     bindSearchResults(searchResults, { onDownload: handleDownload });
   } catch (error) {
     console.error(error);
@@ -1376,7 +1382,10 @@ explorerToggleAllBtn?.addEventListener("click", () => {
   renderLibrary();
 });
 advancedSearchPanel?.querySelectorAll("input").forEach((input) => {
-  input.addEventListener("change", () => saveSearchOptions(readSearchOptionsFromForm()));
+  input.addEventListener("change", () => {
+    saveSearchOptions(readSearchOptionsFromForm());
+    if (searchQuery.value.trim()) runSearch();
+  });
 });
 
 export async function startApp({ user, auth }) {

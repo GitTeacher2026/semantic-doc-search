@@ -12,6 +12,12 @@
   --tree-bg: #ffffff;
   --folder-count-bg: #f3efe6;
   --on-accent: #ffffff;
+  --search-summary-bg: linear-gradient(135deg, #f8f4ea 0%, #eef7f3 100%);
+  --search-card-bg: #ffffff;
+  --search-snippet-bg: #fcfaf6;
+  --search-snippet-border: #e7dfd0;
+  --search-snippet-text: #3f3a32;
+  --search-relevance-track: #efe8da;
 }
 
 * { box-sizing: border-box; }
@@ -259,8 +265,9 @@ select {
   gap: 0.45rem;
   padding: 0.75rem 1rem;
   border-radius: 12px;
-  background: linear-gradient(135deg, #f8f4ea 0%, #eef7f3 100%);
+  background: var(--search-summary-bg);
   border: 1px solid var(--line);
+  color: var(--ink);
 }
 
 .search-summary-stat strong {
@@ -277,6 +284,24 @@ select {
   font-size: 0.9rem;
 }
 
+.search-active-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.search-option-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--line);
+}
+
 .search-results-grid {
   display: grid;
   gap: 0.85rem;
@@ -287,9 +312,10 @@ select {
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 1rem;
-  background: #fff;
+  background: var(--search-card-bg);
   box-shadow: 0 8px 24px rgba(36, 28, 16, 0.04);
   overflow: hidden;
+  color: var(--ink);
 }
 
 .search-result-card::before {
@@ -373,7 +399,7 @@ select {
   flex: 1;
   height: 8px;
   border-radius: 999px;
-  background: #efe8da;
+  background: var(--search-relevance-track);
   overflow: hidden;
 }
 
@@ -398,9 +424,9 @@ select {
 }
 
 .search-snippet {
-  border: 1px dashed #e7dfd0;
+  border: 1px dashed var(--search-snippet-border);
   border-radius: 10px;
-  background: #fcfaf6;
+  background: var(--search-snippet-bg);
   overflow: hidden;
 }
 
@@ -434,7 +460,7 @@ select {
 .search-snippet-text {
   margin: 0;
   line-height: 1.7;
-  color: #3f3a32;
+  color: var(--search-snippet-text);
 }
 
 .search-ellipsis {
@@ -446,10 +472,18 @@ select {
   margin-top: 0.65rem;
   padding: 0.75rem;
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--line);
   line-height: 1.7;
   white-space: pre-wrap;
+  color: var(--ink);
+}
+
+mark.query-hit {
+  background: #ffe9a8;
+  color: inherit;
+  padding: 0 0.1em;
+  border-radius: 3px;
 }
 
 .search-empty {
@@ -1260,6 +1294,12 @@ body.image-preview-open {
   margin-top: 0.75rem;
 }
 
+.advanced-search-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.82rem;
+}
+
 .search-option {
   display: flex;
   align-items: center;
@@ -1363,6 +1403,12 @@ html[data-theme="dark"] {
   --tree-bg: #141d2e;
   --folder-count-bg: #243044;
   --on-accent: #052e1d;
+  --search-summary-bg: linear-gradient(135deg, #1a2438 0%, #132a24 100%);
+  --search-card-bg: #1a2438;
+  --search-snippet-bg: #141d2e;
+  --search-snippet-border: #334155;
+  --search-snippet-text: #d7e0ea;
+  --search-relevance-track: #243044;
 }
 
 html[data-theme="dark"] body {
@@ -1372,6 +1418,35 @@ html[data-theme="dark"] body {
     linear-gradient(180deg, #0b1220 0%, #121b2d 100%);
 }
 
+html[data-theme="dark"] .search-results-summary,
+html[data-theme="dark"] .search-result-card,
+html[data-theme="dark"] .search-snippet,
+html[data-theme="dark"] .search-snippet-full {
+  background: var(--search-card-bg);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .search-snippet {
+  background: var(--search-snippet-bg);
+  border-color: var(--search-snippet-border);
+}
+
+html[data-theme="dark"] .search-snippet-text,
+html[data-theme="dark"] .search-snippet-pill,
+html[data-theme="dark"] .search-result-title {
+  color: var(--search-snippet-text);
+}
+
+html[data-theme="dark"] .search-result-card.rank-gold .search-result-rank {
+  color: #f0d78c;
+}
+
+html[data-theme="dark"] mark.query-hit {
+  background: #7c5e10;
+  color: #fff8e7;
+}
+
 html[data-theme="dark"] .drop-zone,
 html[data-theme="dark"] .pending-file-card,
 html[data-theme="dark"] .storage-mode-picker,
@@ -1379,7 +1454,6 @@ html[data-theme="dark"] .advanced-search-panel,
 html[data-theme="dark"] .tree-storage-label,
 html[data-theme="dark"] .tree-folder > summary.tree-folder-label,
 html[data-theme="dark"] .tree-file-row,
-html[data-theme="dark"] .search-result-card,
 html[data-theme="dark"] .trash-item {
   background: var(--surface-muted);
 }
