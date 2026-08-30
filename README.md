@@ -37,8 +37,13 @@ export DOCSHELF_PASSWORD=your_password
 2. أنشئ مشروعاً جديداً (أو اختر مشروعاً موجوداً)
 3. من **APIs & Services** → **Library**، فعّل **Google Drive API**
 4. من **APIs & Services** → **OAuth consent screen**:
-   - اختر **External** (أو Internal إن كان Workspace)
-   - أضف بريدك `amanyak267@gmail.com` كمستخدم اختبار إذا كان التطبيق في وضع Testing
+   - اختر **External**
+   - أكمل اسم التطبيق والبريد الداعم
+   - من **Scopes** → **Add or Remove Scopes** وأضف:
+     - `.../auth/drive.file` (Google Drive)
+     - `.../auth/userinfo.email` (See your primary Google Account email address)
+   - من **Test users** → **Add users** → أضف: `amanyak267@gmail.com`
+   - (اختياري للاستخدام الشخصي) اضغط **Publish app** إذا استمر الرفض
 5. من **APIs & Services** → **Credentials** → **Create Credentials** → **OAuth client ID**:
    - نوع التطبيق: **Web application**
    - **Authorized JavaScript origins** (مهم جداً):
@@ -50,6 +55,12 @@ export DOCSHELF_PASSWORD=your_password
    - القيمة: الصق Client ID كاملاً بدون مسافات
 8. أعد تشغيل workflow النشر: **Actions** → **Deploy GitHub Pages** → **Re-run all jobs**
 9. بعد النشر، افتح الموقع واضغط **Hard refresh** (Ctrl+Shift+R)
+
+**إذا ظهر `Error 403: access_denied`:**
+- التطبيق في وضع **Testing** ولم تُضف `amanyak267@gmail.com` في **Test users**
+- أو لم تُضف Scopes المطلوبة في شاشة الموافقة (drive.file + email)
+- أو سجّلت الدخول بحساب Google آخر غير `amanyak267@gmail.com`
+- الحل: أضف الحساب في Test users، أو انشر التطبيق **Publish app**، ثم جرّب مرة أخرى
 
 **إذا ظهر `Error 401: invalid_client`:**
 - الـ Client ID غير موجود في Google أو لم يُنشر بعد في الموقع

@@ -69,6 +69,24 @@ async function verifyDriveAccount(accessToken) {
   return profile;
 }
 
+function formatOAuthError(response) {
+  const code = response.error || "";
+  if (code === "invalid_client") {
+    return "معرّف Google OAuth غير صالح. أنشئ OAuth Client ID من نوع Web application في Google Cloud، ثم ضعه في GitHub Secret باسم GOOGLE_CLIENT_ID.";
+  }
+  if (code === "access_denied") {
+    return [
+      "رفض Google الوصول (403 access_denied).",
+      "1) افتح Google Cloud → OAuth consent screen.",
+      "2) أضف amanyak267@gmail.com ضمن Test users (إذا التطبيق في وضع Testing).",
+      "3) من Scopes أضف: drive.file و userinfo.email.",
+      "4) أو انشر التطبيق Publish app للاستخدام الشخصي.",
+      "5) سجّل الدخول في النافذة المنبثقة بحساب amanyak267@gmail.com فقط.",
+    ].join(" ");
+  }
+  return response.error_description || response.error || "تعذّر تسجيل الدخول إلى Google Drive.";
+}
+
 function storeAccessToken(response) {
   sessionStorage.setItem(TOKEN_KEY, response.access_token);
   sessionStorage.setItem(
@@ -108,11 +126,7 @@ export async function ensureDriveAccess({ interactive = true } = {}) {
       hint: ADMIN_EMAIL,
       callback: async (response) => {
         if (response.error) {
-          const message =
-            response.error === "invalid_client"
-              ? "معرّف Google OAuth غير صالح. أنشئ OAuth Client ID من نوع Web application في Google Cloud، ثم ضعه في GitHub Secret باسم GOOGLE_CLIENT_ID."
-              : response.error_description || response.error;
-          reject(new Error(message));
+          reject(new Error(formatOAuthError(response)));
           return;
         }
         try {
@@ -124,6 +138,6 @@ export async function ensureDriveAccess({ interactive = true } = {}) {
         }
       },
     });
-    tokenClient.requestAccessToken({ prompt: "consent" });
+    tokenClient.requestAccessToken({ prompt: "select_account" });
   });
 }
