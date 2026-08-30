@@ -6,12 +6,10 @@
       "firstName": "مدير",
       "lastName": "النظام",
       "email": "amanyak267@gmail.com",
-      "passwordHash": "EA7ALRaIWq3P05mCoRiRlsInyKr4JxTah7diD610IVo=",
+      "passwordHash": "0CyXaA8SKulgVIMYzjZfnQytpjWb9G+qNPFQiaCmkLY=",
       "role": "admin",
       "status": "approved",
-      "createdAt": "2026-01-01T00:00:00.000Z",
-      "resetToken": "e6b181529e8b45a89956b07ae378dfce",
-      "resetExpiresAt": "2026-08-30T01:57:28.091Z"
+      "createdAt": "2026-01-01T00:00:00.000Z"
     }
   ],
   "pending": []
