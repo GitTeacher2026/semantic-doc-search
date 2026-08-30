@@ -959,17 +959,23 @@ function runSearch() {
   }
 
   searchBtn.disabled = true;
-  const category = categoryFilter.value || null;
-  const k = Number(resultCount.value);
-  const index = new BM25Index(allChunksFromDocuments(searchable));
-  const top = index.search(query, k, category);
-  const docMeta = new Map(
-    searchable.map((doc) => [doc.id, { fileGroup: doc.fileGroup, extension: doc.extension }])
-  );
+  try {
+    const category = categoryFilter.value || null;
+    const k = Number(resultCount.value);
+    const index = new BM25Index(allChunksFromDocuments(searchable));
+    const top = index.search(query, k, category);
+    const docMeta = new Map(
+      searchable.map((doc) => [doc.id, { fileGroup: doc.fileGroup, extension: doc.extension }])
+    );
 
-  searchResults.innerHTML = renderSearchResults(top, query, docMeta);
-  bindSearchResults(searchResults, { onDownload: handleDownload });
-  searchBtn.disabled = false;
+    searchResults.innerHTML = renderSearchResults(top, query, docMeta);
+    bindSearchResults(searchResults, { onDownload: handleDownload });
+  } catch (error) {
+    console.error(error);
+    searchResults.innerHTML = `<p class="muted search-empty">تعذّر عرض النتائج: ${escapeHtml(error.message)}</p>`;
+  } finally {
+    searchBtn.disabled = false;
+  }
 }
 
 logoutBtn.addEventListener("click", () => {

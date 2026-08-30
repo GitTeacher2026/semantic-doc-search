@@ -219,11 +219,16 @@ export function allChunksFromDocuments(documents) {
   const chunks = [];
   for (const doc of documents) {
     for (const chunk of doc.chunks || []) {
+      const content =
+        typeof chunk === "string"
+          ? chunk
+          : chunk?.content ?? chunk?.text ?? "";
+      if (!String(content).trim()) continue;
       chunks.push({
         docId: doc.id,
-        filename: doc.filename,
-        category: doc.category,
-        content: chunk.content,
+        filename: doc.filename || "مستند",
+        category: doc.category || "عام",
+        content: String(content),
       });
     }
   }
