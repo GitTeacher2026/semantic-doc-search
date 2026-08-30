@@ -4,6 +4,7 @@ import {
 import { classifyDocument, previewText } from "./engines/classifiers.js";
 import { chunkDocument } from "./engines/chunkers.js";
 import { runDocumentSearch } from "./engines/search.js";
+import { SEARCH_ENGINES } from "./engines/registry.js";
 import { bindSettingsForm, renderSettingsForm } from "./engines/settings-ui.js";
 import {
   EXT_GROUPS,
@@ -89,6 +90,8 @@ const settingsFormRoot = document.getElementById("settings-form-root");
 const trashBackBtn = document.getElementById("trash-back-btn");
 const trashCountBadge = document.getElementById("trash-count-badge");
 const categoryFilter = document.getElementById("category-filter");
+const searchEngineSelect = document.getElementById("search-engine-select");
+const searchEngineDesc = document.getElementById("search-engine-desc");
 const searchQuery = document.getElementById("search-query");
 const searchBtn = document.getElementById("search-btn");
 const searchResults = document.getElementById("search-results");
@@ -126,6 +129,7 @@ async function hydrateDocuments(password) {
   setStatus("جارٍ تحميل المستندات…");
   try {
     state = normalizeState(await loadDocuments(password));
+    syncSearchEngineSelect();
     renderLibrary();
     renderTrash();
     setStatus("", false);
@@ -135,6 +139,32 @@ async function hydrateDocuments(password) {
   } finally {
     isHydrating = false;
   }
+}
+
+function syncSearchEngineSelect() {
+  if (!searchEngineSelect) return;
+  const current = state.settings?.searchEngine || "bm25";
+  searchEngineSelect.innerHTML = Object.values(SEARCH_ENGINES)
+    .map(
+      (engine) =>
+        `<option value="${engine.id}" ${engine.id === current ? "selected" : ""}>${engine.label}</option>`
+    )
+    .join("");
+  if (searchEngineDesc) {
+    searchEngineDesc.textContent = SEARCH_ENGINES[current]?.description || "";
+  }
+}
+
+async function updateSearchEngine(engineId) {
+  if (!SEARCH_ENGINES[engineId]) return;
+  state = {
+    ...state,
+    settings: { ...state.settings, searchEngine: engineId },
+  };
+  if (searchEngineDesc) {
+    searchEngineDesc.textContent = SEARCH_ENGINES[engineId].description;
+  }
+  await persistState();
 }
 
 async function persistState() {
@@ -311,6 +341,7 @@ function initSettingsPage() {
     onSave: async (nextSettings) => {
       state = { ...state, settings: nextSettings };
       await persistState();
+      syncSearchEngineSelect();
     },
     onStatus: setStatus,
   });
@@ -584,6 +615,7 @@ function renderTreeFile(doc) {
 function renderLibrary() {
   const docs = state.documents;
   const categories = summarizeCategories(docs);
+  syncSearchEngineSelect();
 
   categoryFilter.innerHTML = `<option value="">جميع التصنيفات</option>${categories
     .map(([name]) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
@@ -1054,6 +1086,9 @@ ingestBtn.addEventListener("click", () => {
 });
 
 searchBtn.addEventListener("click", runSearch);
+searchEngineSelect?.addEventListener("change", () => {
+  updateSearchEngine(searchEngineSelect.value);
+});
 resultCount.addEventListener("input", () => {
   resultCountLabel.textContent = resultCount.value;
 });
