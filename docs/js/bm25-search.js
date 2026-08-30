@@ -38,10 +38,10 @@ const BROAD_TOPICS = [
   },
 ];
 
-export function tokenize(text) {
+export function tokenize(text, { matchCase = false } = {}) {
   return (String(text || "").match(/[\u0600-\u06FF]{2,}|[a-z0-9]{2,}/gi) || [])
-    .map((token) => token.toLowerCase())
-    .filter((token) => !STOPWORDS.has(token));
+    .map((token) => (matchCase ? token : token.toLowerCase()))
+    .filter((token) => !STOPWORDS.has(matchCase ? token.toLowerCase() : token));
 }
 
 function detectBroadTopic(tokens) {
@@ -198,8 +198,8 @@ export class BM25Index {
     return score;
   }
 
-  search(query, k = 5, category = null) {
-    const queryTokens = tokenize(query);
+  search(query, k = 5, category = null, options = {}) {
+    const queryTokens = tokenize(query, { matchCase: Boolean(options.matchCase) });
     if (!queryTokens.length) return [];
 
     const hits = [];

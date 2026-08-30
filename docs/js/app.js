@@ -1,8 +1,23 @@
 import {
-  BM25Index,
   assignCategory,
-  allChunksFromDocuments,
 } from "./bm25-search.js";
+import { advancedSearch } from "./advanced-search.js";
+import {
+  applySearchOptionsToForm,
+  loadSearchOptions,
+  readSearchOptionsFromForm,
+  saveSearchOptions,
+} from "./search-options.js";
+import {
+  documentMatchesActiveStorage,
+  getActiveStorageBackend,
+  getDocumentStoragePath,
+  getStorageBackendIcon,
+  getStorageBackendLabel,
+  inferDocumentStorage,
+  STORAGE_BACKENDS,
+} from "./document-storage.js";
+import { initTheme, toggleTheme } from "./theme.js";
 import { bindSearchResults, renderSearchResults } from "./search-results.js";
 import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js?v=20260830";
 import {
@@ -74,6 +89,7 @@ import {
 const CHUNK_SIZE = 800;
 const CHUNK_OVERLAP = 120;
 
+let explorerShowAll = false;
 let pendingFiles = [];
 let state = normalizeState({});
 let sessionPassword = "";
@@ -111,6 +127,10 @@ const storageModeInputs = () =>
 const pendingFilesEl = document.getElementById("pending-files");
 const ingestBtn = document.getElementById("ingest-btn");
 const libraryList = document.getElementById("library-list");
+const explorerStorageLabel = document.getElementById("explorer-storage-label");
+const explorerToggleAllBtn = document.getElementById("explorer-toggle-all-btn");
+const advancedSearchPanel = document.getElementById("advanced-search-panel");
+const themeToggleBtn = document.getElementById("theme-toggle-btn");
 const trashMeta = document.getElementById("trash-meta");
 const trashList = document.getElementById("trash-list");
 const libraryPage = document.getElementById("library-page");
@@ -250,6 +270,7 @@ async function handleStorageModeChange(nextMode) {
   }
 
   setStorageMode(nextMode);
+  explorerShowAll = false;
   revokeAllPreviewUrls();
   pendingFiles = [];
   renderPendingFiles();
@@ -682,29 +703,68 @@ openPendingBtn?.addEventListener("click", openPendingDialog);
 pendingCloseBtn?.addEventListener("click", closePendingDialog);
 pendingDialogBackdrop?.addEventListener("click", closePendingDialog);
 
-function buildExplorerTree(documents) {
-  const categories = new Map();
-  for (const doc of documents) {
+function buildExplorerTree(documents, { showAll = false } = {}) {
+  const visibleDocs = documents.filter((doc) => documentMatchesActiveStorage(doc, { showAll }));
+  const storageGroups = new Map();
+
+  for (const doc of visibleDocs) {
+    const storage = inferDocumentStorage(doc);
+    const category = doc.category || "عام";
     const group = doc.fileGroup || fileGroup(doc.filename);
-    if (!categories.has(doc.category)) categories.set(doc.category, new Map());
-    const groups = categories.get(doc.category);
+
+    if (!storageGroups.has(storage)) storageGroups.set(storage, new Map());
+    const categories = storageGroups.get(storage);
+    if (!categories.has(category)) categories.set(category, new Map());
+    const groups = categories.get(category);
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push(doc);
   }
-  return [...categories.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0], "ar"))
-    .map(([category, groups]) => ({
-      category,
-      count: [...groups.values()].reduce((sum, files) => sum + files.length, 0),
-      groups: [...groups.entries()]
-        .sort((a, b) => GROUP_LABELS[a[0]].localeCompare(GROUP_LABELS[b[0]], "ar"))
-        .map(([group, files]) => ({
-          group,
-          label: GROUP_LABELS[group] || group,
-          icon: GROUP_ICONS[group] || GROUP_ICONS.other,
-          files: [...files].sort((a, b) => a.filename.localeCompare(b.filename, "ar")),
-        })),
-    }));
+
+  const storageOrder = [getActiveStorageBackend(), STORAGE_BACKENDS.GITHUB, STORAGE_BACKENDS.DRIVE, STORAGE_BACKENDS.LOCAL];
+  const orderedStorages = [...storageGroups.keys()].sort(
+    (a, b) => storageOrder.indexOf(a) - storageOrder.indexOf(b) || a.localeCompare(b, "ar")
+  );
+
+  return orderedStorages.map((storage) => ({
+    storage,
+    label: getStorageBackendLabel(storage),
+    icon: getStorageBackendIcon(storage),
+    count: [...storageGroups.get(storage).values()].reduce(
+      (sum, groups) => sum + [...groups.values()].reduce((inner, files) => inner + files.length, 0),
+      0
+    ),
+    categories: [...storageGroups.get(storage).entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], "ar"))
+      .map(([category, groups]) => ({
+        category,
+        count: [...groups.values()].reduce((sum, files) => sum + files.length, 0),
+        groups: [...groups.entries()]
+          .sort((a, b) => GROUP_LABELS[a[0]].localeCompare(GROUP_LABELS[b[0]], "ar"))
+          .map(([group, files]) => ({
+            group,
+            label: GROUP_LABELS[group] || group,
+            icon: GROUP_ICONS[group] || GROUP_ICONS.other,
+            files: [...files].sort((a, b) => a.filename.localeCompare(b.filename, "ar")),
+          })),
+      })),
+  }));
+}
+
+function updateExplorerToolbar(docs) {
+  const active = getActiveStorageBackend();
+  const activeLabel = getStorageBackendLabel(active);
+  const otherCount = docs.filter((doc) => !documentMatchesActiveStorage(doc)).length;
+
+  if (explorerStorageLabel) {
+    explorerStorageLabel.textContent = explorerShowAll
+      ? "عرض جميع الملفات من كل مصادر التخزين"
+      : `عرض ملفات ${activeLabel} فقط`;
+  }
+
+  if (explorerToggleAllBtn) {
+    explorerToggleAllBtn.textContent = explorerShowAll ? `عرض ${activeLabel} فقط` : "عرض كل المصادر";
+    explorerToggleAllBtn.classList.toggle("hidden", otherCount === 0 && !explorerShowAll);
+  }
 }
 
 function switchAppPage(page) {
@@ -753,13 +813,19 @@ function renderTreeFile(doc) {
   const groupName = doc.fileGroup || fileGroup(doc.filename);
   const lockedClass = doc.isLocked ? " locked" : "";
   const lockBadge = doc.isLocked ? `<span class="lock-badge">🔒</span>` : "";
+  const storage = inferDocumentStorage(doc);
+  const storageClass = `storage-${storage}`;
   return `
     <li class="tree-file${lockedClass}" role="treeitem" data-id="${doc.id}">
       <div class="tree-file-row">
         <span class="tree-file-icon" aria-hidden="true">${GROUP_ICONS[groupName] || GROUP_ICONS.other}</span>
         <div class="tree-file-info">
           <span class="tree-file-name">${lockBadge}${escapeHtml(doc.filename)}</span>
-          <span class="tree-file-meta">${doc.charCount.toLocaleString("ar-EG")} حرف</span>
+          <span class="tree-file-meta">
+            <span class="storage-badge ${storageClass}">${getStorageBackendIcon(storage)} ${escapeHtml(getStorageBackendLabel(storage))}</span>
+            <span class="tree-file-path">${escapeHtml(getDocumentStoragePath(doc))}</span>
+            <span class="tree-file-size">${doc.charCount.toLocaleString("ar-EG")} حرف</span>
+          </span>
         </div>
         <div class="tree-file-actions explorer-actions">
           ${renderDocActions(doc)}
@@ -776,36 +842,60 @@ function renderLibrary() {
     .map(([name]) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
     .join("")}`;
 
+  updateExplorerToolbar(docs);
+
   if (!docs.length) {
     libraryList.innerHTML = `<p class="muted tree-empty">لا توجد مستندات بعد. اسحب ملفاً إلى منطقة الرفع للبدء.</p>`;
     return;
   }
 
-  const tree = buildExplorerTree(docs);
+  const tree = buildExplorerTree(docs, { showAll: explorerShowAll });
+  const visibleCount = tree.reduce((sum, storageNode) => sum + storageNode.count, 0);
+
+  if (!visibleCount) {
+    libraryList.innerHTML = `<p class="muted tree-empty">لا توجد ملفات في ${escapeHtml(getStorageBackendLabel(getActiveStorageBackend()))}. جرّب «عرض كل المصادر» أو غيّر مكان التخزين.</p>`;
+    return;
+  }
+
   libraryList.innerHTML = tree
     .map(
-      (folder) => `
-      <details class="tree-folder" open>
-        <summary class="tree-folder-label">
+      (storageNode) => `
+      <details class="tree-storage-root" open>
+        <summary class="tree-storage-label">
           <span class="tree-chevron" aria-hidden="true"></span>
-          <span class="tree-folder-icon" aria-hidden="true">📁</span>
-          <span class="tree-folder-name">${escapeHtml(folder.category)}</span>
-          <span class="tree-folder-count">${folder.count}</span>
+          <span class="tree-storage-icon" aria-hidden="true">${storageNode.icon}</span>
+          <span class="tree-storage-name">${escapeHtml(storageNode.label)}</span>
+          <span class="tree-folder-count">${storageNode.count}</span>
         </summary>
-        <div class="tree-children">
-          ${folder.groups
+        <div class="tree-storage-children">
+          ${storageNode.categories
             .map(
-              (group) => `
-            <details class="tree-folder tree-folder-nested" open>
+              (folder) => `
+            <details class="tree-folder" open>
               <summary class="tree-folder-label">
                 <span class="tree-chevron" aria-hidden="true"></span>
-                <span class="tree-folder-icon" aria-hidden="true">${group.icon}</span>
-                <span class="tree-folder-name">${escapeHtml(group.label)}</span>
-                <span class="tree-folder-count">${group.files.length}</span>
+                <span class="tree-folder-icon" aria-hidden="true">📁</span>
+                <span class="tree-folder-name">${escapeHtml(folder.category)}</span>
+                <span class="tree-folder-count">${folder.count}</span>
               </summary>
-              <ul class="tree-files" role="group">
-                ${group.files.map((doc) => renderTreeFile(doc)).join("")}
-              </ul>
+              <div class="tree-children">
+                ${folder.groups
+                  .map(
+                    (group) => `
+                  <details class="tree-folder tree-folder-nested" open>
+                    <summary class="tree-folder-label">
+                      <span class="tree-chevron" aria-hidden="true"></span>
+                      <span class="tree-folder-icon" aria-hidden="true">${group.icon}</span>
+                      <span class="tree-folder-name">${escapeHtml(group.label)}</span>
+                      <span class="tree-folder-count">${group.files.length}</span>
+                    </summary>
+                    <ul class="tree-files" role="group">
+                      ${group.files.map((doc) => renderTreeFile(doc)).join("")}
+                    </ul>
+                  </details>`
+                  )
+                  .join("")}
+              </div>
             </details>`
             )
             .join("")}
@@ -1143,6 +1233,11 @@ async function ingestFiles(files) {
         preview: text.replace(/\s+/g, " ").slice(0, 280),
         fileData: driveFileId ? null : arrayBufferToBase64(arrayBuffer),
         driveFileId,
+        storageBackend: isUsingDriveStorage()
+          ? STORAGE_BACKENDS.DRIVE
+          : isUsingGitHubStorage()
+            ? STORAGE_BACKENDS.GITHUB
+            : STORAGE_BACKENDS.LOCAL,
         chunks,
         isLocked: false,
         lockHash: null,
@@ -1193,17 +1288,23 @@ function runSearch() {
     return;
   }
 
+  const searchOptions = readSearchOptionsFromForm();
+  saveSearchOptions(searchOptions);
+
   searchBtn.disabled = true;
   try {
     const category = categoryFilter.value || null;
     const k = Number(resultCount.value);
-    const index = new BM25Index(allChunksFromDocuments(searchable));
-    const top = index.search(query, k, category);
+    const top = advancedSearch(searchable, query, {
+      ...searchOptions,
+      category,
+      limit: k,
+    });
     const docMeta = new Map(
       searchable.map((doc) => [doc.id, { fileGroup: doc.fileGroup, extension: doc.extension }])
     );
 
-    setSearchResults(renderSearchResults(top, query, docMeta));
+    setSearchResults(renderSearchResults(top, query, docMeta, searchOptions));
     bindSearchResults(searchResults, { onDownload: handleDownload });
   } catch (error) {
     console.error(error);
@@ -1266,6 +1367,17 @@ for (const input of document.querySelectorAll('input[name="storage-mode"]')) {
 
 setupDropZone();
 initImagePreview();
+applySearchOptionsToForm(loadSearchOptions());
+initTheme();
+
+themeToggleBtn?.addEventListener("click", () => toggleTheme());
+explorerToggleAllBtn?.addEventListener("click", () => {
+  explorerShowAll = !explorerShowAll;
+  renderLibrary();
+});
+advancedSearchPanel?.querySelectorAll("input").forEach((input) => {
+  input.addEventListener("change", () => saveSearchOptions(readSearchOptionsFromForm()));
+});
 
 export async function startApp({ user, auth }) {
   currentUser = user;
@@ -1280,6 +1392,7 @@ export async function startApp({ user, auth }) {
 
   try {
     await hydrateDocuments(sessionPassword);
+    applySearchOptionsToForm(loadSearchOptions());
     updateStoragePanel();
     updateUploadAccess();
     showView();

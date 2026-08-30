@@ -223,6 +223,7 @@
         <p class="tagline">ارفع ملفات PDF وOffice والنصوص، صنّفها تلقائياً، وابحث فوراً.</p>
       </div>
       <div class="hero-actions">
+        <button id="theme-toggle-btn" class="btn ghost small" type="button" aria-pressed="false">🌙 الوضع الداكن</button>
         <div id="admin-toolbar" class="admin-toolbar hidden">
           <button id="open-members-btn" class="btn ghost small" type="button">إدارة الأعضاء</button>
           <button id="open-pending-btn" class="btn ghost small" type="button">
@@ -297,7 +298,13 @@
           <div id="pending-files" class="pending-files-grid hidden"></div>
           <button id="ingest-btn" class="btn primary" type="button" disabled>فهرسة وتصنيف</button>
 
-          <h2 class="section-gap">مستكشف الملفات</h2>
+          <div class="explorer-toolbar">
+            <div class="explorer-toolbar-info">
+              <h2 class="section-gap explorer-title">مستكشف الملفات</h2>
+              <p id="explorer-storage-label" class="explorer-storage-label muted"></p>
+            </div>
+            <button id="explorer-toggle-all-btn" class="btn ghost small" type="button">عرض كل المصادر</button>
+          </div>
           <div id="library-list" class="folder-tree" role="tree" aria-label="شجرة الملفات"></div>
         </section>
 
@@ -305,6 +312,31 @@
           <h2>البحث الذكي (فوري)</h2>
           <label for="search-query">ابحث في محتوى المستندات</label>
           <input id="search-query" type="search" placeholder="مثال: جدول زمني لمشروع ترميم الجسر" />
+          <details id="advanced-search-panel" class="advanced-search-panel">
+            <summary>خيارات بحث متقدمة</summary>
+            <div class="advanced-search-options">
+              <label class="search-option">
+                <input id="search-opt-match-case" type="checkbox" />
+                <span>مطابقة حالة الأحرف</span>
+              </label>
+              <label class="search-option">
+                <input id="search-opt-whole-words" type="checkbox" />
+                <span>كلمات كاملة فقط</span>
+              </label>
+              <label class="search-option">
+                <input id="search-opt-exact-phrase" type="checkbox" />
+                <span>عبارة مطابقة حرفياً</span>
+              </label>
+              <label class="search-option">
+                <input id="search-opt-filename" type="checkbox" checked />
+                <span>البحث في أسماء الملفات</span>
+              </label>
+              <label class="search-option">
+                <input id="search-opt-content" type="checkbox" checked />
+                <span>البحث في المحتوى</span>
+              </label>
+            </div>
+          </details>
           <label for="category-filter">تصفية حسب المشروع / الموضوع</label>
           <select id="category-filter"></select>
           <label for="result-count">عدد النتائج: <span id="result-count-label">5</span></label>
@@ -421,6 +453,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/main.js?v=20260830-storage"></script>
+  <script type="module" src="js/main.js?v=20260830-features"></script>
 </body>
 </html>

@@ -6,7 +6,10 @@ import {
   initAuthPage,
   isAuthenticated,
 } from "./auth-page.js";
-import { startApp } from "./app.js?v=20260830-storage";
+import { initTheme } from "./theme.js";
+import { startApp } from "./app.js?v=20260830-features";
+
+initTheme();
 
 async function main() {
   const resetToken = handleResetFromUrl();

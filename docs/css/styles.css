@@ -6,6 +6,8 @@
   --accent: #0f6e56;
   --accent-soft: #d8efe6;
   --danger: #9b2c2c;
+  --surface: #ffffff;
+  --surface-muted: #faf8f3;
 }
 
 * { box-sizing: border-box; }
@@ -64,7 +66,7 @@ select {
   padding: 0.65rem 0.75rem;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
   font: inherit;
 }
 
@@ -1188,11 +1190,209 @@ body.image-preview-open {
   padding: 0.65rem 0.75rem;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
   font: inherit;
 }
 
 @media (max-width: 900px) {
   .grid { grid-template-columns: 1fr; }
   .hero { flex-direction: column; }
+}
+
+.explorer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.explorer-title {
+  margin-bottom: 0.2rem;
+}
+
+.explorer-storage-label {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.advanced-search-panel {
+  margin: 0.75rem 0 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-muted);
+  padding: 0.65rem 0.85rem;
+}
+
+.advanced-search-panel summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.advanced-search-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.55rem 0.85rem;
+  margin-top: 0.75rem;
+}
+
+.search-option {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.search-option input {
+  width: auto;
+  margin: 0;
+}
+
+.tree-storage-root,
+.tree-storage-children {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.tree-storage-label {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-muted);
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+.tree-storage-icon {
+  font-size: 1.1rem;
+}
+
+.tree-storage-name {
+  flex: 1;
+}
+
+.tree-file-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-top: 0.2rem;
+}
+
+.tree-file-path {
+  word-break: break-word;
+}
+
+.tree-file-size::before {
+  content: "·";
+  margin-left: 0.35rem;
+}
+
+.storage-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  border-radius: 999px;
+  padding: 0.08rem 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.storage-badge.storage-github {
+  color: #5b21b6;
+  background: #f3e8ff;
+  border-color: #d8b4fe;
+}
+
+.storage-badge.storage-drive {
+  color: #0e7490;
+  background: #ecfeff;
+  border-color: #a5f0fc;
+}
+
+.storage-badge.storage-local {
+  color: #475467;
+  background: #f2f4f7;
+  border-color: #d0d5dd;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #e8edf5;
+  --muted: #9aa8ba;
+  --panel: #162033;
+  --line: #2f3b50;
+  --accent: #3dd6a0;
+  --accent-soft: #123b30;
+  --danger: #ff9b9b;
+  --surface: #101828;
+  --surface-muted: #1a2438;
+}
+
+html[data-theme="dark"] body {
+  background:
+    radial-gradient(1200px 500px at 90% -10%, rgba(61, 214, 160, 0.08) 0%, transparent 55%),
+    radial-gradient(900px 420px at 0% 0%, rgba(120, 140, 255, 0.08) 0%, transparent 50%),
+    linear-gradient(180deg, #0b1220 0%, #121b2d 100%);
+}
+
+html[data-theme="dark"] .drop-zone,
+html[data-theme="dark"] .pending-file-card,
+html[data-theme="dark"] .storage-mode-picker,
+html[data-theme="dark"] .advanced-search-panel,
+html[data-theme="dark"] .tree-storage-label,
+html[data-theme="dark"] .tree-folder-label,
+html[data-theme="dark"] .tree-file,
+html[data-theme="dark"] .search-result-card,
+html[data-theme="dark"] .trash-item {
+  background: var(--surface-muted);
+}
+
+html[data-theme="dark"] .drive-connect-panel {
+  background: linear-gradient(135deg, #132033 0%, #102a24 100%);
+  border-color: #2f4d67;
+}
+
+html[data-theme="dark"] .storage-badge.storage-github {
+  color: #d8b4fe;
+  background: #2a1a45;
+  border-color: #5b21b6;
+}
+
+html[data-theme="dark"] .storage-badge.storage-drive {
+  color: #67e8f9;
+  background: #10323a;
+  border-color: #0e7490;
+}
+
+html[data-theme="dark"] .storage-badge.storage-local {
+  color: #d0d5dd;
+  background: #243041;
+  border-color: #475467;
+}
+
+html[data-theme="dark"] .type-pill,
+html[data-theme="dark"] .chip,
+html[data-theme="dark"] .lock-badge {
+  filter: brightness(0.92);
+}
+
+html[data-theme="dark"] .btn.ghost {
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .status {
+  background: #1a2a40;
+  border-color: #2f4d67;
 }

@@ -22,30 +22,31 @@ function coerceHit(hit) {
   };
 }
 
-export function highlightText(text, query) {
+export function highlightText(text, query, { matchCase = false } = {}) {
   const escaped = escapeHtml(String(text ?? ""));
   const safeQuery = String(query || "").trim();
   if (!safeQuery) return escaped;
   const tokens = [...new Set(safeQuery.split(/\s+/).filter((token) => token.length >= 2))]
     .sort((a, b) => b.length - a.length);
   let result = escaped;
+  const flags = matchCase ? "g" : "gi";
   for (const token of tokens) {
     const escToken = escapeHtml(token);
-    const pattern = new RegExp(escToken.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    const pattern = new RegExp(escToken.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), flags);
     result = result.replace(pattern, '<mark class="query-hit">$&</mark>');
   }
   return result;
 }
 
-function excerptAroundQuery(text, query, radius = 140) {
+function excerptAroundQuery(text, query, radius = 140, { matchCase = false } = {}) {
   const normalized = String(text ?? "").replace(/\s+/g, " ").trim();
   if (!normalized) return { text: "", hasBefore: false, hasAfter: false };
 
   const tokens = [...new Set(String(query || "").split(/\s+/).filter((token) => token.length >= 2))];
   let anchor = -1;
-  const lower = normalized.toLowerCase();
+  const lower = matchCase ? normalized : normalized.toLowerCase();
   for (const token of tokens.sort((a, b) => b.length - a.length)) {
-    const idx = lower.indexOf(token.toLowerCase());
+    const idx = (matchCase ? normalized : lower).indexOf(matchCase ? token : token.toLowerCase());
     if (idx >= 0 && (anchor < 0 || idx < anchor)) anchor = idx;
   }
 
@@ -110,9 +111,9 @@ function groupHits(hits) {
     .sort((a, b) => b.bestScore - a.bestScore);
 }
 
-function renderSnippet(snippet, query, index, docId) {
+function renderSnippet(snippet, query, index, docId, searchOptions = {}) {
   const content = String(snippet.content ?? "");
-  const excerpt = excerptAroundQuery(content, query);
+  const excerpt = excerptAroundQuery(content, query, 140, searchOptions);
   const snippetId = `snippet-${docId}-${index}`;
   const isLong = content.replace(/\s+/g, " ").trim().length > excerpt.text.length + 40;
   const pct = snippet.pct ?? 0;
@@ -126,20 +127,20 @@ function renderSnippet(snippet, query, index, docId) {
       <div class="search-snippet-body">
         <p class="search-snippet-text">
           ${excerpt.hasBefore ? '<span class="search-ellipsis">…</span>' : ""}
-          ${highlightText(excerpt.text || content.slice(0, 280), query)}
+          ${highlightText(excerpt.text || content.slice(0, 280), query, searchOptions)}
           ${excerpt.hasAfter ? '<span class="search-ellipsis">…</span>' : ""}
         </p>
         ${
           isLong
             ? `<button class="btn ghost small search-expand-btn" type="button" data-target="${snippetId}" aria-expanded="false">عرض المقطع كاملاً</button>
-               <div id="${snippetId}" class="search-snippet-full hidden">${highlightText(content, query)}</div>`
+               <div id="${snippetId}" class="search-snippet-full hidden">${highlightText(content, query, searchOptions)}</div>`
             : ""
         }
       </div>
     </details>`;
 }
 
-export function renderSearchResults(hits, query, docMeta = new Map()) {
+export function renderSearchResults(hits, query, docMeta = new Map(), searchOptions = {}) {
   const normalizedHits = (Array.isArray(hits) ? hits : [])
     .map(coerceHit)
     .filter((hit) => hit.chunk.content.trim());
@@ -181,7 +182,7 @@ export function renderSearchResults(hits, query, docMeta = new Map()) {
             <span class="search-relevance-label">${pct}% تطابق</span>
           </div>
           <div class="search-snippet-stack">
-            ${group.snippets.map((snippet, snippetIndex) => renderSnippet(snippet, query, snippetIndex, group.docId)).join("")}
+            ${group.snippets.map((snippet, snippetIndex) => renderSnippet(snippet, query, snippetIndex, group.docId, searchOptions)).join("")}
           </div>
         </article>`;
     })
