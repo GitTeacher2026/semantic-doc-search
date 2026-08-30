@@ -187,6 +187,194 @@ select {
 
 .library { display: grid; gap: 0.75rem; }
 
+.app-nav {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  padding: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  width: fit-content;
+}
+
+.app-nav-btn {
+  border: none;
+  border-radius: 9px;
+  padding: 0.55rem 0.9rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.app-nav-btn:hover {
+  background: #f3efe6;
+  color: var(--ink);
+}
+
+.app-nav-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.trash-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.2rem;
+  height: 1.2rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: #c0392b;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.trash-page-panel {
+  max-width: 900px;
+}
+
+.folder-tree {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.5rem;
+  overflow: hidden;
+}
+
+.tree-empty {
+  padding: 1rem;
+}
+
+.tree-folder {
+  border-radius: 8px;
+}
+
+.tree-folder-nested {
+  margin: 0.15rem 0 0.15rem 0.75rem;
+  border-right: 2px solid var(--accent-soft);
+  padding-right: 0.5rem;
+}
+
+.tree-folder > summary.tree-folder-label {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 0.55rem;
+  border-radius: 8px;
+  font-weight: 600;
+  user-select: none;
+}
+
+.tree-folder > summary.tree-folder-label::-webkit-details-marker {
+  display: none;
+}
+
+.tree-folder > summary.tree-folder-label:hover {
+  background: #f7f3ea;
+}
+
+.tree-chevron {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-left: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.tree-folder:not([open]) > summary .tree-chevron {
+  transform: rotate(135deg);
+}
+
+.tree-folder-icon {
+  flex-shrink: 0;
+}
+
+.tree-folder-name {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.tree-folder-count {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+  background: #f3efe6;
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+}
+
+.tree-children {
+  padding: 0.15rem 0 0.35rem 0.25rem;
+}
+
+.tree-files {
+  list-style: none;
+  margin: 0.2rem 0 0;
+  padding: 0 0 0 1.25rem;
+  border-right: 1px dashed #ddd5c8;
+}
+
+.tree-file {
+  margin: 0.1rem 0;
+}
+
+.tree-file-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+}
+
+.tree-file-row:hover {
+  background: #faf8f4;
+}
+
+.tree-file-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.tree-file-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.tree-file-name {
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.tree-file-meta {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.tree-file-actions.explorer-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.tree-file.locked .tree-file-row {
+  opacity: 0.85;
+}
+
 .explorer { display: grid; gap: 0.55rem; }
 
 .explorer-folder {

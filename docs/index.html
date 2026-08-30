@@ -233,49 +233,62 @@
 
     <div id="status-banner" class="status hidden"></div>
 
-    <main class="grid">
-      <section class="panel">
-        <h2>رفع الملفات</h2>
-        <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="منطقة رفع الملفات">
-          <input id="file-input" class="drop-zone-input" type="file" accept=".pdf,.txt,.md,.text,.log,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx" multiple />
-          <div class="drop-zone-content">
-            <div class="drop-zone-icon" aria-hidden="true">📂</div>
-            <p class="drop-zone-title">اسحب الملفات وأفلتها هنا</p>
-            <p class="drop-zone-sub muted">أو انقر لاختيار الملفات من جهازك</p>
-            <div class="drop-zone-types">
-              <span class="type-pill pdf">PDF</span>
-              <span class="type-pill word">Word</span>
-              <span class="type-pill excel">Excel</span>
-              <span class="type-pill powerpoint">PPT</span>
-              <span class="type-pill text">نص</span>
+    <nav class="app-nav" aria-label="تنقل التطبيق">
+      <button id="nav-library-btn" class="app-nav-btn active" type="button">المكتبة</button>
+      <button id="nav-trash-btn" class="app-nav-btn" type="button">
+        سلة المهملات
+        <span id="trash-count-badge" class="trash-count-badge hidden">0</span>
+      </button>
+    </nav>
+
+    <div id="library-page" class="app-page">
+      <main class="grid">
+        <section class="panel">
+          <h2>رفع الملفات</h2>
+          <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="منطقة رفع الملفات">
+            <input id="file-input" class="drop-zone-input" type="file" accept=".pdf,.txt,.md,.text,.log,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx" multiple />
+            <div class="drop-zone-content">
+              <div class="drop-zone-icon" aria-hidden="true">📂</div>
+              <p class="drop-zone-title">اسحب الملفات وأفلتها هنا</p>
+              <p class="drop-zone-sub muted">أو انقر لاختيار الملفات من جهازك</p>
+              <div class="drop-zone-types">
+                <span class="type-pill pdf">PDF</span>
+                <span class="type-pill word">Word</span>
+                <span class="type-pill excel">Excel</span>
+                <span class="type-pill powerpoint">PPT</span>
+                <span class="type-pill text">نص</span>
+              </div>
             </div>
           </div>
-        </div>
-        <div id="pending-files" class="pending-files-grid hidden"></div>
-        <button id="ingest-btn" class="btn primary" type="button" disabled>فهرسة وتصنيف</button>
+          <div id="pending-files" class="pending-files-grid hidden"></div>
+          <button id="ingest-btn" class="btn primary" type="button" disabled>فهرسة وتصنيف</button>
 
-        <h2>مستكشف الملفات</h2>
-        <p id="library-meta" class="muted">جارٍ التحميل…</p>
-        <div id="category-chips" class="chips"></div>
-        <div id="library-list" class="explorer"></div>
+          <h2 class="section-gap">مستكشف الملفات</h2>
+          <div id="library-list" class="folder-tree" role="tree" aria-label="شجرة الملفات"></div>
+        </section>
 
-        <h2 class="section-gap">سلة المهملات</h2>
+        <section class="panel">
+          <h2>البحث الذكي (فوري)</h2>
+          <label for="search-query">ابحث في محتوى المستندات</label>
+          <input id="search-query" type="search" placeholder="مثال: جدول زمني لمشروع ترميم الجسر" />
+          <label for="category-filter">تصفية حسب المشروع / الموضوع</label>
+          <select id="category-filter"></select>
+          <label for="result-count">عدد النتائج: <span id="result-count-label">5</span></label>
+          <input id="result-count" type="range" min="3" max="12" value="5" />
+          <button id="search-btn" class="btn primary" type="button">بحث</button>
+          <div id="search-results" class="results"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="trash-page" class="app-page hidden">
+      <section class="panel trash-page-panel">
+        <h2>سلة المهملات</h2>
         <p id="trash-meta" class="muted">الملفات المحذوفة تُحذف نهائياً بعد 30 يوماً.</p>
         <div id="trash-list" class="trash-list"></div>
+        <button id="trash-back-btn" class="btn ghost" type="button">العودة إلى المكتبة</button>
       </section>
-
-      <section class="panel">
-        <h2>البحث الذكي (فوري)</h2>
-        <label for="search-query">ابحث في محتوى المستندات</label>
-        <input id="search-query" type="search" placeholder="مثال: جدول زمني لمشروع ترميم الجسر" />
-        <label for="category-filter">تصفية حسب المشروع / الموضوع</label>
-        <select id="category-filter"></select>
-        <label for="result-count">عدد النتائج: <span id="result-count-label">5</span></label>
-        <input id="result-count" type="range" min="3" max="12" value="5" />
-        <button id="search-btn" class="btn primary" type="button">بحث</button>
-        <div id="search-results" class="results"></div>
-      </section>
-    </main>
+    </div>
   </div>
 
   <div id="members-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="members-dialog-title">

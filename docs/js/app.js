@@ -73,11 +73,15 @@ const dropZone = document.getElementById("drop-zone");
 const fileInput = document.getElementById("file-input");
 const pendingFilesEl = document.getElementById("pending-files");
 const ingestBtn = document.getElementById("ingest-btn");
-const libraryMeta = document.getElementById("library-meta");
-const categoryChips = document.getElementById("category-chips");
 const libraryList = document.getElementById("library-list");
 const trashMeta = document.getElementById("trash-meta");
 const trashList = document.getElementById("trash-list");
+const libraryPage = document.getElementById("library-page");
+const trashPage = document.getElementById("trash-page");
+const navLibraryBtn = document.getElementById("nav-library-btn");
+const navTrashBtn = document.getElementById("nav-trash-btn");
+const trashBackBtn = document.getElementById("trash-back-btn");
+const trashCountBadge = document.getElementById("trash-count-badge");
 const categoryFilter = document.getElementById("category-filter");
 const searchQuery = document.getElementById("search-query");
 const searchBtn = document.getElementById("search-btn");
@@ -147,6 +151,7 @@ function showView() {
     renderLibrary();
     renderTrash();
     refreshAdminToolbar();
+    switchAppPage("library");
   }
 }
 
@@ -497,18 +502,34 @@ function buildExplorerTree(documents) {
     }));
 }
 
+function switchAppPage(page) {
+  const isTrash = page === "trash";
+  libraryPage?.classList.toggle("hidden", isTrash);
+  trashPage?.classList.toggle("hidden", !isTrash);
+  navLibraryBtn?.classList.toggle("active", !isTrash);
+  navTrashBtn?.classList.toggle("active", isTrash);
+  if (isTrash) renderTrash();
+}
+
+function updateTrashBadge() {
+  const count = (state.trash || []).length;
+  if (!trashCountBadge) return;
+  if (count > 0) {
+    trashCountBadge.textContent = String(count);
+    trashCountBadge.classList.remove("hidden");
+  } else {
+    trashCountBadge.classList.add("hidden");
+  }
+}
+
+navLibraryBtn?.addEventListener("click", () => switchAppPage("library"));
+navTrashBtn?.addEventListener("click", () => switchAppPage("trash"));
+trashBackBtn?.addEventListener("click", () => switchAppPage("library"));
+
 function summarizeCategories(documents) {
   const counts = new Map();
   for (const doc of documents) counts.set(doc.category, (counts.get(doc.category) || 0) + 1);
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ar"));
-}
-
-function renderDocPreview(doc) {
-  if (doc.isLocked && !isDocUnlocked(doc)) {
-    return `<div class="locked-preview">🔒 ملف مقفل — افتحه لعرض المحتوى</div>`;
-  }
-  const preview = doc.preview || "";
-  return `<div class="explorer-file-preview">${escapeHtml(preview)}${preview.length >= 280 ? "…" : ""}</div>`;
 }
 
 function renderDocActions(doc) {
@@ -523,22 +544,35 @@ function renderDocActions(doc) {
     <button class="btn ghost small delete-btn" data-id="${doc.id}" type="button">حذف</button>`;
 }
 
+function renderTreeFile(doc) {
+  const groupName = doc.fileGroup || fileGroup(doc.filename);
+  const lockedClass = doc.isLocked ? " locked" : "";
+  const lockBadge = doc.isLocked ? `<span class="lock-badge">🔒</span>` : "";
+  return `
+    <li class="tree-file${lockedClass}" role="treeitem" data-id="${doc.id}">
+      <div class="tree-file-row">
+        <span class="tree-file-icon" aria-hidden="true">${GROUP_ICONS[groupName] || GROUP_ICONS.other}</span>
+        <div class="tree-file-info">
+          <span class="tree-file-name">${lockBadge}${escapeHtml(doc.filename)}</span>
+          <span class="tree-file-meta">${doc.charCount.toLocaleString("ar-EG")} حرف</span>
+        </div>
+        <div class="tree-file-actions explorer-actions">
+          ${renderDocActions(doc)}
+        </div>
+      </div>
+    </li>`;
+}
+
 function renderLibrary() {
   const docs = state.documents;
-  const docWord = docs.length === 1 ? "مستند" : "مستندات";
-  libraryMeta.textContent = `محرك البحث: BM25 (فوري) · ${docs.length} ${docWord}`;
-
   const categories = summarizeCategories(docs);
-  categoryChips.innerHTML = categories
-    .map(([name, count]) => `<span class="chip">${escapeHtml(name)} (${count})</span>`)
-    .join("");
 
   categoryFilter.innerHTML = `<option value="">جميع التصنيفات</option>${categories
     .map(([name]) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
     .join("")}`;
 
   if (!docs.length) {
-    libraryList.innerHTML = `<p class="muted">لا توجد مستندات بعد. اسحب ملفاً إلى منطقة الرفع للبدء.</p>`;
+    libraryList.innerHTML = `<p class="muted tree-empty">لا توجد مستندات بعد. اسحب ملفاً إلى منطقة الرفع للبدء.</p>`;
     return;
   }
 
@@ -546,38 +580,28 @@ function renderLibrary() {
   libraryList.innerHTML = tree
     .map(
       (folder) => `
-      <details class="explorer-folder" open>
-        <summary>📁 ${escapeHtml(folder.category)} (${folder.count})</summary>
-        <div class="explorer-body">
+      <details class="tree-folder" open>
+        <summary class="tree-folder-label">
+          <span class="tree-chevron" aria-hidden="true"></span>
+          <span class="tree-folder-icon" aria-hidden="true">📁</span>
+          <span class="tree-folder-name">${escapeHtml(folder.category)}</span>
+          <span class="tree-folder-count">${folder.count}</span>
+        </summary>
+        <div class="tree-children">
           ${folder.groups
             .map(
               (group) => `
-            <div class="explorer-group">
-              <div class="explorer-group-title">${group.icon} ${escapeHtml(group.label)} (${group.files.length})</div>
-              ${group.files
-                .map((doc) => {
-                  const groupName = doc.fileGroup || fileGroup(doc.filename);
-                  const lockedClass = doc.isLocked ? " locked" : "";
-                  const lockBadge = doc.isLocked
-                    ? `<span class="lock-badge">🔒 مقفل</span>`
-                    : "";
-                  return `
-                <article class="explorer-file${lockedClass}" data-id="${doc.id}">
-                  <div class="explorer-file-main">
-                    ${largeIconMarkup(groupName)}
-                    <div>
-                      <div class="explorer-file-title">${lockBadge}${escapeHtml(doc.filename)}</div>
-                      <div class="explorer-file-meta">${escapeHtml(doc.category)} · ${doc.charCount.toLocaleString("ar-EG")} حرف · ${escapeHtml(doc.extension || "")}</div>
-                      ${renderDocPreview(doc)}
-                    </div>
-                  </div>
-                  <div class="explorer-actions">
-                    ${renderDocActions(doc)}
-                  </div>
-                </article>`;
-                })
-                .join("")}
-            </div>`
+            <details class="tree-folder tree-folder-nested" open>
+              <summary class="tree-folder-label">
+                <span class="tree-chevron" aria-hidden="true"></span>
+                <span class="tree-folder-icon" aria-hidden="true">${group.icon}</span>
+                <span class="tree-folder-name">${escapeHtml(group.label)}</span>
+                <span class="tree-folder-count">${group.files.length}</span>
+              </summary>
+              <ul class="tree-files" role="group">
+                ${group.files.map((doc) => renderTreeFile(doc)).join("")}
+              </ul>
+            </details>`
             )
             .join("")}
         </div>
@@ -608,6 +632,7 @@ function bindLibraryActions() {
 
 function renderTrash() {
   const trash = state.trash || [];
+  updateTrashBadge();
   trashMeta.textContent =
     trash.length === 0
       ? `سلة المهملات فارغة. الملفات المحذوفة تُحذف نهائياً بعد ${TRASH_RETENTION_DAYS} يوماً.`
