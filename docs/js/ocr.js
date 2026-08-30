@@ -17,13 +17,25 @@ export function isImageFile(filename) {
   return IMAGE_EXTENSIONS.has(filename.slice(dot).toLowerCase());
 }
 
+async function loadTesseract() {
+  const mod = await import("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/+esm");
+  const createWorker = mod.createWorker ?? mod.default?.createWorker;
+  if (typeof createWorker !== "function") {
+    throw new Error("تعذّر تحميل محرك OCR.");
+  }
+  return { createWorker };
+}
+
 async function getWorker() {
   if (!workerPromise) {
     workerPromise = (async () => {
-      const { createWorker } = await import(
-        "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.esm.min.js"
-      );
-      return createWorker("ara+eng", 1);
+      try {
+        const { createWorker } = await loadTesseract();
+        return createWorker("ara+eng", 1);
+      } catch (error) {
+        workerPromise = null;
+        throw error;
+      }
     })();
   }
   return workerPromise;
