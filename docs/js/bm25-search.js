@@ -211,7 +211,14 @@ export class BM25Index {
     }
 
     hits.sort((a, b) => b.score - a.score);
-    return hits.slice(0, k);
+    return hits.slice(0, k).map(({ chunk, score }) => ({
+      chunk,
+      score,
+      docId: chunk.docId,
+      filename: chunk.filename,
+      category: chunk.category,
+      content: chunk.content,
+    }));
   }
 }
 
