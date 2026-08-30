@@ -240,6 +240,58 @@ select {
   max-width: 900px;
 }
 
+.settings-page-panel {
+  max-width: 720px;
+}
+
+.settings-grid {
+  display: grid;
+  gap: 1.25rem;
+  margin: 1.25rem 0;
+}
+
+.settings-field label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+
+.settings-field select {
+  width: 100%;
+  max-width: 420px;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font: inherit;
+  background: #fff;
+}
+
+.settings-desc {
+  margin: 0.45rem 0 0;
+  font-size: 0.92rem;
+}
+
+.settings-note {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+}
+
+.settings-model-status {
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 0.5rem;
+}
+
 .folder-tree {
   border: 1px solid var(--line);
   border-radius: 12px;

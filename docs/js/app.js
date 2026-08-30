@@ -1,8 +1,10 @@
 import {
-  BM25Index,
-  assignCategory,
   allChunksFromDocuments,
 } from "./bm25-search.js";
+import { classifyDocument, previewText } from "./engines/classifiers.js";
+import { chunkDocument } from "./engines/chunkers.js";
+import { runDocumentSearch } from "./engines/search.js";
+import { bindSettingsForm, renderSettingsForm } from "./engines/settings-ui.js";
 import {
   EXT_GROUPS,
   GROUP_ICONS,
@@ -46,9 +48,6 @@ import {
   TRASH_RETENTION_DAYS,
 } from "./trash.js";
 
-const CHUNK_SIZE = 800;
-const CHUNK_OVERLAP = 120;
-
 let pendingFiles = [];
 let state = normalizeState({});
 let sessionPassword = "";
@@ -80,9 +79,13 @@ const libraryList = document.getElementById("library-list");
 const trashMeta = document.getElementById("trash-meta");
 const trashList = document.getElementById("trash-list");
 const libraryPage = document.getElementById("library-page");
+const settingsPage = document.getElementById("settings-page");
 const trashPage = document.getElementById("trash-page");
 const navLibraryBtn = document.getElementById("nav-library-btn");
+const navSettingsBtn = document.getElementById("nav-settings-btn");
 const navTrashBtn = document.getElementById("nav-trash-btn");
+const settingsBackBtn = document.getElementById("settings-back-btn");
+const settingsFormRoot = document.getElementById("settings-form-root");
 const trashBackBtn = document.getElementById("trash-back-btn");
 const trashCountBadge = document.getElementById("trash-count-badge");
 const categoryFilter = document.getElementById("category-filter");
@@ -297,15 +300,20 @@ async function loadJsZip() {
 }
 
 function chunkText(text) {
-  const chunks = [];
-  let start = 0;
-  while (start < text.length) {
-    const end = Math.min(text.length, start + CHUNK_SIZE);
-    chunks.push(text.slice(start, end));
-    if (end === text.length) break;
-    start = Math.max(end - CHUNK_OVERLAP, start + 1);
-  }
-  return chunks.length ? chunks : [text || ""];
+  return chunkDocument(state.settings?.chunkingEngine || "fixed", text);
+}
+
+function initSettingsPage() {
+  if (!settingsFormRoot) return;
+  settingsFormRoot.innerHTML = renderSettingsForm(state.settings);
+  bindSettingsForm(settingsFormRoot, {
+    getSettings: () => state.settings,
+    onSave: async (nextSettings) => {
+      state = { ...state, settings: nextSettings };
+      await persistState();
+    },
+    onStatus: setStatus,
+  });
 }
 
 function extractDocxXmlText(xml) {
@@ -506,12 +514,17 @@ function buildExplorerTree(documents) {
 }
 
 function switchAppPage(page) {
+  const isLibrary = page === "library";
+  const isSettings = page === "settings";
   const isTrash = page === "trash";
-  libraryPage?.classList.toggle("hidden", isTrash);
+  libraryPage?.classList.toggle("hidden", !isLibrary);
+  settingsPage?.classList.toggle("hidden", !isSettings);
   trashPage?.classList.toggle("hidden", !isTrash);
-  navLibraryBtn?.classList.toggle("active", !isTrash);
+  navLibraryBtn?.classList.toggle("active", isLibrary);
+  navSettingsBtn?.classList.toggle("active", isSettings);
   navTrashBtn?.classList.toggle("active", isTrash);
   if (isTrash) renderTrash();
+  if (isSettings) initSettingsPage();
 }
 
 function updateTrashBadge() {
@@ -526,7 +539,9 @@ function updateTrashBadge() {
 }
 
 navLibraryBtn?.addEventListener("click", () => switchAppPage("library"));
+navSettingsBtn?.addEventListener("click", () => switchAppPage("settings"));
 navTrashBtn?.addEventListener("click", () => switchAppPage("trash"));
+settingsBackBtn?.addEventListener("click", () => switchAppPage("library"));
 trashBackBtn?.addEventListener("click", () => switchAppPage("library"));
 
 function summarizeCategories(documents) {
@@ -913,7 +928,12 @@ async function ingestFiles(files) {
       const arrayBuffer = await file.arrayBuffer();
       const text = await extractText(file, arrayBuffer);
       if (!text) throw new Error(`لم يُعثر على نص في ${file.name}`);
-      const category = assignCategory(text, file.name, state.documents);
+      const category = classifyDocument(
+        state.settings.classificationEngine,
+        text,
+        file.name,
+        state.documents
+      );
       const chunks = chunkText(text).map((content) => ({ content }));
       let driveFileId = null;
       if (isUsingDriveStorage()) {
@@ -931,7 +951,7 @@ async function ingestFiles(files) {
         fileGroup: fileGroup(file.name),
         extension: fileExtension(file.name),
         charCount: text.length,
-        preview: text.replace(/\s+/g, " ").slice(0, 280),
+        preview: previewText(text),
         fileData: driveFileId ? null : arrayBufferToBase64(arrayBuffer),
         driveFileId,
         chunks,
@@ -960,7 +980,7 @@ async function ingestFiles(files) {
   }
 }
 
-function runSearch() {
+async function runSearch() {
   const query = searchQuery.value.trim();
   if (!query) {
     searchResults.innerHTML = `<p class="muted">أدخل عبارة البحث.</p>`;
@@ -975,15 +995,24 @@ function runSearch() {
   searchBtn.disabled = true;
   const category = categoryFilter.value || null;
   const k = Number(resultCount.value);
-  const index = new BM25Index(allChunksFromDocuments(searchable));
-  const top = index.search(query, k, category);
+  const chunks = allChunksFromDocuments(searchable);
 
-  if (!top.length) {
-    searchResults.innerHTML = `<p class="muted">لم يُعثر على مقاطع مطابقة. جرّب عبارة أوسع.</p>`;
-  } else {
-    searchResults.innerHTML = top
-      .map(
-        (hit) => `
+  try {
+    const top = await runDocumentSearch({
+      engineId: state.settings.searchEngine,
+      query,
+      chunks,
+      k,
+      category,
+      onStatus: setStatus,
+    });
+
+    if (!top.length) {
+      searchResults.innerHTML = `<p class="muted">لم يُعثر على مقاطع مطابقة. جرّب عبارة أوسع أو محرك بحث آخر.</p>`;
+    } else {
+      searchResults.innerHTML = top
+        .map(
+          (hit) => `
         <article class="hit">
           <div class="hit-header">
             <div>
@@ -995,14 +1024,19 @@ function runSearch() {
           </div>
           <p>${highlightText(hit.content, query)}</p>
         </article>`
-      )
-      .join("");
+        )
+        .join("");
 
-    searchResults.querySelectorAll(".search-download-btn").forEach((btn) => {
-      btn.addEventListener("click", () => handleDownload(btn.dataset.id));
-    });
+      searchResults.querySelectorAll(".search-download-btn").forEach((btn) => {
+        btn.addEventListener("click", () => handleDownload(btn.dataset.id));
+      });
+    }
+  } catch (error) {
+    searchResults.innerHTML = `<p class="muted">تعذّر البحث: ${escapeHtml(error.message)}</p>`;
+  } finally {
+    searchBtn.disabled = false;
+    setStatus("", false);
   }
-  searchBtn.disabled = false;
 }
 
 logoutBtn.addEventListener("click", () => {

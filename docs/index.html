@@ -235,6 +235,7 @@
 
     <nav class="app-nav" aria-label="تنقل التطبيق">
       <button id="nav-library-btn" class="app-nav-btn active" type="button">المكتبة</button>
+      <button id="nav-settings-btn" class="app-nav-btn" type="button">إعدادات البحث</button>
       <button id="nav-trash-btn" class="app-nav-btn" type="button">
         سلة المهملات
         <span id="trash-count-badge" class="trash-count-badge hidden">0</span>
@@ -279,6 +280,15 @@
           <div id="search-results" class="results"></div>
         </section>
       </main>
+    </div>
+
+    <div id="settings-page" class="app-page hidden">
+      <section class="panel settings-page-panel">
+        <h2>إعدادات البحث والفهرسة</h2>
+        <p class="muted">اختر محرك البحث والتصنيف وتقسيم النص. BM25 هو الافتراضي الموصى به.</p>
+        <div id="settings-form-root"></div>
+        <button id="settings-back-btn" class="btn ghost" type="button">العودة إلى المكتبة</button>
+      </section>
     </div>
 
     <div id="trash-page" class="app-page hidden">

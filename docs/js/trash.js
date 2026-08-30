@@ -1,3 +1,5 @@
+import { normalizeEngineSettings } from "./engines/registry.js";
+
 export const TRASH_RETENTION_DAYS = 30;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -6,6 +8,7 @@ export function normalizeState(state) {
   return {
     documents: Array.isArray(next.documents) ? next.documents : [],
     trash: Array.isArray(next.trash) ? next.trash : [],
+    settings: normalizeEngineSettings(next.settings),
   };
 }
 
