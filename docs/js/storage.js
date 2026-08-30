@@ -142,6 +142,7 @@ export async function saveDocuments(password, state) {
 
   try {
     await uploadRemoteStore(envelope);
+    saveLocalDocuments(payload);
   } catch (error) {
     if (isUsingGitHubStorage()) {
       const message = String(error.message || "");
@@ -149,9 +150,11 @@ export async function saveDocuments(password, state) {
         const latest = await fetchGitHubStore();
         remoteSha = latest.sha;
         await uploadGitHubStore(envelope, remoteSha);
+        saveLocalDocuments(payload);
         return;
       }
     }
+    saveLocalDocuments(payload);
     throw error;
   }
 }

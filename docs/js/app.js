@@ -1300,15 +1300,17 @@ async function ingestFiles(files) {
 
   ingestBtn.disabled = true;
   setStatus("جارٍ فهرسة الملفات…");
+  const documentsBefore = state.documents.length;
   try {
     for (const file of files) {
       const arrayBuffer = await file.arrayBuffer();
-      if (isImageFile(file.name)) {
+      const image = isImageFile(file.name);
+      if (image) {
         setStatus(`جارٍ استخراج النص من الصورة (OCR): ${file.name}…`);
       }
       const text = await extractText(file, arrayBuffer, {
         onOcrProgress: (progress) => {
-          if (isImageFile(file.name)) {
+          if (image) {
             setStatus(`${formatOcrProgress(progress)} — ${file.name}`);
           }
         },
@@ -1318,12 +1320,15 @@ async function ingestFiles(files) {
       const chunks = chunkText(text).map((content) => ({ content }));
       let driveFileId = null;
       if (isUsingDriveStorage()) {
+        setStatus(`جارٍ رفع الملف إلى Google Drive: ${file.name}…`);
         driveFileId = await uploadDocumentFile(
           category,
           file.name,
           new Blob([arrayBuffer], { type: file.type || "application/octet-stream" })
         );
       }
+      const keepBinary =
+        !driveFileId && !(isUsingGitHubStorage() && image);
       state.documents.push({
         id: crypto.randomUUID(),
         filename: file.name,
@@ -1332,7 +1337,7 @@ async function ingestFiles(files) {
         extension: fileExtension(file.name),
         charCount: text.length,
         preview: text.replace(/\s+/g, " ").slice(0, 280),
-        fileData: driveFileId ? null : arrayBufferToBase64(arrayBuffer),
+        fileData: keepBinary ? arrayBufferToBase64(arrayBuffer) : null,
         driveFileId,
         storageBackend: isUsingDriveStorage()
           ? STORAGE_BACKENDS.DRIVE
@@ -1344,6 +1349,7 @@ async function ingestFiles(files) {
         lockHash: null,
       });
     }
+    setStatus("جارٍ حفظ المستندات…");
     await persistState();
     renderLibrary();
     setStatus(
@@ -1358,7 +1364,11 @@ async function ingestFiles(files) {
     );
     setTimeout(() => setStatus("", false), 2500);
   } catch (error) {
-    setStatus(`خطأ: ${error.message}`, true);
+    state.documents = state.documents.slice(0, documentsBefore);
+    const hint = /bad credentials|DOCSHELF_GITHUB_TOKEN/i.test(error.message || "")
+      ? " (نجح استخراج النص من الصورة، لكن فشل الحفظ في GitHub.)"
+      : "";
+    setStatus(`خطأ: ${error.message}${hint}`, true);
   } finally {
     ingestBtn.disabled = !pendingFiles.length;
     revokeAllPreviewUrls();

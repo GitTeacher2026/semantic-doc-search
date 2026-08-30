@@ -5,6 +5,7 @@ import {
   GITHUB_TOKEN,
   STORE_PATH,
 } from "./config.js";
+import { formatGitHubApiError } from "./github-errors.js";
 
 function apiUrl() {
   return `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${STORE_PATH}`;
@@ -42,7 +43,7 @@ export async function fetchEncryptedStore() {
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || `تعذّر قراءة التخزين السحابي (${res.status})`);
+    throw new Error(formatGitHubApiError(err.message, res.status));
   }
 
   const payload = await res.json();
@@ -70,7 +71,7 @@ export async function uploadEncryptedStore(envelope, sha) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || `تعذّر حفظ التخزين السحابي (${res.status})`);
+    throw new Error(formatGitHubApiError(err.message, res.status));
   }
 
   const result = await res.json();

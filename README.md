@@ -37,6 +37,15 @@ export DOCSHELF_PASSWORD=your_password
 
 إذا كان كلاهما مضبوطاً، يظهر في التطبيق خيار **مكان التخزين** للتبديل بين GitHub و Google Drive.
 
+### إعداد GitHub Token (للتخزين على GitHub)
+
+1. افتح [GitHub → Settings → Developer settings → Personal access tokens](https://github.com/settings/tokens)
+2. أنشئ **Fine-grained token** أو **Classic token** بصلاحية **`repo`** على مستودع `semantic-doc-search`
+3. في GitHub: **Settings** → **Secrets and variables** → **Actions** → أضف سراً باسم **`DOCSHELF_GITHUB_TOKEN`**
+4. أعد تشغيل workflow **Deploy GitHub Pages**
+
+إذا ظهر **`Bad credentials`** بعد رفع صورة (بعد اكتمال OCR): المفتاح منتهٍ أو ملغى — أنشئ توكناً جديداً وحدّث السر ثم أعد النشر. الصور على GitHub تُحفظ كنص مستخرج فقط (بدون نسخة الصورة الأصلية) لتقليل الحجم.
+
 ### إعداد Google Drive (مرة واحدة)
 
 1. افتح [Google Cloud Console](https://console.cloud.google.com/) وسجّل الدخول بحساب **amanyak267@gmail.com**
