@@ -13,17 +13,16 @@
 - بحث فوري BM25 (نسخة Streamlit ونسخة GitHub Pages)
 - **تخزين سحابي على Google Drive** — الملفات تُحفظ في مجلدات حسب التصنيف على حساب amanyak267@gmail.com
 
-## بيانات الدخول الافتراضية
+## بيانات الدخول
 
 | الحقل | القيمة |
 |-------|--------|
 | اسم المستخدم | `admin` |
-| كلمة المرور | `docshelf2024` |
 
-لتغييرها في Streamlit:
+كلمة مرور المسؤول تُدار عبر `data/users.json` (نسخة GitHub Pages) أو متغيرات البيئة (نسخة Streamlit):
 
 ```bash
-export DOCSHELF_USERNAME=your_user
+export DOCSHELF_USERNAME=admin
 export DOCSHELF_PASSWORD=your_password
 ```
 

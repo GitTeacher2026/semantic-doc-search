@@ -12,7 +12,7 @@ const DEFAULT_ADMIN = {
   firstName: "مدير",
   lastName: "النظام",
   email: "amanyak267@gmail.com",
-  passwordHash: "EA7ALRaIWq3P05mCoRiRlsInyKr4JxTah7diD610IVo=",
+  passwordHash: "G3ymG6VwFFm8A8Iy46ljHwOlRJ4ifIjLKlBVh11HBOY=",
   role: "admin",
   status: "approved",
   createdAt: "2026-01-01T00:00:00.000Z",

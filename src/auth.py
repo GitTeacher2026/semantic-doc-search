@@ -8,7 +8,7 @@ import os
 import streamlit as st
 
 DEFAULT_USERNAME = os.getenv("DOCSHELF_USERNAME", "admin")
-DEFAULT_PASSWORD = os.getenv("DOCSHELF_PASSWORD", "docshelf2024")
+DEFAULT_PASSWORD = os.getenv("DOCSHELF_PASSWORD", "9gYeYhcVN62es7w")
 
 
 def _password_hash(value: str) -> str:
@@ -65,8 +65,6 @@ def render_login_page() -> None:
             if login(username, password):
                 st.rerun()
             st.error("اسم المستخدم أو كلمة المرور غير صحيحة.")
-
-        st.caption("بيانات الدخول الافتراضية: admin / docshelf2024")
 
 
 def require_login() -> None:
