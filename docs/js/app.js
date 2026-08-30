@@ -4,6 +4,7 @@ import {
   allChunksFromDocuments,
 } from "./bm25-search.js";
 import { bindSearchResults, renderSearchResults } from "./search-results.js";
+import { extractImageText, isImageFile } from "./ocr.js";
 import {
   EXT_GROUPS,
   GROUP_ICONS,
@@ -89,6 +90,7 @@ const trashCountBadge = document.getElementById("trash-count-badge");
 const categoryFilter = document.getElementById("category-filter");
 const searchQuery = document.getElementById("search-query");
 const searchBtn = document.getElementById("search-btn");
+const clearSearchBtn = document.getElementById("clear-search-btn");
 const searchResults = document.getElementById("search-results");
 const resultCount = document.getElementById("result-count");
 const resultCountLabel = document.getElementById("result-count-label");
@@ -236,7 +238,7 @@ function renderPendingFiles() {
       <article class="pending-file-card">
         ${largeIconMarkup(fileGroup(file.name))}
         <div class="pending-file-name">${escapeHtml(file.name)}</div>
-        <div class="pending-file-size">${formatFileSize(file.size)}</div>
+        <div class="pending-file-size">${formatFileSize(file.size)}${isImageFile(file.name) ? " · OCR" : ""}</div>
         <button class="pending-file-remove" type="button" data-index="${index}">إزالة</button>
       </article>`
     )
@@ -390,9 +392,12 @@ async function extractPdfText(arrayBuffer) {
   return parts.join("\n").trim();
 }
 
-async function extractText(file, arrayBuffer) {
+async function extractText(file, arrayBuffer, { onOcrProgress } = {}) {
   const name = String(file?.name || "");
   const buffer = arrayBuffer || (await file.arrayBuffer());
+  if (isImageFile(name)) {
+    return extractImageText(new Blob([buffer], { type: file.type || "image/jpeg" }), onOcrProgress);
+  }
   if (fileEndsWith(name, ".pdf")) return extractPdfText(buffer);
   if (fileEndsWith(name, ".docx")) return extractDocxText(buffer);
   if (fileEndsWith(name, ".xlsx") || fileEndsWith(name, ".xls")) return extractExcelText(buffer);
@@ -897,7 +902,16 @@ async function ingestFiles(files) {
   try {
     for (const file of files) {
       const arrayBuffer = await file.arrayBuffer();
-      const text = await extractText(file, arrayBuffer);
+      if (isImageFile(file.name)) {
+        setStatus(`جارٍ استخراج النص من الصورة (OCR): ${file.name}…`);
+      }
+      const text = await extractText(file, arrayBuffer, {
+        onOcrProgress: (pct) => {
+          if (isImageFile(file.name)) {
+            setStatus(`جارٍ استخراج النص من الصورة: ${pct}% — ${file.name}`);
+          }
+        },
+      });
       if (!text) throw new Error(`لم يُعثر على نص في ${file.name}`);
       const category = assignCategory(text, file.name, state.documents);
       const chunks = chunkText(text).map((content) => ({ content }));
@@ -946,15 +960,24 @@ async function ingestFiles(files) {
   }
 }
 
+function setSearchResults(html) {
+  searchResults.innerHTML = html;
+  if (clearSearchBtn) clearSearchBtn.disabled = !html;
+}
+
+function clearSearchResults() {
+  setSearchResults("");
+}
+
 function runSearch() {
   const query = searchQuery.value.trim();
   if (!query) {
-    searchResults.innerHTML = `<p class="muted search-empty">أدخل عبارة البحث.</p>`;
+    setSearchResults(`<p class="muted search-empty">أدخل عبارة البحث.</p>`);
     return;
   }
   const searchable = accessibleDocuments(state.documents);
   if (!searchable.length) {
-    searchResults.innerHTML = `<p class="muted search-empty">ارفع مستندات أو افتح الملفات المقفلة قبل البحث.</p>`;
+    setSearchResults(`<p class="muted search-empty">ارفع مستندات أو افتح الملفات المقفلة قبل البحث.</p>`);
     return;
   }
 
@@ -968,11 +991,11 @@ function runSearch() {
       searchable.map((doc) => [doc.id, { fileGroup: doc.fileGroup, extension: doc.extension }])
     );
 
-    searchResults.innerHTML = renderSearchResults(top, query, docMeta);
+    setSearchResults(renderSearchResults(top, query, docMeta));
     bindSearchResults(searchResults, { onDownload: handleDownload });
   } catch (error) {
     console.error(error);
-    searchResults.innerHTML = `<p class="muted search-empty">تعذّر عرض النتائج: ${escapeHtml(error.message)}</p>`;
+    setSearchResults(`<p class="muted search-empty">تعذّر عرض النتائج: ${escapeHtml(error.message)}</p>`);
   } finally {
     searchBtn.disabled = false;
   }
@@ -993,6 +1016,10 @@ ingestBtn.addEventListener("click", () => {
 });
 
 searchBtn.addEventListener("click", runSearch);
+clearSearchBtn?.addEventListener("click", clearSearchResults);
+searchQuery?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") runSearch();
+});
 resultCount.addEventListener("input", () => {
   resultCountLabel.textContent = resultCount.value;
 });

@@ -246,7 +246,7 @@
         <section class="panel">
           <h2>رفع الملفات</h2>
           <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="منطقة رفع الملفات">
-            <input id="file-input" class="drop-zone-input" type="file" accept=".pdf,.txt,.md,.text,.log,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx" multiple />
+            <input id="file-input" class="drop-zone-input" type="file" accept=".pdf,.txt,.md,.text,.log,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.gif,.bmp,.tif,.tiff" multiple />
             <div class="drop-zone-content">
               <div class="drop-zone-icon" aria-hidden="true">📂</div>
               <p class="drop-zone-title">اسحب الملفات وأفلتها هنا</p>
@@ -257,7 +257,9 @@
                 <span class="type-pill excel">Excel</span>
                 <span class="type-pill powerpoint">PPT</span>
                 <span class="type-pill text">نص</span>
+                <span class="type-pill image">صور</span>
               </div>
+              <p class="drop-zone-ocr muted">الصور تُفهرَس تلقائياً عبر OCR (عربي + إنجليزي)</p>
             </div>
           </div>
           <div id="pending-files" class="pending-files-grid hidden"></div>
@@ -275,7 +277,10 @@
           <select id="category-filter"></select>
           <label for="result-count">عدد النتائج: <span id="result-count-label">5</span></label>
           <input id="result-count" type="range" min="3" max="12" value="5" />
-          <button id="search-btn" class="btn primary" type="button">بحث</button>
+          <div class="search-actions">
+            <button id="search-btn" class="btn primary" type="button">بحث</button>
+            <button id="clear-search-btn" class="btn ghost" type="button" disabled>مسح النتائج</button>
+          </div>
           <div id="search-results" class="results"></div>
         </section>
       </main>

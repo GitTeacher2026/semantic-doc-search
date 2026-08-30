@@ -764,6 +764,24 @@ mark.query-hit, .query-hit {
 .type-pill.excel { color: #067647; border-color: #abefc6; background: #ecfdf3; }
 .type-pill.powerpoint { color: #b93815; border-color: #f9dbaf; background: #fff6ed; }
 .type-pill.text { color: #6941c6; border-color: #d9d6fe; background: #f4f3ff; }
+.type-pill.image { color: #0e7090; border-color: #a5f0fc; background: #ecfeff; }
+
+.drop-zone-ocr {
+  margin-top: 0.65rem;
+  font-size: 0.85rem;
+}
+
+.search-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.search-actions .btn.primary {
+  flex: 1;
+  min-width: 7rem;
+}
 
 .pending-files-grid {
   display: grid;

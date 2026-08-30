@@ -4,6 +4,7 @@ export const EXT_GROUPS = {
   excel: [".xls", ".xlsx"],
   powerpoint: [".ppt", ".pptx"],
   text: [".txt", ".md", ".text", ".log", ".csv"],
+  image: [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"],
 };
 
 export const GROUP_LABELS = {
@@ -12,6 +13,7 @@ export const GROUP_LABELS = {
   excel: "Excel",
   powerpoint: "PowerPoint",
   text: "نص",
+  image: "صورة",
   other: "أخرى",
 };
 
@@ -21,6 +23,7 @@ export const GROUP_ICONS = {
   excel: "📊",
   powerpoint: "📽️",
   text: "📃",
+  image: "🖼️",
   other: "📁",
 };
 
@@ -37,6 +40,14 @@ export const ACCEPTED_EXTENSIONS = [
   ".xlsx",
   ".ppt",
   ".pptx",
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".gif",
+  ".bmp",
+  ".tif",
+  ".tiff",
 ];
 
 export function fileExtension(filename) {
