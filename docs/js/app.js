@@ -4,7 +4,7 @@ import {
   allChunksFromDocuments,
 } from "./bm25-search.js";
 import { bindSearchResults, renderSearchResults } from "./search-results.js";
-import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js";
+import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js?v=20260830";
 import {
   EXT_GROUPS,
   GROUP_ICONS,

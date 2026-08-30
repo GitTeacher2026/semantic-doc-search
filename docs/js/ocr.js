@@ -13,7 +13,7 @@ const IMAGE_EXTENSIONS = new Set([
 
 const MAX_EDGE = 1600;
 const OCR_TIMEOUT_MS = 45_000;
-const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+const GEMINI_MODELS = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"];
 
 const STAGE_LABELS = {
   prepare: "جارٍ تحضير الصورة",
