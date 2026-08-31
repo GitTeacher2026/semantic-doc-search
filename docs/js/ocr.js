@@ -114,10 +114,19 @@ function mapTesseractProgress(message) {
   }
 }
 
+async function loadTesseract() {
+  const mod = await import(TESSERACT_URL);
+  const api = mod.default ?? mod;
+  if (typeof api?.createWorker !== "function") {
+    throw new Error("تعذّر تحميل محرك OCR. حدّث الصفحة وحاول مرة أخرى.");
+  }
+  return api;
+}
+
 async function getWorker() {
   if (!workerPromise) {
     workerPromise = (async () => {
-      const { createWorker } = await import(TESSERACT_URL);
+      const { createWorker } = await loadTesseract();
       return createWorker("ara+eng", 1, {
         logger: mapTesseractProgress,
       });

@@ -20,7 +20,7 @@ import {
 } from "./document-storage.js";
 import { initTheme, toggleTheme } from "./theme.js";
 import { bindSearchResults, renderSearchResults } from "./search-results.js?v=20260830b";
-import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js?v=20260831";
+import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js?v=20260831b";
 import {
   ensurePreviewUrl,
   initImagePreview,
