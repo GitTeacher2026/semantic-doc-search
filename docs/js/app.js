@@ -20,7 +20,7 @@ import {
 } from "./document-storage.js";
 import { initTheme, toggleTheme } from "./theme.js";
 import { bindSearchResults, renderSearchResults } from "./search-results.js?v=20260830b";
-import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js?v=20260831c";
+import { extractImageText, formatOcrProgress, hydrateOcrSpaceKey, isImageFile } from "./ocr.js?v=20260831e";
 import {
   getAvailableOcrEngines,
   loadOcrOptions,
@@ -537,11 +537,12 @@ async function extractText(file, arrayBuffer, { onOcrProgress } = {}) {
   const name = String(file?.name || "");
   const buffer = arrayBuffer || (await file.arrayBuffer());
   if (isImageFile(name)) {
-    return extractImageText(
+    const result = await extractImageText(
       new Blob([buffer], { type: file.type || "image/jpeg" }),
       onOcrProgress,
       { engine: readOcrEngineFromForm() }
     );
+    return typeof result === "string" ? result : result.text;
   }
   if (fileEndsWith(name, ".pdf")) return extractPdfText(buffer);
   if (fileEndsWith(name, ".docx")) return extractDocxText(buffer);
@@ -1402,6 +1403,7 @@ export async function startApp({ user, auth }) {
 
   try {
     await hydrateDocuments(sessionPassword);
+    await hydrateOcrSpaceKey();
     applySearchOptionsToForm(loadSearchOptions());
     updateOcrEnginePanel();
     updateStoragePanel();

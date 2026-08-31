@@ -1,11 +1,5 @@
-import { OCR_SPACE_API_KEY } from "./config.js";
-import {
-  getOcrFallbackEngine,
-  getOcrEngineLabel,
-  loadOcrOptions,
-  OCR_ENGINES,
-  resolveOcrEngine,
-} from "./ocr-options.js";
+import { OCR_ENGINES, getOcrFallbackEngine, getOcrEngineLabel, loadOcrOptions, resolveOcrEngine } from "./ocr-options.js";
+import { hydrateOcrSpaceKey } from "./ocr-config.js";
 
 const IMAGE_EXTENSIONS = new Set([
   ".jpg",
@@ -33,6 +27,7 @@ let workerPromise = null;
 let activeProgressCallback = null;
 
 export { getAvailableOcrEngines, loadOcrOptions, saveOcrOptions, OCR_ENGINES } from "./ocr-options.js";
+export { hydrateOcrSpaceKey } from "./ocr-config.js";
 
 export function isImageFile(filename) {
   const dot = String(filename || "").lastIndexOf(".");
@@ -40,10 +35,13 @@ export function isImageFile(filename) {
   return IMAGE_EXTENSIONS.has(filename.slice(dot).toLowerCase());
 }
 
-export function formatOcrProgress({ stage, pct, engine } = {}) {
+export function formatOcrProgress({ stage, pct, engine, fallbackReason } = {}) {
   const engineLabel = engine ? getOcrEngineLabel(engine).split("—").pop()?.trim() : "";
   const prefix = engineLabel ? `${engineLabel}: ` : "";
   const label = STAGE_LABELS[stage] || "جارٍ معالجة الصورة";
+  if (fallbackReason && stage === "load") {
+    return `فشل OCR.space — التحويل إلى Tesseract…`;
+  }
   if (stage === "load" || stage === "ocr" || stage === "upload") {
     return `${prefix}${label}${typeof pct === "number" ? `: ${pct}%` : "…"}`;
   }
@@ -158,9 +156,9 @@ async function ocrWithTesseract(blob) {
 }
 
 async function ocrWithOcrSpace(blob) {
-  const apiKey = String(OCR_SPACE_API_KEY || "").trim();
+  const apiKey = await hydrateOcrSpaceKey();
   if (!apiKey) {
-    throw new Error("مفتاح OCR.space غير مضبوط. أضف OCR_SPACE_API_KEY في GitHub Secrets.");
+    throw new Error("مفتاح OCR.space غير مضبوط. أضف OCR_SPACE_API_KEY في GitHub Secrets ثم أعد النشر.");
   }
 
   activeProgressCallback?.({ stage: "upload", pct: 25, engine: OCR_ENGINES.OCR_SPACE });
@@ -210,10 +208,12 @@ async function runOcrEngine(engine, blob) {
 }
 
 export async function extractImageText(file, onProgress, options = {}) {
+  await hydrateOcrSpaceKey();
   activeProgressCallback = onProgress;
   const preferred = options.engine || loadOcrOptions().engine;
   const primary = resolveOcrEngine(preferred);
-  const fallback = preferred === OCR_ENGINES.AUTO ? getOcrFallbackEngine(primary) : null;
+  const allowFallback = preferred === OCR_ENGINES.AUTO;
+  const fallback = getOcrFallbackEngine(primary, allowFallback);
 
   try {
     const source = file instanceof Blob ? file : new Blob([file]);
@@ -224,6 +224,15 @@ export async function extractImageText(file, onProgress, options = {}) {
 
     for (const engine of [primary, fallback].filter(Boolean)) {
       try {
+        if (engine !== primary && lastError) {
+          onProgress?.({
+            stage: "load",
+            pct: 0,
+            engine,
+            fallbackReason: lastError.message,
+          });
+        }
+
         const text = normalizeOcrText(
           await withTimeout(
             runOcrEngine(engine, prepared),
@@ -236,15 +245,10 @@ export async function extractImageText(file, onProgress, options = {}) {
           throw new Error("لم يُعثر على نص في الصورة.");
         }
 
-        return text;
+        return { text, engine };
       } catch (error) {
         lastError = error;
         if (!fallback || engine === fallback) break;
-        onProgress?.({
-          stage: "load",
-          pct: 0,
-          engine: fallback,
-        });
       }
     }
 
