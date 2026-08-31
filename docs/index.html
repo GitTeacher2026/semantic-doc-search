@@ -252,6 +252,15 @@
           <div id="storage-settings-panel" class="storage-settings-panel hidden">
             <p id="storage-mode-status" class="storage-mode-status muted"></p>
           </div>
+          <div class="ocr-engine-panel">
+            <label class="ocr-engine-label" for="ocr-engine">استخراج نص الصور (OCR)</label>
+            <select id="ocr-engine" class="ocr-engine-select" aria-label="محرك استخراج النص من الصور">
+              <option value="auto">تلقائي</option>
+              <option value="tesseract">محلي — Tesseract</option>
+              <option value="ocrspace" hidden disabled>سحابي — OCR.space</option>
+            </select>
+            <p id="ocr-engine-hint" class="ocr-engine-hint muted">محلي (عربي + إنجليزي) — لا يحتاج مفتاح API</p>
+          </div>
           <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="منطقة رفع الملفات">
             <input id="file-input" class="drop-zone-input" type="file" accept=".pdf,.txt,.md,.text,.log,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.gif,.bmp,.tif,.tiff" multiple />
             <div class="drop-zone-content">
@@ -266,7 +275,7 @@
                 <span class="type-pill text">نص</span>
                 <span class="type-pill image">صور</span>
               </div>
-              <p class="drop-zone-ocr muted">الصور — استخراج النص محلياً (عربي + إنجليزي) بدون خدمات خارجية</p>
+              <p class="drop-zone-ocr muted">الصور — استخراج النص عبر Tesseract المحلي أو OCR.space السحابي</p>
             </div>
           </div>
           <div id="pending-files" class="pending-files-grid hidden"></div>

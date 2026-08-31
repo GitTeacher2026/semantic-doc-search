@@ -34,6 +34,7 @@ jobs:
           DOCSHELF_GITHUB_TOKEN: ${{ secrets.DOCSHELF_GITHUB_TOKEN }}
           DOCSHELF_VAULT_PASSWORD: ${{ secrets.DOCSHELF_VAULT_PASSWORD }}
           WEB3FORMS_ACCESS_KEY: ${{ secrets.WEB3FORMS_ACCESS_KEY }}
+          OCR_SPACE_API_KEY: ${{ secrets.OCR_SPACE_API_KEY }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           node <<'NODE'
@@ -41,6 +42,7 @@ jobs:
           const token = process.env.DOCSHELF_GITHUB_TOKEN || "";
           const vaultPassword = process.env.DOCSHELF_VAULT_PASSWORD || "docshelf2024";
           const web3formsKey = process.env.WEB3FORMS_ACCESS_KEY || "";
+          const ocrSpaceKey = (process.env.OCR_SPACE_API_KEY || "").trim();
           const [owner, repo] = String(process.env.GITHUB_REPOSITORY || "owner/repo").split("/");
           const siteUrl = `https://${owner.toLowerCase()}.github.io/${repo}/`;
           const config = `/** Generated during deploy — do not edit manually. */
@@ -54,6 +56,7 @@ jobs:
           export const SITE_URL = ${JSON.stringify(siteUrl)};
           export const VAULT_PASSWORD = ${JSON.stringify(vaultPassword)};
           export const WEB3FORMS_ACCESS_KEY = ${JSON.stringify(web3formsKey)};
+          export const OCR_SPACE_API_KEY = ${JSON.stringify(ocrSpaceKey)};
           `;
           fs.writeFileSync("docs/js/config.js", config);
           NODE

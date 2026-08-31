@@ -9,3 +9,4 @@ export const ADMIN_EMAIL = "reagon.gm@pm.me";
 export const SITE_URL = "https://gitteacher2026.github.io/semantic-doc-search/";
 export const VAULT_PASSWORD = "docshelf2024";
 export const WEB3FORMS_ACCESS_KEY = "";
+export const OCR_SPACE_API_KEY = "";

@@ -20,7 +20,13 @@ import {
 } from "./document-storage.js";
 import { initTheme, toggleTheme } from "./theme.js";
 import { bindSearchResults, renderSearchResults } from "./search-results.js?v=20260830b";
-import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js?v=20260831b";
+import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js?v=20260831c";
+import {
+  getAvailableOcrEngines,
+  loadOcrOptions,
+  readOcrEngineFromForm,
+  saveOcrOptions,
+} from "./ocr-options.js";
 import {
   ensurePreviewUrl,
   initImagePreview,
@@ -201,6 +207,37 @@ function updateStoragePanel() {
     storageModeStatus.textContent = githubAvailable
       ? "التخزين عبر GitHub — تُحفظ الملفات والفهرس في المستودع المشفّر."
       : "";
+  }
+}
+
+function updateOcrEnginePanel() {
+  const select = document.getElementById("ocr-engine");
+  const hint = document.getElementById("ocr-engine-hint");
+  if (!select) return;
+
+  const saved = loadOcrOptions().engine;
+  const engines = getAvailableOcrEngines();
+  const previous = select.value;
+
+  select.replaceChildren(
+    ...engines.map((engine) => {
+      const option = document.createElement("option");
+      option.value = engine.id;
+      option.textContent = engine.label;
+      return option;
+    })
+  );
+
+  const nextValue = engines.some((item) => item.id === saved)
+    ? saved
+    : engines.some((item) => item.id === previous)
+      ? previous
+      : engines[0]?.id;
+  if (nextValue) select.value = nextValue;
+
+  const active = engines.find((item) => item.id === select.value) || engines[0];
+  if (hint && active?.hint) {
+    hint.textContent = active.hint;
   }
 }
 
@@ -500,7 +537,11 @@ async function extractText(file, arrayBuffer, { onOcrProgress } = {}) {
   const name = String(file?.name || "");
   const buffer = arrayBuffer || (await file.arrayBuffer());
   if (isImageFile(name)) {
-    return extractImageText(new Blob([buffer], { type: file.type || "image/jpeg" }), onOcrProgress);
+    return extractImageText(
+      new Blob([buffer], { type: file.type || "image/jpeg" }),
+      onOcrProgress,
+      { engine: readOcrEngineFromForm() }
+    );
   }
   if (fileEndsWith(name, ".pdf")) return extractPdfText(buffer);
   if (fileEndsWith(name, ".docx")) return extractDocxText(buffer);
@@ -1343,6 +1384,11 @@ advancedSearchPanel?.querySelectorAll("input").forEach((input) => {
   });
 });
 
+document.getElementById("ocr-engine")?.addEventListener("change", (event) => {
+  saveOcrOptions({ engine: readOcrEngineFromForm() });
+  updateOcrEnginePanel();
+});
+
 export async function startApp({ user, auth }) {
   currentUser = user;
   authApi = auth;
@@ -1357,6 +1403,7 @@ export async function startApp({ user, auth }) {
   try {
     await hydrateDocuments(sessionPassword);
     applySearchOptionsToForm(loadSearchOptions());
+    updateOcrEnginePanel();
     updateStoragePanel();
     updateUploadAccess();
     showView();
