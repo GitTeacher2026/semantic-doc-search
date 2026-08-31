@@ -4,11 +4,15 @@ import { STORAGE_MODES, getResolvedStorageMode } from "./storage-preference.js";
 export const STORAGE_BACKENDS = {
   GITHUB: "github",
   DRIVE: "drive",
+  MEGA: "mega",
+  ONEDRIVE: "onedrive",
   LOCAL: "local",
 };
 
 export function inferDocumentStorage(doc) {
   if (doc?.storageBackend) return doc.storageBackend;
+  if (doc?.onedriveFileId) return STORAGE_BACKENDS.ONEDRIVE;
+  if (doc?.megaFileId) return STORAGE_BACKENDS.MEGA;
   if (doc?.driveFileId) return STORAGE_BACKENDS.DRIVE;
   if (doc?.fileData) return STORAGE_BACKENDS.GITHUB;
   return STORAGE_BACKENDS.LOCAL;
@@ -17,18 +21,24 @@ export function inferDocumentStorage(doc) {
 export function getActiveStorageBackend() {
   const mode = getResolvedStorageMode();
   if (mode === STORAGE_MODES.DRIVE) return STORAGE_BACKENDS.DRIVE;
+  if (mode === STORAGE_MODES.MEGA) return STORAGE_BACKENDS.MEGA;
+  if (mode === STORAGE_MODES.ONEDRIVE) return STORAGE_BACKENDS.ONEDRIVE;
   if (mode === STORAGE_MODES.GITHUB) return STORAGE_BACKENDS.GITHUB;
   return STORAGE_BACKENDS.LOCAL;
 }
 
 export function getStorageBackendLabel(backend) {
   if (backend === STORAGE_BACKENDS.DRIVE) return "Google Drive";
+  if (backend === STORAGE_BACKENDS.MEGA) return "MEGA";
+  if (backend === STORAGE_BACKENDS.ONEDRIVE) return "OneDrive";
   if (backend === STORAGE_BACKENDS.GITHUB) return "GitHub";
   return "محلي";
 }
 
 export function getStorageBackendIcon(backend) {
   if (backend === STORAGE_BACKENDS.DRIVE) return "☁️";
+  if (backend === STORAGE_BACKENDS.MEGA) return "🟥";
+  if (backend === STORAGE_BACKENDS.ONEDRIVE) return "🔷";
   if (backend === STORAGE_BACKENDS.GITHUB) return "🐙";
   return "💾";
 }
@@ -40,6 +50,12 @@ export function getDocumentStoragePath(doc) {
 
   if (backend === STORAGE_BACKENDS.DRIVE) {
     return `مخزن الوثائق / ${category} / ${filename}`;
+  }
+  if (backend === STORAGE_BACKENDS.MEGA) {
+    return `MEGA / مخزن الوثائق / ${category} / ${filename}`;
+  }
+  if (backend === STORAGE_BACKENDS.ONEDRIVE) {
+    return `OneDrive / مخزن الوثائق / ${category} / ${filename}`;
   }
   if (backend === STORAGE_BACKENDS.GITHUB) {
     const repo = GITHUB_OWNER && GITHUB_REPO ? `${GITHUB_OWNER}/${GITHUB_REPO}` : "المستودع";

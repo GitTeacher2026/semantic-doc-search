@@ -1,10 +1,8 @@
-const OCR_OPTIONS_KEY = "docshelf_ocr_options_v4";
+const OCR_OPTIONS_KEY = "docshelf_ocr_options_v5";
 
 export const OCR_ENGINES = {
   AUTO: "auto",
   PUTER: "puter",
-  PADDLE: "paddle",
-  TESSERACT: "tesseract",
 };
 
 export const DEFAULT_OCR_OPTIONS = {
@@ -15,26 +13,14 @@ export function getAvailableOcrEngines() {
   return [
     {
       id: OCR_ENGINES.AUTO,
-      label: "تلقائي (سريع ثم محلي)",
-      hint: "يجرب Puter ثم PaddleOCR ثم Tesseract عند الحاجة",
+      label: "تلقائي — Puter AI",
+      hint: "استخراج سريع للنص عبر Puter.js — بدون مفتاح API",
       available: true,
     },
     {
       id: OCR_ENGINES.PUTER,
       label: "سريع — Puter AI",
-      hint: "بدون مفتاح API — AWS/Mistral OCR عبر Puter.js",
-      available: true,
-    },
-    {
-      id: OCR_ENGINES.PADDLE,
-      label: "محلي — PaddleOCR",
-      hint: "يعمل في المتصفح — دقة عالية للعربية (~12 م.ب في التحميل الأول)",
-      available: true,
-    },
-    {
-      id: OCR_ENGINES.TESSERACT,
-      label: "محلي — Tesseract",
-      hint: "مجاني بالكامل — أبطأ في المرة الأولى",
+      hint: "AWS/Mistral OCR عبر Puter.js",
       available: true,
     },
   ];
@@ -77,27 +63,5 @@ export function getOcrEngineLabel(engine) {
 }
 
 export function buildOcrEngineChain(preferred = loadOcrOptions().engine) {
-  const chain = [];
-  const add = (id) => {
-    if (!id) return;
-    if (!chain.includes(id)) chain.push(id);
-  };
-
-  if (preferred === OCR_ENGINES.TESSERACT) return [OCR_ENGINES.TESSERACT];
-  if (preferred === OCR_ENGINES.PADDLE) {
-    add(OCR_ENGINES.PADDLE);
-    add(OCR_ENGINES.TESSERACT);
-    return chain;
-  }
-  if (preferred === OCR_ENGINES.PUTER) {
-    add(OCR_ENGINES.PUTER);
-    add(OCR_ENGINES.PADDLE);
-    add(OCR_ENGINES.TESSERACT);
-    return chain;
-  }
-
-  add(OCR_ENGINES.PUTER);
-  add(OCR_ENGINES.PADDLE);
-  add(OCR_ENGINES.TESSERACT);
-  return chain;
+  return [OCR_ENGINES.PUTER];
 }

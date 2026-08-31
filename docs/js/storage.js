@@ -1,9 +1,24 @@
 import { base64ToBytes, bytesToBase64, decryptJson, deriveKey, encryptJson } from "./crypto.js";
 import {
+  fetchEncryptedStore as fetchDriveStore,
+  uploadEncryptedStore as uploadDriveStore,
+} from "./drive-storage.js";
+import {
   fetchEncryptedStore as fetchGitHubStore,
   isGitHubStorageConfigured,
   uploadEncryptedStore as uploadGitHubStore,
 } from "./github-storage.js";
+import {
+  fetchEncryptedStore as fetchMegaStore,
+  uploadEncryptedStore as uploadMegaStore,
+} from "./mega-storage.js";
+import {
+  fetchEncryptedStore as fetchOneDriveStore,
+  uploadEncryptedStore as uploadOneDriveStore,
+} from "./onedrive-storage.js";
+import { isDriveConnected } from "./drive-auth.js";
+import { isMegaConnected } from "./mega-auth.js";
+import { isOneDriveConnected } from "./onedrive-auth.js";
 import { normalizeState, purgeExpiredTrash } from "./trash.js";
 import { getResolvedStorageMode, STORAGE_MODES } from "./storage-preference.js";
 
@@ -11,7 +26,7 @@ const LOCAL_CACHE_KEY = "docshelf_store_v5";
 
 let sessionKey = null;
 let currentSalt = null;
-let remoteSha = null;
+let remoteHandle = null;
 
 function loadLocalDocuments() {
   try {
@@ -29,30 +44,80 @@ function finalizeState(state) {
   return purgeExpiredTrash(normalizeState(state));
 }
 
+function isModeReady(mode) {
+  if (mode === STORAGE_MODES.GITHUB) return isGitHubStorageConfigured();
+  if (mode === STORAGE_MODES.DRIVE) return isDriveConnected();
+  if (mode === STORAGE_MODES.MEGA) return isMegaConnected();
+  if (mode === STORAGE_MODES.ONEDRIVE) return isOneDriveConnected();
+  return true;
+}
+
 export function isCloudSyncEnabled() {
-  return getResolvedStorageMode() === STORAGE_MODES.GITHUB && isGitHubStorageConfigured();
+  const mode = getResolvedStorageMode();
+  if (mode === STORAGE_MODES.LOCAL) return false;
+  return isModeReady(mode);
 }
 
 export function isUsingDriveStorage() {
-  return false;
+  return getResolvedStorageMode() === STORAGE_MODES.DRIVE && isDriveConnected();
 }
 
 export function isUsingGitHubStorage() {
   return getResolvedStorageMode() === STORAGE_MODES.GITHUB && isGitHubStorageConfigured();
 }
 
-async function fetchRemoteStore() {
-  if (isGitHubStorageConfigured()) {
-    const { envelope, sha } = await fetchGitHubStore();
-    return { envelope, sha };
-  }
-  return { envelope: null, sha: null };
+export function isUsingMegaStorage() {
+  return getResolvedStorageMode() === STORAGE_MODES.MEGA && isMegaConnected();
 }
 
-async function uploadRemoteStore(envelope) {
-  if (isGitHubStorageConfigured()) {
-    remoteSha = await uploadGitHubStore(envelope, remoteSha);
+export function isUsingOneDriveStorage() {
+  return getResolvedStorageMode() === STORAGE_MODES.ONEDRIVE && isOneDriveConnected();
+}
+
+export function isUsingRemoteFileStorage() {
+  return isUsingDriveStorage() || isUsingMegaStorage() || isUsingOneDriveStorage();
+}
+
+async function fetchRemoteStore() {
+  const mode = getResolvedStorageMode();
+  if (mode === STORAGE_MODES.GITHUB && isGitHubStorageConfigured()) {
+    const { envelope, sha } = await fetchGitHubStore();
+    return { envelope, handle: { type: STORAGE_MODES.GITHUB, sha } };
   }
+  if (mode === STORAGE_MODES.DRIVE && isDriveConnected()) {
+    const { envelope, fileId } = await fetchDriveStore();
+    return { envelope, handle: { type: STORAGE_MODES.DRIVE, fileId } };
+  }
+  if (mode === STORAGE_MODES.MEGA && isMegaConnected()) {
+    const { envelope, fileId } = await fetchMegaStore();
+    return { envelope, handle: { type: STORAGE_MODES.MEGA, fileId } };
+  }
+  if (mode === STORAGE_MODES.ONEDRIVE && isOneDriveConnected()) {
+    const { envelope, fileId } = await fetchOneDriveStore();
+    return { envelope, handle: { type: STORAGE_MODES.ONEDRIVE, fileId } };
+  }
+  return { envelope: null, handle: null };
+}
+
+async function uploadRemoteStore(envelope, handle) {
+  const mode = handle?.type || getResolvedStorageMode();
+  if (mode === STORAGE_MODES.GITHUB) {
+    const sha = await uploadGitHubStore(envelope, handle?.sha ?? null);
+    return { type: STORAGE_MODES.GITHUB, sha };
+  }
+  if (mode === STORAGE_MODES.DRIVE) {
+    const fileId = await uploadDriveStore(envelope, handle?.fileId ?? null);
+    return { type: STORAGE_MODES.DRIVE, fileId };
+  }
+  if (mode === STORAGE_MODES.MEGA) {
+    const fileId = await uploadMegaStore(envelope, handle?.fileId ?? null);
+    return { type: STORAGE_MODES.MEGA, fileId };
+  }
+  if (mode === STORAGE_MODES.ONEDRIVE) {
+    const fileId = await uploadOneDriveStore(envelope, handle?.fileId ?? null);
+    return { type: STORAGE_MODES.ONEDRIVE, fileId };
+  }
+  return handle;
 }
 
 export async function loadDocuments(password) {
@@ -60,8 +125,8 @@ export async function loadDocuments(password) {
     return finalizeState(loadLocalDocuments());
   }
 
-  const { envelope, sha } = await fetchRemoteStore();
-  remoteSha = sha;
+  const { envelope, handle } = await fetchRemoteStore();
+  remoteHandle = handle;
 
   if (!envelope) {
     const local = finalizeState(loadLocalDocuments());
@@ -106,7 +171,7 @@ export async function saveDocuments(password, state) {
   };
 
   try {
-    await uploadRemoteStore(envelope);
+    remoteHandle = await uploadRemoteStore(envelope, remoteHandle);
     saveLocalDocuments(payload);
   } catch (error) {
     saveLocalDocuments(payload);
@@ -117,5 +182,5 @@ export async function saveDocuments(password, state) {
 export function clearStorageSession() {
   sessionKey = null;
   currentSalt = null;
-  remoteSha = null;
+  remoteHandle = null;
 }

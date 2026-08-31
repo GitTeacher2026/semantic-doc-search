@@ -9,8 +9,8 @@
 
 - صفحة تسجيل دخول قبل الوصول إلى أي وظيفة
 - واجهة عربية كاملة مع دعم RTL
-- رفع PDF وOffice ونصوص **والصور** (OCR: Puter AI · PaddleOCR · Tesseract)
-- تخزين سحابي مشفّر على **GitHub** فقط
+- رفع PDF وOffice ونصوص **والصور** (OCR: Puter AI)
+- تخزين مشفّر على **GitHub** أو **Google Drive** أو **MEGA** أو **OneDrive** أو محلياً
 - بحث فوري BM25 مع خيارات متقدمة ووضع داكن
 
 ## بيانات الدخول
@@ -57,23 +57,56 @@
 
 > الإشعارات تُرسل أيضاً من المتصفح عند التسجيل إذا كان المفتاح مضبوطاً في `config.js` بعد النشر.
 
-### 4) نشر الموقع
+### 4) `GOOGLE_CLIENT_ID` (اختياري — Google Drive)
+
+راجع قسم **التخزين** أدناه لخطوات إنشاء OAuth Client ID.
+
+### 5) `ONEDRIVE_CLIENT_ID` (اختياري — OneDrive)
+
+راجع قسم **التخزين** أدناه لخطوات تسجيل التطبيق في Azure.
+
+### 6) نشر الموقع
 
 1. **Settings → Pages → Source:** GitHub Actions
 2. **Actions → Deploy GitHub Pages → Re-run all jobs**
 3. افتح https://gitteacher2026.github.io/semantic-doc-search/
 
+## التخزين
+
+اختر **مكان التخزين** فوق منطقة الرفع:
+
+| المصدر | الإعداد | الملاحظات |
+|--------|---------|-----------|
+| **GitHub** | `DOCSHELF_GITHUB_TOKEN` | فهرس مشفّر في المستودع — يعمل تلقائياً |
+| **Google Drive** | `GOOGLE_CLIENT_ID` + تسجيل دخول | ملفات وفهرس في مجلد «مخزن الوثائق» |
+| **MEGA** | بريد وكلمة مرور في الواجهة | لا يحتاج Secret — جلسة المتصفح فقط |
+| **OneDrive** | `ONEDRIVE_CLIENT_ID` + تسجيل دخول | ملفات وفهرس في مجلد «مخزن الوثائق» |
+| **محلي** | لا شيء | `localStorage` فقط — بدون مزامنة |
+
+### إعداد Google Drive
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → مشروع جديد → **APIs & Services** → **OAuth consent screen**
+2. أضف `reagon.gm@pm.me` كـ Test user (أو انشر التطبيق)
+3. **Credentials** → **Create OAuth Client ID** → نوع **Web application**
+4. **Authorized JavaScript origins:** `https://gitteacher2026.github.io`
+5. **Authorized redirect URIs:** `https://gitteacher2026.github.io/semantic-doc-search/`
+6. فعّل **Google Drive API**
+7. انسخ **Client ID** → Secret باسم **`GOOGLE_CLIENT_ID`**
+8. أعد تشغيل **Deploy GitHub Pages**
+
+### إعداد OneDrive
+
+1. [Azure Portal](https://portal.azure.com/) → **App registrations** → **New registration**
+2. **Redirect URI:** Single-page application → `https://gitteacher2026.github.io/semantic-doc-search/`
+3. **API permissions:** Microsoft Graph → Delegated → `Files.ReadWrite`, `User.Read`
+4. انسخ **Application (client) ID** → Secret باسم **`ONEDRIVE_CLIENT_ID`**
+5. أعد تشغيل **Deploy GitHub Pages**
+
+> يجب تسجيل الدخول بحساب **`reagon.gm@pm.me`** لـ Google Drive و OneDrive.
+
 ## استخراج النص من الصور (OCR)
 
-أربعة أوضاع — اختر من القائمة فوق منطقة الرفع:
-
-| المحرك | المفتاح | الملاحظات |
-|--------|---------|-----------|
-| **Puter AI** (افتراضي في الوضع التلقائي) | لا يحتاج مفتاح | سريع — AWS/Mistral OCR عبر [Puter.js](https://docs.puter.com/AI/img2txt/) |
-| **PaddleOCR** | لا يحتاج مفتاح | محلي في المتصفح — دقة عالية للعربية عبر [ppu-paddle-ocr](https://www.npmjs.com/package/ppu-paddle-ocr) |
-| **Tesseract** | لا يحتاج مفتاح | محلي بالكامل — احتياطي موثوق |
-
-**الوضع التلقائي:** Puter → PaddleOCR → Tesseract عند الفشل.
+محرك واحد — **Puter AI** (سريع، بدون مفتاح API) عبر [Puter.js](https://docs.puter.com/AI/img2txt/).
 
 ## سلة المهملات
 
@@ -107,8 +140,8 @@ streamlit run app.py --server.port 8512 --server.address 0.0.0.0
 
 ```
 docs/                     # نسخة GitHub Pages
-docs/js/storage.js        # تخزين مشفّر عبر GitHub API
-docs/js/ocr.js            # OCR (Puter AI · PaddleOCR · Tesseract)
+docs/js/storage.js        # تخزين مشفّر (GitHub · Drive · MEGA · OneDrive)
+docs/js/ocr.js            # OCR (Puter AI)
 .github/workflows/pages.yml
 data/browser-store.enc.json
 data/users.json

@@ -20,7 +20,7 @@ import {
 } from "./document-storage.js";
 import { initTheme, toggleTheme } from "./theme.js";
 import { bindSearchResults, renderSearchResults } from "./search-results.js?v=20260830b";
-import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js?v=20260831h";
+import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js?v=20260831i";
 import {
   getAvailableOcrEngines,
   loadOcrOptions,
@@ -55,13 +55,49 @@ import {
 import {
   clearStorageSession,
   isCloudSyncEnabled,
+  isUsingDriveStorage,
   isUsingGitHubStorage,
+  isUsingMegaStorage,
+  isUsingOneDriveStorage,
+  isUsingRemoteFileStorage,
   loadDocuments,
   saveDocuments,
 } from "./storage.js";
 import {
-  isGitHubModeAvailable,
+  getAvailableStorageModes,
+  getResolvedStorageMode,
+  getStorageModeHint,
+  getStorageModeLabel,
+  setStorageMode,
+  STORAGE_MODES,
 } from "./storage-preference.js";
+import {
+  isDriveConnected,
+  loginToGoogleDrive,
+  logoutGoogleDrive,
+} from "./drive-auth.js";
+import { downloadDriveFile, renameDriveFile, uploadDocumentFile as uploadDriveDocumentFile } from "./drive-storage.js";
+import {
+  getMegaEmail,
+  isMegaConnected,
+  loginToMega,
+  logoutMega,
+} from "./mega-auth.js";
+import {
+  downloadMegaFile,
+  renameMegaFile,
+  uploadDocumentFile as uploadMegaDocumentFile,
+} from "./mega-storage.js";
+import {
+  isOneDriveConnected,
+  loginToOneDrive,
+  logoutOneDrive,
+} from "./onedrive-auth.js";
+import {
+  downloadOneDriveFile,
+  renameOneDriveFile,
+  uploadDocumentFile as uploadOneDriveDocumentFile,
+} from "./onedrive-storage.js";
 import {
   approvePendingUser,
   rejectPendingUser,
@@ -110,7 +146,16 @@ const resendEmailBtn = document.getElementById("resend-email-btn");
 const dropZone = document.getElementById("drop-zone");
 const fileInput = document.getElementById("file-input");
 const storageSettingsPanel = document.getElementById("storage-settings-panel");
+const storageModePicker = document.getElementById("storage-mode-picker");
 const storageModeStatus = document.getElementById("storage-mode-status");
+const cloudConnectPanel = document.getElementById("cloud-connect-panel");
+const cloudConnectTitle = document.getElementById("cloud-connect-title");
+const cloudConnectHint = document.getElementById("cloud-connect-hint");
+const cloudConnectBtn = document.getElementById("cloud-connect-btn");
+const cloudDisconnectBtn = document.getElementById("cloud-disconnect-btn");
+const megaLoginFields = document.getElementById("mega-login-fields");
+const megaEmailInput = document.getElementById("mega-email");
+const megaPasswordInput = document.getElementById("mega-password");
 const pendingFilesEl = document.getElementById("pending-files");
 const ingestBtn = document.getElementById("ingest-btn");
 const libraryList = document.getElementById("library-list");
@@ -199,17 +244,149 @@ function isAuthed() {
 }
 
 function canUploadFiles() {
-  return true;
+  const mode = getResolvedStorageMode();
+  if (mode === STORAGE_MODES.LOCAL) return true;
+  if (mode === STORAGE_MODES.GITHUB) return isUsingGitHubStorage();
+  if (mode === STORAGE_MODES.DRIVE) return isUsingDriveStorage();
+  if (mode === STORAGE_MODES.MEGA) return isUsingMegaStorage();
+  if (mode === STORAGE_MODES.ONEDRIVE) return isUsingOneDriveStorage();
+  return false;
+}
+
+function isCloudMode(mode = getResolvedStorageMode()) {
+  return mode !== STORAGE_MODES.LOCAL;
+}
+
+function cloudModeNeedsAuth(mode = getResolvedStorageMode()) {
+  return mode === STORAGE_MODES.DRIVE || mode === STORAGE_MODES.MEGA || mode === STORAGE_MODES.ONEDRIVE;
+}
+
+function renderStorageModePicker() {
+  if (!storageModePicker) return;
+  const modes = getAvailableStorageModes();
+  const current = getResolvedStorageMode();
+  storageModePicker.replaceChildren(
+    ...modes.map((mode) => {
+      const label = document.createElement("label");
+      label.className = "storage-mode-option";
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = "storage-mode";
+      input.value = mode.id;
+      input.checked = mode.id === current;
+      label.append(input, document.createTextNode(` ${mode.label}`));
+      return label;
+    })
+  );
+}
+
+function updateCloudConnectPanel() {
+  const mode = getResolvedStorageMode();
+  const needsAuth = cloudModeNeedsAuth(mode);
+  cloudConnectPanel?.classList.toggle("hidden", !needsAuth);
+  megaLoginFields?.classList.toggle("hidden", mode !== STORAGE_MODES.MEGA);
+
+  if (!needsAuth) return;
+
+  if (mode === STORAGE_MODES.DRIVE) {
+    cloudConnectTitle.textContent = "Google Drive";
+    cloudConnectHint.textContent = isDriveConnected()
+      ? "متصل — يُحفظ الفهرس والملفات في مجلد مخزن الوثائق."
+      : "سجّل الدخول بحساب Google المصرّح به لحفظ الملفات.";
+    cloudConnectBtn.textContent = isDriveConnected() ? "إعادة الاتصال" : "الاتصال بـ Google Drive";
+    cloudDisconnectBtn.classList.toggle("hidden", !isDriveConnected());
+  } else if (mode === STORAGE_MODES.MEGA) {
+    cloudConnectTitle.textContent = "MEGA";
+    cloudConnectHint.textContent = isMegaConnected()
+      ? `متصل كـ ${getMegaEmail()}`
+      : "أدخل بريد MEGA وكلمة المرور — تُستخدم للجلسة الحالية فقط.";
+    cloudConnectBtn.textContent = isMegaConnected() ? "إعادة الاتصال" : "الاتصال بـ MEGA";
+    cloudDisconnectBtn.classList.toggle("hidden", !isMegaConnected());
+    if (megaEmailInput && !megaEmailInput.value) {
+      megaEmailInput.value = getMegaEmail();
+    }
+  } else if (mode === STORAGE_MODES.ONEDRIVE) {
+    cloudConnectTitle.textContent = "OneDrive";
+    cloudConnectHint.textContent = isOneDriveConnected()
+      ? "متصل — يُحفظ الفهرس والملفات في مجلد مخزن الوثائق."
+      : "سجّل الدخول بحساب Microsoft المصرّح به.";
+    cloudConnectBtn.textContent = isOneDriveConnected() ? "إعادة الاتصال" : "الاتصال بـ OneDrive";
+    cloudDisconnectBtn.classList.toggle("hidden", !isOneDriveConnected());
+  }
 }
 
 function updateStoragePanel() {
-  const githubAvailable = isGitHubModeAvailable();
-  storageSettingsPanel?.classList.toggle("hidden", !githubAvailable);
+  const modes = getAvailableStorageModes();
+  storageSettingsPanel?.classList.toggle("hidden", modes.length === 0);
+  renderStorageModePicker();
+  updateCloudConnectPanel();
+
+  const mode = getResolvedStorageMode();
+  const label = getStorageModeLabel(mode);
+  const hint = getStorageModeHint(mode);
   if (storageModeStatus) {
-    storageModeStatus.textContent = githubAvailable
-      ? "التخزين عبر GitHub — تُحفظ الملفات والفهرس في المستودع المشفّر."
-      : "";
+    if (!canUploadFiles() && isCloudMode(mode)) {
+      storageModeStatus.textContent = `${label}: ${hint} — يلزم الاتصال قبل الرفع.`;
+    } else if (isCloudSyncEnabled()) {
+      storageModeStatus.textContent = `${label}: ${hint}`;
+    } else {
+      storageModeStatus.textContent = `${label}: ${hint}`;
+    }
   }
+}
+
+async function handleStorageModeChange(nextMode) {
+  if (!nextMode || nextMode === getResolvedStorageMode()) return;
+  setStorageMode(nextMode);
+  clearStorageSession();
+  updateStoragePanel();
+  updateUploadAccess();
+  if (!sessionPassword) return;
+  try {
+    setStatus("جارٍ تحميل المستندات من مصدر التخزين الجديد…");
+    await hydrateDocuments(sessionPassword);
+  } catch (error) {
+    setStatus(`تعذّر تحميل المستندات: ${error.message}`, true);
+  }
+}
+
+async function handleCloudConnect() {
+  const mode = getResolvedStorageMode();
+  try {
+    if (mode === STORAGE_MODES.DRIVE) {
+      setStatus("جارٍ الاتصال بـ Google Drive…");
+      await loginToGoogleDrive();
+    } else if (mode === STORAGE_MODES.MEGA) {
+      setStatus("جارٍ الاتصال بـ MEGA…");
+      await loginToMega(megaEmailInput?.value, megaPasswordInput?.value);
+      if (megaPasswordInput) megaPasswordInput.value = "";
+    } else if (mode === STORAGE_MODES.ONEDRIVE) {
+      setStatus("جارٍ الاتصال بـ OneDrive…");
+      await loginToOneDrive();
+    }
+    clearStorageSession();
+    updateStoragePanel();
+    updateUploadAccess();
+    if (sessionPassword) {
+      await hydrateDocuments(sessionPassword);
+    }
+    setStatus("تم الاتصال بنجاح.", true);
+    setTimeout(() => setStatus("", false), 2000);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+function handleCloudDisconnect() {
+  const mode = getResolvedStorageMode();
+  if (mode === STORAGE_MODES.DRIVE) logoutGoogleDrive();
+  if (mode === STORAGE_MODES.MEGA) logoutMega();
+  if (mode === STORAGE_MODES.ONEDRIVE) logoutOneDrive();
+  clearStorageSession();
+  updateStoragePanel();
+  updateUploadAccess();
+  setStatus("تم قطع الاتصال.", true);
+  setTimeout(() => setStatus("", false), 2000);
 }
 
 function updateOcrEnginePanel() {
@@ -659,7 +836,14 @@ function buildExplorerTree(documents, { showAll = false } = {}) {
     groups.get(group).push(doc);
   }
 
-  const storageOrder = [getActiveStorageBackend(), STORAGE_BACKENDS.GITHUB, STORAGE_BACKENDS.DRIVE, STORAGE_BACKENDS.LOCAL];
+  const storageOrder = [
+    getActiveStorageBackend(),
+    STORAGE_BACKENDS.GITHUB,
+    STORAGE_BACKENDS.DRIVE,
+    STORAGE_BACKENDS.MEGA,
+    STORAGE_BACKENDS.ONEDRIVE,
+    STORAGE_BACKENDS.LOCAL,
+  ];
   const orderedStorages = [...storageGroups.keys()].sort(
     (a, b) => storageOrder.indexOf(a) - storageOrder.indexOf(b) || a.localeCompare(b, "ar")
   );
@@ -978,8 +1162,14 @@ async function downloadDocument(doc) {
     if (doc.fileData) {
       bytes = Uint8Array.from(atob(doc.fileData), (char) => char.charCodeAt(0));
     } else if (doc.driveFileId) {
-      setStatus("هذا الملف كان مخزّناً في Google Drive القديم ولم يعد متاحاً. أعد رفعه.", true);
-      return;
+      const buffer = await downloadDriveFile(doc.driveFileId);
+      bytes = new Uint8Array(buffer);
+    } else if (doc.megaFileId) {
+      const buffer = await downloadMegaFile(doc.megaFileId);
+      bytes = new Uint8Array(buffer);
+    } else if (doc.onedriveFileId) {
+      const buffer = await downloadOneDriveFile(doc.onedriveFileId);
+      bytes = new Uint8Array(buffer);
     } else {
       setStatus("تعذّر التنزيل: الملف غير مخزّن. أعد رفع الملف.", true);
       return;
@@ -1079,10 +1269,17 @@ async function confirmRename() {
 
   try {
     if (doc.driveFileId) {
-      throw new Error("هذا الملف كان مخزّناً في Google Drive القديم. أعد رفعه لإعادة تسميته.");
+      const renamed = await renameDriveFile(doc.driveFileId, nextName);
+      doc.filename = renamed;
+    } else if (doc.megaFileId) {
+      const renamed = await renameMegaFile(doc.megaFileId, nextName);
+      doc.filename = renamed;
+    } else if (doc.onedriveFileId) {
+      const renamed = await renameOneDriveFile(doc.onedriveFileId, nextName);
+      doc.filename = renamed;
+    } else {
+      doc.filename = nextName;
     }
-
-    doc.filename = nextName;
     doc.extension = fileExtension(nextName);
     doc.fileGroup = fileGroup(nextName);
     await persistState();
@@ -1255,7 +1452,26 @@ async function ingestFiles(files) {
       if (!text) throw new Error(`لم يُعثر على نص في ${file.name}`);
       const category = assignCategory(text, file.name, state.documents);
       const chunks = chunkText(text).map((content) => ({ content }));
-      const keepBinary = !(isUsingGitHubStorage() && image);
+      const backend = getActiveStorageBackend();
+      const blob = new Blob([arrayBuffer]);
+      let fileData = null;
+      let driveFileId = null;
+      let megaFileId = null;
+      let onedriveFileId = null;
+
+      if (backend === STORAGE_BACKENDS.DRIVE) {
+        driveFileId = await uploadDriveDocumentFile(category, file.name, blob);
+      } else if (backend === STORAGE_BACKENDS.MEGA) {
+        megaFileId = await uploadMegaDocumentFile(category, file.name, blob);
+      } else if (backend === STORAGE_BACKENDS.ONEDRIVE) {
+        onedriveFileId = await uploadOneDriveDocumentFile(category, file.name, blob);
+      } else if (backend === STORAGE_BACKENDS.GITHUB) {
+        const keepBinary = !image;
+        fileData = keepBinary ? arrayBufferToBase64(arrayBuffer) : null;
+      } else {
+        fileData = arrayBufferToBase64(arrayBuffer);
+      }
+
       state.documents.push({
         id: crypto.randomUUID(),
         filename: file.name,
@@ -1264,11 +1480,11 @@ async function ingestFiles(files) {
         extension: fileExtension(file.name),
         charCount: text.length,
         preview: text.replace(/\s+/g, " ").slice(0, 280),
-        fileData: keepBinary ? arrayBufferToBase64(arrayBuffer) : null,
-        driveFileId: null,
-        storageBackend: isUsingGitHubStorage()
-          ? STORAGE_BACKENDS.GITHUB
-          : STORAGE_BACKENDS.LOCAL,
+        fileData,
+        driveFileId,
+        megaFileId,
+        onedriveFileId,
+        storageBackend: backend,
         chunks,
         isLocked: false,
         lockHash: null,
@@ -1278,11 +1494,13 @@ async function ingestFiles(files) {
     await persistState();
     renderLibrary();
     setStatus(
-      isUsingGitHubStorage()
-        ? "اكتملت الفهرسة وحُفظت في GitHub."
-        : isCloudSyncEnabled()
-          ? "اكتملت الفهرسة وحُفظت في التخزين السحابي."
-          : "اكتملت الفهرسة.",
+      isUsingRemoteFileStorage()
+        ? `اكتملت الفهرسة وحُفظت في ${getStorageModeLabel()}.`
+        : isUsingGitHubStorage()
+          ? "اكتملت الفهرسة وحُفظت في GitHub."
+          : isCloudSyncEnabled()
+            ? "اكتملت الفهرسة وحُفظت في التخزين السحابي."
+            : "اكتملت الفهرسة.",
       true
     );
     setTimeout(() => setStatus("", false), 2500);
@@ -1421,6 +1639,21 @@ advancedSearchPanel?.querySelectorAll("input").forEach((input) => {
 document.getElementById("ocr-engine")?.addEventListener("change", (event) => {
   saveOcrOptions({ engine: readOcrEngineFromForm() });
   updateOcrEnginePanel();
+});
+
+storageModePicker?.addEventListener("change", (event) => {
+  const target = event.target;
+  if (target?.name === "storage-mode" && target.checked) {
+    handleStorageModeChange(target.value);
+  }
+});
+
+cloudConnectBtn?.addEventListener("click", () => {
+  handleCloudConnect();
+});
+
+cloudDisconnectBtn?.addEventListener("click", () => {
+  handleCloudDisconnect();
 });
 
 export async function startApp({ user, auth }) {
