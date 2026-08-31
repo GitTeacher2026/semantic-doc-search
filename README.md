@@ -32,8 +32,10 @@
 2. [Settings → Developer settings → Personal access tokens → Fine-grained tokens](https://github.com/settings/tokens?type=beta)
 3. **Generate new token**
    - Repository access: **Only select repositories** → `semantic-doc-search`
-   - Permissions → **Contents**: Read and write
-   - **Repository metadata**: Read-only (يُضاف تلقائياً)
+   - Permissions:
+     - **Contents**: Read and write *(required for login, password reset, document save)*
+     - **Metadata**: Read-only
+     - **Issues**: Read and write *(optional — fallback notifications)*
 4. انسخ التوكن (يظهر مرة واحدة فقط)
 5. في المستودع: Secret باسم **`DOCSHELF_GITHUB_TOKEN`** → الصق التوكن
 

@@ -42,7 +42,7 @@ jobs:
           const vaultPassword = process.env.DOCSHELF_VAULT_PASSWORD || "docshelf2024";
           const web3formsKey = process.env.WEB3FORMS_ACCESS_KEY || "";
           const [owner, repo] = String(process.env.GITHUB_REPOSITORY || "owner/repo").split("/");
-          const siteUrl = `https://${owner}.github.io/${repo}/`;
+          const siteUrl = `https://${owner.toLowerCase()}.github.io/${repo}/`;
           const config = `/** Generated during deploy — do not edit manually. */
           export const GITHUB_OWNER = ${JSON.stringify(owner)};
           export const GITHUB_REPO = ${JSON.stringify(repo)};

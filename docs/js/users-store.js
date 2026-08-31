@@ -12,7 +12,7 @@ const DEFAULT_ADMIN = {
   firstName: "مدير",
   lastName: "النظام",
   email: "reagon.gm@pm.me",
-  passwordHash: "oi+fgmvzjxgweibj3KiQri/60qFqSg8qhPJnqfinYDI=",
+  passwordHash: "TX7vVAE6FDguGaKHcyFpvneq9wwAT5LK5tFbehdA2nM=",
   role: "admin",
   status: "approved",
   createdAt: "2026-01-01T00:00:00.000Z",
@@ -126,7 +126,13 @@ export async function saveUsersDb(db, sha = usersSha) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || `تعذّر حفظ حسابات المستخدمين (${res.status})`);
+    const message = String(err.message || "");
+    if (/not accessible by personal access token/i.test(message)) {
+      throw new Error(
+        "مفتاح GitHub لا يملك صلاحية الكتابة على المستودع. حدّث DOCSHELF_GITHUB_TOKEN بصلاحية Contents: Read and write ثم أعد النشر."
+      );
+    }
+    throw new Error(message || `تعذّر حفظ حسابات المستخدمين (${res.status})`);
   }
 
   const result = await res.json();
