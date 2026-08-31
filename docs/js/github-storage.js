@@ -5,7 +5,7 @@ import {
   GITHUB_TOKEN,
   STORE_PATH,
 } from "./config.js";
-import { formatGitHubApiError } from "./github-errors.js";
+import { formatGitHubApiError, isGitHubShaConflict } from "./github-errors.js";
 
 function apiUrl() {
   return `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${STORE_PATH}`;
@@ -36,6 +36,7 @@ export async function fetchEncryptedStore() {
 
   const res = await fetch(`${apiUrl()}?ref=${encodeURIComponent(GITHUB_BRANCH)}`, {
     headers: authHeaders(),
+    cache: "no-store",
   });
 
   if (res.status === 404) {
@@ -51,7 +52,7 @@ export async function fetchEncryptedStore() {
   return { envelope: JSON.parse(text), sha: payload.sha };
 }
 
-export async function uploadEncryptedStore(envelope, sha) {
+async function putEncryptedStore(envelope, sha) {
   const content = btoa(unescape(encodeURIComponent(JSON.stringify(envelope))));
   const body = {
     message: "Update encrypted document store",
@@ -71,9 +72,31 @@ export async function uploadEncryptedStore(envelope, sha) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(formatGitHubApiError(err.message, res.status));
+    const error = new Error(formatGitHubApiError(err.message, res.status));
+    error.status = res.status;
+    throw error;
   }
 
   const result = await res.json();
   return result.content.sha;
+}
+
+export async function uploadEncryptedStore(envelope, sha) {
+  let currentSha = sha;
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await putEncryptedStore(envelope, currentSha);
+    } catch (error) {
+      lastError = error;
+      if (!isGitHubShaConflict(error) || attempt >= 2) {
+        throw error;
+      }
+      const latest = await fetchEncryptedStore();
+      currentSha = latest.sha;
+    }
+  }
+
+  throw lastError || new Error("تعذّر حفظ المستندات على GitHub.");
 }

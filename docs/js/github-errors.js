@@ -1,3 +1,14 @@
+export function isGitHubShaConflict(error) {
+  const status = Number(error?.status || 0);
+  const text = String(error?.message || "").toLowerCase();
+  return (
+    status === 409 ||
+    text.includes("does not match") ||
+    text.includes("sha") ||
+    text.includes("conflict")
+  );
+}
+
 export function formatGitHubApiError(message, status) {
   const text = String(message || "").trim();
   const lower = text.toLowerCase();
@@ -17,6 +28,10 @@ export function formatGitHubApiError(message, status) {
 
   if (lower.includes("too large") || lower.includes("size")) {
     return "الملف كبير جداً لحفظه في GitHub. جرّب ملفاً أصغر أو قلّل عدد المرفقات.";
+  }
+
+  if (isGitHubShaConflict({ message: text, status })) {
+    return "تعارض في حفظ المستندات — يُعاد المحاولة تلقائياً. إن تكرّر الخطأ، حدّث الصفحة ثم حاول مرة أخرى.";
   }
 
   return text || `خطأ GitHub (${status || "غير معروف"})`;

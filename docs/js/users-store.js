@@ -5,6 +5,7 @@ import {
   GITHUB_TOKEN,
   USERS_PATH,
 } from "./config.js";
+import { isGitHubShaConflict } from "./github-errors.js";
 
 const DEFAULT_ADMIN = {
   id: "admin-default",
@@ -102,29 +103,38 @@ export async function saveUsersDb(db, sha = usersSha) {
     return;
   }
 
-  if (!sha) {
-    await refreshUsersSha();
-    sha = usersSha;
-  }
+  let currentSha = sha;
+  let lastError = null;
 
-  const content = btoa(unescape(encodeURIComponent(JSON.stringify(payload, null, 2))));
-  const body = {
-    message: "Update user accounts",
-    content,
-    branch: GITHUB_BRANCH,
-  };
-  if (sha) body.sha = sha;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!currentSha) {
+      await refreshUsersSha();
+      currentSha = usersSha;
+    }
 
-  const res = await fetch(apiUrl(), {
-    method: "PUT",
-    headers: {
-      ...authHeaders(),
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(payload, null, 2))));
+    const body = {
+      message: "Update user accounts",
+      content,
+      branch: GITHUB_BRANCH,
+    };
+    if (currentSha) body.sha = currentSha;
 
-  if (!res.ok) {
+    const res = await fetch(apiUrl(), {
+      method: "PUT",
+      headers: {
+        ...authHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (res.ok) {
+      const result = await res.json();
+      usersSha = result.content.sha;
+      return;
+    }
+
     const err = await res.json().catch(() => ({}));
     const message = String(err.message || "");
     if (/not accessible by personal access token/i.test(message)) {
@@ -132,11 +142,20 @@ export async function saveUsersDb(db, sha = usersSha) {
         "مفتاح GitHub لا يملك صلاحية الكتابة على المستودع. حدّث DOCSHELF_GITHUB_TOKEN بصلاحية Contents: Read and write ثم أعد النشر."
       );
     }
-    throw new Error(message || `تعذّر حفظ حسابات المستخدمين (${res.status})`);
+
+    const error = new Error(message || `تعذّر حفظ حسابات المستخدمين (${res.status})`);
+    error.status = res.status;
+    lastError = error;
+
+    if (!isGitHubShaConflict(error) || attempt >= 2) {
+      throw error;
+    }
+
+    await refreshUsersSha();
+    currentSha = usersSha;
   }
 
-  const result = await res.json();
-  usersSha = result.content.sha;
+  throw lastError || new Error("تعذّر حفظ حسابات المستخدمين.");
 }
 
 export async function refreshUsersSha() {

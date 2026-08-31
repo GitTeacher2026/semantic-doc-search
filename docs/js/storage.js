@@ -109,16 +109,6 @@ export async function saveDocuments(password, state) {
     await uploadRemoteStore(envelope);
     saveLocalDocuments(payload);
   } catch (error) {
-    if (isUsingGitHubStorage()) {
-      const message = String(error.message || "");
-      if (message.includes("sha") || message.includes("409")) {
-        const latest = await fetchGitHubStore();
-        remoteSha = latest.sha;
-        await uploadGitHubStore(envelope, remoteSha);
-        saveLocalDocuments(payload);
-        return;
-      }
-    }
     saveLocalDocuments(payload);
     throw error;
   }
