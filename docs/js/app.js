@@ -20,7 +20,7 @@ import {
 } from "./document-storage.js";
 import { initTheme, toggleTheme } from "./theme.js";
 import { bindSearchResults, renderSearchResults } from "./search-results.js?v=20260830b";
-import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js?v=20260830";
+import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js?v=20260831";
 import {
   ensurePreviewUrl,
   initImagePreview,
@@ -49,28 +49,13 @@ import {
 import {
   clearStorageSession,
   isCloudSyncEnabled,
-  isUsingDriveStorage,
   isUsingGitHubStorage,
   loadDocuments,
   saveDocuments,
 } from "./storage.js";
 import {
-  getResolvedStorageMode,
-  getStorageModeLabel,
-  hasStorageChoice,
-  isDriveModeAvailable,
   isGitHubModeAvailable,
-  setStorageMode,
-  STORAGE_MODES,
 } from "./storage-preference.js";
-import {
-  clearDriveSession,
-  isDriveConnected,
-  isDriveConfigured,
-  loginToGoogleDrive,
-  logoutGoogleDrive,
-} from "./drive-auth.js";
-import { uploadDocumentFile, downloadDriveFile, renameDriveFile } from "./drive-storage.js";
 import {
   approvePendingUser,
   rejectPendingUser,
@@ -117,15 +102,8 @@ const pendingUsersList = document.getElementById("pending-users-list");
 const resendEmailBtn = document.getElementById("resend-email-btn");
 const dropZone = document.getElementById("drop-zone");
 const fileInput = document.getElementById("file-input");
-const driveConnectPanel = document.getElementById("drive-connect-panel");
-const driveStatusText = document.getElementById("drive-status-text");
-const driveLoginBtn = document.getElementById("drive-login-btn");
-const driveLogoutBtn = document.getElementById("drive-logout-btn");
 const storageSettingsPanel = document.getElementById("storage-settings-panel");
-const storageModePicker = document.getElementById("storage-mode-picker");
 const storageModeStatus = document.getElementById("storage-mode-status");
-const storageModeInputs = () =>
-  Array.from(document.querySelectorAll('input[name="storage-mode"]'));
 const pendingFilesEl = document.getElementById("pending-files");
 const ingestBtn = document.getElementById("ingest-btn");
 const libraryList = document.getElementById("library-list");
@@ -213,89 +191,16 @@ function isAuthed() {
 }
 
 function canUploadFiles() {
-  if (!isCloudSyncEnabled()) return true;
-  if (isUsingDriveStorage()) return isDriveConnected();
-  if (isUsingGitHubStorage()) return true;
   return true;
 }
 
-function syncStorageModeInputs() {
-  const mode = getResolvedStorageMode();
-  for (const input of storageModeInputs()) {
-    input.checked = input.value === mode;
-  }
-}
-
 function updateStoragePanel() {
-  const driveAvailable = isDriveModeAvailable();
   const githubAvailable = isGitHubModeAvailable();
-  const showSettings = driveAvailable || githubAvailable;
-
-  storageSettingsPanel?.classList.toggle("hidden", !showSettings);
-  storageModePicker?.classList.toggle("hidden", !hasStorageChoice());
-  syncStorageModeInputs();
-
-  const mode = getResolvedStorageMode();
+  storageSettingsPanel?.classList.toggle("hidden", !githubAvailable);
   if (storageModeStatus) {
-    if (mode === STORAGE_MODES.GITHUB && githubAvailable) {
-      storageModeStatus.textContent =
-        "التخزين عبر GitHub — تُحفظ الملفات والفهرس في المستودع المشفّر.";
-    } else if (mode === STORAGE_MODES.DRIVE && driveAvailable) {
-      storageModeStatus.textContent =
-        "التخزين عبر Google Drive — تُرفع الملفات إلى مجلدات حسب التصنيف.";
-    } else {
-      storageModeStatus.textContent = "";
-    }
-  }
-
-  updateDrivePanel();
-}
-
-function updateDrivePanel() {
-  if (!driveConnectPanel) return;
-  const showDrivePanel = isUsingDriveStorage() && isDriveModeAvailable();
-  driveConnectPanel.classList.toggle("hidden", !showDrivePanel);
-  if (!showDrivePanel) return;
-
-  const connected = isDriveConnected();
-  if (driveStatusText) {
-    driveStatusText.textContent = connected
-      ? "متصل — يمكنك رفع الملفات وحفظها في Google Drive."
-      : "غير متصل — سجّل الدخول إلى Google Drive قبل رفع أي ملف.";
-  }
-  driveLoginBtn?.classList.toggle("hidden", connected);
-  driveLogoutBtn?.classList.toggle("hidden", !connected);
-}
-
-async function handleStorageModeChange(nextMode) {
-  const currentMode = getResolvedStorageMode();
-  if (nextMode === currentMode) return;
-
-  const confirmed = window.confirm(
-    `سيتم التبديل إلى ${getStorageModeLabel(nextMode)}.\n` +
-      "سيتم تحميل المستندات من مصدر التخزين الجديد. هل تريد المتابعة؟"
-  );
-  if (!confirmed) {
-    syncStorageModeInputs();
-    return;
-  }
-
-  setStorageMode(nextMode);
-  explorerShowAll = false;
-  revokeAllPreviewUrls();
-  pendingFiles = [];
-  renderPendingFiles();
-  clearStorageSession();
-  updateStoragePanel();
-  updateUploadAccess();
-
-  if (!sessionPassword) return;
-  try {
-    await hydrateDocuments(sessionPassword);
-    setStatus(`تم التبديل إلى ${getStorageModeLabel(nextMode)}.`, true);
-    setTimeout(() => setStatus("", false), 2500);
-  } catch (error) {
-    setStatus(`تعذّر تحميل المستندات: ${error.message}`, true);
+    storageModeStatus.textContent = githubAvailable
+      ? "التخزين عبر GitHub — تُحفظ الملفات والفهرس في المستودع المشفّر."
+      : "";
   }
 }
 
@@ -304,35 +209,6 @@ function updateUploadAccess() {
   dropZone?.classList.toggle("is-disabled", !allowed);
   if (fileInput) fileInput.disabled = !allowed;
   ingestBtn.disabled = !allowed || !pendingFiles.length;
-}
-
-async function handleDriveLogin() {
-  if (!driveLoginBtn) return;
-  driveLoginBtn.disabled = true;
-  setStatus("جارٍ ربط Google Drive…");
-  try {
-    await loginToGoogleDrive();
-    await hydrateDocuments(sessionPassword);
-    updateStoragePanel();
-    updateUploadAccess();
-    setStatus("تم ربط Google Drive بنجاح.", true);
-    setTimeout(() => setStatus("", false), 2500);
-  } catch (error) {
-    setStatus(error.message, true);
-  } finally {
-    driveLoginBtn.disabled = false;
-  }
-}
-
-function handleDriveLogout() {
-  logoutGoogleDrive();
-  revokeAllPreviewUrls();
-  pendingFiles = [];
-  renderPendingFiles();
-  updateStoragePanel();
-  updateUploadAccess();
-  setStatus("تم قطع اتصال Google Drive. لن يمكن رفع ملفات جديدة حتى تسجيل الدخول مجدداً.", true);
-  setTimeout(() => setStatus("", false), 3000);
 }
 
 function showView() {
@@ -469,7 +345,7 @@ function setupDropZone() {
   const addFiles = (fileList) => {
     if (!fileList?.length) return;
     if (!canUploadFiles()) {
-      setStatus("يرجى تسجيل الدخول إلى Google Drive قبل رفع الملفات.", true);
+      setStatus("تعذّر رفع الملفات. تحقق من إعدادات التخزين.", true);
       return;
     }
     const merged = [...pendingFiles];
@@ -480,7 +356,7 @@ function setupDropZone() {
   dropZone.addEventListener("click", (event) => {
     if (!canUploadFiles()) {
       event.preventDefault();
-      setStatus("يرجى تسجيل الدخول إلى Google Drive قبل رفع الملفات.", true);
+      setStatus("تعذّر رفع الملفات. تحقق من إعدادات التخزين.", true);
     }
   });
 
@@ -515,7 +391,7 @@ function setupDropZone() {
   dropZone.addEventListener("drop", (event) => {
     if (!canUploadFiles()) {
       event.preventDefault();
-      setStatus("يرجى تسجيل الدخول إلى Google Drive قبل رفع الملفات.", true);
+      setStatus("تعذّر رفع الملفات. تحقق من إعدادات التخزين.", true);
       return;
     }
     addFiles([...event.dataTransfer.files]);
@@ -1027,14 +903,8 @@ async function downloadDocument(doc) {
     if (doc.fileData) {
       bytes = Uint8Array.from(atob(doc.fileData), (char) => char.charCodeAt(0));
     } else if (doc.driveFileId) {
-      if (!isDriveConnected()) {
-        setStatus("هذا الملف مخزّن في Google Drive. سجّل الدخول إلى Drive لتنزيله.", true);
-        return;
-      }
-      setStatus("جارٍ تنزيل الملف من Google Drive…");
-      const buffer = await downloadDriveFile(doc.driveFileId);
-      bytes = new Uint8Array(buffer);
-      setStatus("", false);
+      setStatus("هذا الملف كان مخزّناً في Google Drive القديم ولم يعد متاحاً. أعد رفعه.", true);
+      return;
     } else {
       setStatus("تعذّر التنزيل: الملف غير مخزّن. أعد رفع الملف.", true);
       return;
@@ -1134,10 +1004,7 @@ async function confirmRename() {
 
   try {
     if (doc.driveFileId) {
-      if (!isDriveConnected()) {
-        throw new Error("هذا الملف مخزّن في Google Drive. سجّل الدخول إلى Drive لإعادة تسميته.");
-      }
-      await renameDriveFile(doc.driveFileId, nextName);
+      throw new Error("هذا الملف كان مخزّناً في Google Drive القديم. أعد رفعه لإعادة تسميته.");
     }
 
     doc.filename = nextName;
@@ -1289,12 +1156,7 @@ async function confirmUnlock() {
 
 async function ingestFiles(files) {
   if (!canUploadFiles()) {
-    setStatus(
-      isUsingDriveStorage()
-        ? "يرجى تسجيل الدخول إلى Google Drive قبل رفع الملفات."
-        : "تعذّر رفع الملفات. تحقق من إعدادات التخزين.",
-      true
-    );
+    setStatus("تعذّر رفع الملفات. تحقق من إعدادات التخزين.", true);
     return;
   }
 
@@ -1318,17 +1180,7 @@ async function ingestFiles(files) {
       if (!text) throw new Error(`لم يُعثر على نص في ${file.name}`);
       const category = assignCategory(text, file.name, state.documents);
       const chunks = chunkText(text).map((content) => ({ content }));
-      let driveFileId = null;
-      if (isUsingDriveStorage()) {
-        setStatus(`جارٍ رفع الملف إلى Google Drive: ${file.name}…`);
-        driveFileId = await uploadDocumentFile(
-          category,
-          file.name,
-          new Blob([arrayBuffer], { type: file.type || "application/octet-stream" })
-        );
-      }
-      const keepBinary =
-        !driveFileId && !(isUsingGitHubStorage() && image);
+      const keepBinary = !(isUsingGitHubStorage() && image);
       state.documents.push({
         id: crypto.randomUUID(),
         filename: file.name,
@@ -1338,12 +1190,10 @@ async function ingestFiles(files) {
         charCount: text.length,
         preview: text.replace(/\s+/g, " ").slice(0, 280),
         fileData: keepBinary ? arrayBufferToBase64(arrayBuffer) : null,
-        driveFileId,
-        storageBackend: isUsingDriveStorage()
-          ? STORAGE_BACKENDS.DRIVE
-          : isUsingGitHubStorage()
-            ? STORAGE_BACKENDS.GITHUB
-            : STORAGE_BACKENDS.LOCAL,
+        driveFileId: null,
+        storageBackend: isUsingGitHubStorage()
+          ? STORAGE_BACKENDS.GITHUB
+          : STORAGE_BACKENDS.LOCAL,
         chunks,
         isLocked: false,
         lockHash: null,
@@ -1353,13 +1203,11 @@ async function ingestFiles(files) {
     await persistState();
     renderLibrary();
     setStatus(
-      isUsingDriveStorage()
-        ? "اكتملت الفهرسة وحُفظت في Google Drive حسب التصنيف."
-        : isUsingGitHubStorage()
-          ? "اكتملت الفهرسة وحُفظت في GitHub."
-          : isCloudSyncEnabled()
-            ? "اكتملت الفهرسة وحُفظت في التخزين السحابي."
-            : "اكتملت الفهرسة.",
+      isUsingGitHubStorage()
+        ? "اكتملت الفهرسة وحُفظت في GitHub."
+        : isCloudSyncEnabled()
+          ? "اكتملت الفهرسة وحُفظت في التخزين السحابي."
+          : "اكتملت الفهرسة.",
       true
     );
     setTimeout(() => setStatus("", false), 2500);
@@ -1435,7 +1283,6 @@ logoutBtn.addEventListener("click", () => {
   state = normalizeState({});
   currentUser = null;
   clearStorageSession();
-  clearDriveSession();
   clearUnlockSession();
   authApi?.logout?.();
 });
@@ -1478,15 +1325,6 @@ unlockPassword?.addEventListener("keydown", (event) => {
 lockPasswordConfirm?.addEventListener("keydown", (event) => {
   if (event.key === "Enter") confirmLock();
 });
-
-driveLoginBtn?.addEventListener("click", handleDriveLogin);
-driveLogoutBtn?.addEventListener("click", handleDriveLogout);
-for (const input of document.querySelectorAll('input[name="storage-mode"]')) {
-  input.addEventListener("change", () => {
-    if (!input.checked) return;
-    handleStorageModeChange(input.value);
-  });
-}
 
 setupDropZone();
 initImagePreview();

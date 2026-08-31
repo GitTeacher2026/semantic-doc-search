@@ -250,33 +250,7 @@
         <section class="panel">
           <h2>رفع الملفات</h2>
           <div id="storage-settings-panel" class="storage-settings-panel hidden">
-            <div id="storage-mode-picker" class="storage-mode-picker hidden">
-              <span class="storage-mode-label">مكان التخزين</span>
-              <div class="storage-mode-options" role="radiogroup" aria-label="مكان التخزين">
-                <label class="storage-mode-option">
-                  <input type="radio" name="storage-mode" value="github" />
-                  <span>GitHub</span>
-                </label>
-                <label class="storage-mode-option">
-                  <input type="radio" name="storage-mode" value="drive" />
-                  <span>Google Drive</span>
-                </label>
-              </div>
-            </div>
             <p id="storage-mode-status" class="storage-mode-status muted"></p>
-            <div id="drive-connect-panel" class="drive-connect-panel hidden">
-              <div class="drive-connect-info">
-                <span class="drive-connect-icon" aria-hidden="true">☁️</span>
-                <div>
-                  <strong>Google Drive</strong>
-                  <p id="drive-status-text" class="muted">غير متصل — سجّل الدخول قبل رفع الملفات.</p>
-                </div>
-              </div>
-              <div class="drive-connect-actions">
-                <button id="drive-login-btn" class="btn primary small" type="button">تسجيل الدخول إلى Google Drive</button>
-                <button id="drive-logout-btn" class="btn ghost small hidden" type="button">قطع الاتصال</button>
-              </div>
-            </div>
           </div>
           <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="منطقة رفع الملفات">
             <input id="file-input" class="drop-zone-input" type="file" accept=".pdf,.txt,.md,.text,.log,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.gif,.bmp,.tif,.tiff" multiple />
@@ -292,7 +266,7 @@
                 <span class="type-pill text">نص</span>
                 <span class="type-pill image">صور</span>
               </div>
-              <p class="drop-zone-ocr muted">الصور تُرسل إلى Google AI (مثل Google Lens) لاستخراج النص بسرعة</p>
+              <p class="drop-zone-ocr muted">الصور — استخراج النص محلياً (عربي + إنجليزي) بدون خدمات خارجية</p>
             </div>
           </div>
           <div id="pending-files" class="pending-files-grid hidden"></div>

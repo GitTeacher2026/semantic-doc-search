@@ -16,7 +16,7 @@ export function formatGitHubApiError(message, status) {
   }
 
   if (lower.includes("too large") || lower.includes("size")) {
-    return "الملف كبير جداً لحفظه في GitHub. جرّب Google Drive للصور أو ملفاً أصغر.";
+    return "الملف كبير جداً لحفظه في GitHub. جرّب ملفاً أصغر أو قلّل عدد المرفقات.";
   }
 
   return text || `خطأ GitHub (${status || "غير معروف"})`;

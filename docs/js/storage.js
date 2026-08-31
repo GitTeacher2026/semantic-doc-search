@@ -1,27 +1,17 @@
 import { base64ToBytes, bytesToBase64, decryptJson, deriveKey, encryptJson } from "./crypto.js";
 import {
-  fetchEncryptedStore as fetchDriveStore,
-  isDriveStorageConfigured,
-  uploadEncryptedStore as uploadDriveStore,
-} from "./drive-storage.js";
-import { getStoredAccessToken, isDriveConfigured } from "./drive-auth.js";
-import {
   fetchEncryptedStore as fetchGitHubStore,
   isGitHubStorageConfigured,
   uploadEncryptedStore as uploadGitHubStore,
 } from "./github-storage.js";
 import { normalizeState, purgeExpiredTrash } from "./trash.js";
-import {
-  STORAGE_MODES,
-  getResolvedStorageMode,
-} from "./storage-preference.js";
+import { getResolvedStorageMode, STORAGE_MODES } from "./storage-preference.js";
 
 const LOCAL_CACHE_KEY = "docshelf_store_v5";
 
 let sessionKey = null;
 let currentSalt = null;
 let remoteSha = null;
-let remoteFileId = null;
 
 function loadLocalDocuments() {
   try {
@@ -40,14 +30,11 @@ function finalizeState(state) {
 }
 
 export function isCloudSyncEnabled() {
-  const mode = getResolvedStorageMode();
-  if (mode === STORAGE_MODES.DRIVE) return isDriveStorageConfigured();
-  if (mode === STORAGE_MODES.GITHUB) return isGitHubStorageConfigured();
-  return false;
+  return getResolvedStorageMode() === STORAGE_MODES.GITHUB && isGitHubStorageConfigured();
 }
 
 export function isUsingDriveStorage() {
-  return getResolvedStorageMode() === STORAGE_MODES.DRIVE && isDriveStorageConfigured();
+  return false;
 }
 
 export function isUsingGitHubStorage() {
@@ -55,36 +42,15 @@ export function isUsingGitHubStorage() {
 }
 
 async function fetchRemoteStore() {
-  const mode = getResolvedStorageMode();
-
-  if (mode === STORAGE_MODES.DRIVE && isDriveStorageConfigured()) {
-    if (!getStoredAccessToken()) {
-      return { envelope: null, fileId: null, sha: null };
-    }
-    const { envelope, fileId } = await fetchDriveStore();
-    return { envelope, fileId, sha: null };
-  }
-
-  if (mode === STORAGE_MODES.GITHUB && isGitHubStorageConfigured()) {
+  if (isGitHubStorageConfigured()) {
     const { envelope, sha } = await fetchGitHubStore();
-    return { envelope, fileId: null, sha };
+    return { envelope, sha };
   }
-
-  return { envelope: null, fileId: null, sha: null };
+  return { envelope: null, sha: null };
 }
 
 async function uploadRemoteStore(envelope) {
-  const mode = getResolvedStorageMode();
-
-  if (mode === STORAGE_MODES.DRIVE && isDriveStorageConfigured()) {
-    if (!getStoredAccessToken()) {
-      throw new Error("يلزم تسجيل الدخول إلى Google Drive قبل حفظ الملفات.");
-    }
-    remoteFileId = await uploadDriveStore(envelope, remoteFileId);
-    return;
-  }
-
-  if (mode === STORAGE_MODES.GITHUB && isGitHubStorageConfigured()) {
+  if (isGitHubStorageConfigured()) {
     remoteSha = await uploadGitHubStore(envelope, remoteSha);
   }
 }
@@ -94,8 +60,7 @@ export async function loadDocuments(password) {
     return finalizeState(loadLocalDocuments());
   }
 
-  const { envelope, fileId, sha } = await fetchRemoteStore();
-  remoteFileId = fileId;
+  const { envelope, sha } = await fetchRemoteStore();
   remoteSha = sha;
 
   if (!envelope) {
@@ -163,5 +128,4 @@ export function clearStorageSession() {
   sessionKey = null;
   currentSalt = null;
   remoteSha = null;
-  remoteFileId = null;
 }

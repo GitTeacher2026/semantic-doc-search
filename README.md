@@ -1,17 +1,17 @@
 # مخزن الوثائق
 
-تطبيق ويب عربي لرفع ملفات PDF وOffice والنصوص والصور، تصنيفها تلقائياً حسب المشروع/الموضوع، والبحث الفوري عبر المحتوى باستخدام BM25 (بدون تحميل نموذج ذكاء اصطناعي).
+تطبيق ويب عربي لرفع ملفات PDF وOffice والنصوص والصور، تصنيفها تلقائياً حسب المشروع/الموضوع، والبحث الفوري عبر المحتوى باستخدام BM25.
+
+**المستودع الحالي:** [GitTeacher2026/semantic-doc-search](https://github.com/GitTeacher2026/semantic-doc-search)  
+**الموقع:** https://gitteacher2026.github.io/semantic-doc-search/
 
 ## الميزات
 
 - صفحة تسجيل دخول قبل الوصول إلى أي وظيفة
 - واجهة عربية كاملة مع دعم RTL
-- رفع ملفات PDF ونصية وOffice (Word وExcel وPowerPoint) **والصور** (استخراج نص عبر Google AI — مثل Google Lens)
-- دعم أسماء الملفات العربية
-- مستكشف ملفات منظم حسب التصنيف ونوع الملف
-- تصنيف تلقائي حسب تداخل الكلمات المفتاحية
-- بحث فوري BM25 (نسخة Streamlit ونسخة GitHub Pages)
-- **تخزين سحابي على GitHub** — الملفات والفهرس المشفّر داخل المستودع (الوضع الافتراضي)
+- رفع PDF وOffice ونصوص **والصور** (OCR محلي عربي + إنجليزي عبر Tesseract.js — بدون Google)
+- تخزين سحابي مشفّر على **GitHub** فقط
+- بحث فوري BM25 مع خيارات متقدمة ووضع داكن
 
 ## بيانات الدخول
 
@@ -20,102 +20,66 @@
 | اسم المستخدم | `admin` |
 | البريد الإداري | `reagon.gm@pm.me` |
 
-كلمة مرور المسؤول تُدار عبر `data/users.json` (نسخة GitHub Pages) أو متغيرات البيئة (نسخة Streamlit):
+## إعداد الأسرار في GitHub (مرة واحدة)
+
+افتح المستودع → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
+
+### 1) `DOCSHELF_GITHUB_TOKEN` (مطلوب)
+
+يسمح للتطبيق بحفظ المستندات في `data/browser-store.enc.json`.
+
+1. سجّل الدخول كـ **GitTeacher2026**
+2. [Settings → Developer settings → Personal access tokens → Fine-grained tokens](https://github.com/settings/tokens?type=beta)
+3. **Generate new token**
+   - Repository access: **Only select repositories** → `semantic-doc-search`
+   - Permissions → **Contents**: Read and write
+   - **Repository metadata**: Read-only (يُضاف تلقائياً)
+4. انسخ التوكن (يظهر مرة واحدة فقط)
+5. في المستودع: Secret باسم **`DOCSHELF_GITHUB_TOKEN`** → الصق التوكن
+
+### 2) `DOCSHELF_VAULT_PASSWORD` (اختياري)
+
+كلمة مرور فك تشفير المستندات. إذا لم تُضف، يُستخدم الافتراضي `docshelf2024`.  
+**لا تغيّرها** إن كنت تنقل بيانات قديمة مشفّرة بنفس القيمة.
+
+### 3) `WEB3FORMS_ACCESS_KEY` (اختياري — إشعارات التسجيل)
+
+يرسل بريداً للمسؤول عند تسجيل مستخدم جديد.
+
+1. افتح https://web3forms.com
+2. سجّل بحسابك (يمكن استخدام **reagon.gm@pm.me**)
+3. أنشئ نموذجاً جديداً
+4. انسخ **Access Key** (شكلها UUID مثل `69fd75eb-0aad-4952-98df-ca4ac06f734d`)
+5. في المستودع: Secret باسم **`WEB3FORMS_ACCESS_KEY`**
+6. أعد تشغيل **Deploy GitHub Pages**
+
+> الإشعارات تُرسل أيضاً من المتصفح عند التسجيل إذا كان المفتاح مضبوطاً في `config.js` بعد النشر.
+
+### 4) نشر الموقع
+
+1. **Settings → Pages → Source:** GitHub Actions
+2. **Actions → Deploy GitHub Pages → Re-run all jobs**
+3. افتح https://gitteacher2026.github.io/semantic-doc-search/
+
+## استخراج النص من الصور (OCR)
+
+يستخدم **Tesseract.js** في المتصفح (عربي + إنجليزي). لا حاجة لمفتاح API ولا لخدمات Google.
+
+- أول صورة قد تستغرق وقتاً أطول (تحميل نموذج اللغة ~15 MB)
+- الصور على GitHub تُحفظ كنص مستخرج فقط (بدون نسخة الصورة الأصلية) لتقليل حجم المستودع
+
+## ربط Cursor بالمستودع الجديد
 
 ```bash
-export DOCSHELF_USERNAME=admin
-export DOCSHELF_PASSWORD=your_password
+git remote set-url origin https://github.com/GitTeacher2026/semantic-doc-search.git
+git push -u origin main
 ```
 
-## التخزين السحابي (GitHub)
+إذا رُفض الدفع بسبب commit أولي في GitHub:
 
-| المصدر | السر المطلوب | السلوك |
-|--------|-------------|--------|
-| **GitHub** | `DOCSHELF_GITHUB_TOKEN` | الملفات والفهرس داخل `data/browser-store.enc.json` في المستودع |
-
-> **ملاحظة:** Google Drive و Gemini اختياريان. بدون `GOOGLE_CLIENT_ID` يعمل التطبيق على GitHub فقط.
-
-### إعداد GitHub Token (للتخزين على GitHub)
-
-1. سجّل الدخول بحساب GitHub الجديد (**reagon.gm@pm.me**)
-2. افتح [GitHub → Settings → Developer settings → Personal access tokens](https://github.com/settings/tokens)
-3. أنشئ **Fine-grained token** بصلاحية **`repo`** على مستودع `semantic-doc-search`
-4. في المستودع: **Settings** → **Secrets and variables** → **Actions** → أضف:
-   - **`DOCSHELF_GITHUB_TOKEN`** — التوكن الذي أنشأته
-   - **`DOCSHELF_VAULT_PASSWORD`** — كلمة مرور فك تشفير المستندات (اتركها كما كانت إن كنت تنقل بيانات قديمة)
-5. أعد تشغيل workflow **Deploy GitHub Pages**
-
-إذا ظهر **`Bad credentials`**: أنشئ توكناً جديداً وحدّث السر ثم أعد النشر.
-
-### نقل المشروع إلى حساب GitHub جديد
-
-1. أنشئ حساباً على https://github.com/signup بالبريد **reagon.gm@pm.me**
-2. أنشئ مستودعاً عاماً باسم `semantic-doc-search`
-3. ارفع هذا الكود إلى المستودع الجديد (`git push`)
-4. فعّل **GitHub Pages** من **Settings → Pages → Source: GitHub Actions**
-5. أضف الأسرار (`DOCSHELF_GITHUB_TOKEN`, `DOCSHELF_VAULT_PASSWORD`) في المستودع الجديد
-6. عنوان الموقع يُحدَّد تلقائياً: `https://<اسم-المستخدم>.github.io/semantic-doc-search/`
-
-### إعداد Google Drive (اختياري — قديم)
-
-1. افتح [Google Cloud Console](https://console.cloud.google.com/) بحساب Google منفصل
-2. أنشئ مشروعاً جديداً (أو اختر مشروعاً موجوداً)
-3. من **APIs & Services** → **Library**، فعّل **Google Drive API**
-4. من **APIs & Services** → **OAuth consent screen**:
-   - اختر **External**
-   - أكمل اسم التطبيق والبريد الداعم
-   - من **Scopes** → **Add or Remove Scopes** وأضف:
-     - `.../auth/drive.file` (Google Drive)
-     - `.../auth/userinfo.email` (See your primary Google Account email address)
-   - من **Test users** → **Add users** → أضف بريد المسؤول: `reagon.gm@pm.me`
-   - (اختياري للاستخدام الشخصي) اضغط **Publish app** إذا استمر الرفض
-5. من **APIs & Services** → **Credentials** → **Create Credentials** → **OAuth client ID**:
-   - نوع التطبيق: **Web application**
-   - **Authorized JavaScript origins** (مهم جداً):
-     - `https://<اسم-مستخدمك>.github.io`
-   - لا تستخدم Client Secret في هذا المشروع — المطلوب **Client ID** فقط
-6. انسخ **Client ID** (ينتهي بـ `.apps.googleusercontent.com`)
-7. في GitHub: **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
-   - الاسم: `GOOGLE_CLIENT_ID`
-   - القيمة: الصق Client ID كاملاً بدون مسافات
-8. أعد تشغيل workflow النشر: **Actions** → **Deploy GitHub Pages** → **Re-run all jobs**
-9. بعد النشر، افتح الموقع واضغط **Hard refresh** (Ctrl+Shift+R)
-
-**إذا ظهر `Error 403: access_denied`:**
-- التطبيق في وضع **Testing** ولم يُضف `reagon.gm@pm.me` في **Test users**
-- أو لم تُضف Scopes المطلوبة في شاشة الموافقة (drive.file + email)
-- أو سجّلت الدخول بحساب Google آخر غير بريد المسؤول
-- الحل: أضف الحساب في Test users، أو انشر التطبيق **Publish app**، ثم جرّب مرة أخرى
-
-**إذا ظهر `Error 401: invalid_client`:**
-- الـ Client ID غير موجود في Google أو لم يُنشر بعد في الموقع
-- تأكد أن السرّ اسمه بالضبط `GOOGLE_CLIENT_ID` وليس Client Secret
-- تأكد أن origin `https://<اسم-مستخدمك>.github.io` مضاف في OAuth client
-- تأكد أنك أعدت نشر GitHub Pages بعد إضافة السرّ
-
-عند أول تسجيل دخول بعد الإعداد الصحيح، سيُطلب ربط Google Drive بحساب **reagon.gm@pm.me**. الملفات تُرفع تلقائياً إلى:
-
+```bash
+git push -u origin main --force
 ```
-مخزن الوثائق/
-  ├── إدارة ومشاريع/
-  ├── مالية ومحاسبة/
-  ├── docshelf-index.enc.json
-  └── ...
-```
-
-> **ملاحظة:** إذا لم يُضبط `GOOGLE_CLIENT_ID`، يعود التطبيق إلى التخزين المحلي أو GitHub (إن وُجد `DOCSHELF_GITHUB_TOKEN`).
-
-### استخراج النص من الصور (Google AI / Gemini)
-
-بدلاً من OCR المحلي البطيء، تُرسل الصور إلى **Google Gemini Vision** (نفس تقنية Google Lens) لاستخراج النص بسرعة.
-
-1. افتح [Google AI Studio](https://aistudio.google.com/apikey) وسجّل الدخول بحساب Google
-2. اضغط **Create API key** — المفاتيح الجديدة تبدأ بـ **`AQ.`** (المفاتيح القديمة بـ **`AIzaSy`**)
-3. في GitHub: **Settings** → **Secrets and variables** → **Actions** → أضف سراً باسم **`GEMINI_API_KEY`** (بالضبط)
-4. أعد تشغيل workflow **Deploy GitHub Pages** (Actions → Re-run all jobs) — إضافة السر وحده لا يكفي
-5. حدّث الموقع تحديثاً قوياً: **Ctrl+Shift+R**
-
-بدون `GEMINI_API_KEY` لن يعمل رفع الصور (باقي أنواع الملفات تعمل طبيعياً).
 
 ## التشغيل المحلي (Streamlit)
 
@@ -126,73 +90,18 @@ pip install -r requirements.txt
 streamlit run app.py --server.port 8512 --server.address 0.0.0.0
 ```
 
-ثم افتح http://127.0.0.1:8512
-
-## النشر على GitHub Pages
-
-يتم نشر النسخة الثابتة العربية من مجلد `docs/` تلقائياً عبر GitHub Actions.
-
-### 1) إنشاء حساب GitHub (إن لم يكن لديك)
-
-أنشئ حساباً مجانياً على https://github.com/signup
-
-### 2) إنشاء المستودع ورفع الكود
-
-```bash
-# تثبيت GitHub CLI
-curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-sudo apt update && sudo apt install gh -y
-
-# تسجيل الدخول
-gh auth login
-
-# إنشاء المستودع ورفع الكود
-gh repo create semantic-doc-search --public --source=. --remote=github --push
-```
-
-### 3) تفعيل GitHub Pages (خطوة إلزامية — مرة واحدة)
-
-> **إذا فشل الـ workflow بخطأ `Get Pages site failed` / `Not Found` على `configure-pages@v5`،**
-> فهذا يعني أن GitHub Pages **غير مُفعَّل بعد** في المستودع. لا يمكن للـ workflow تفعيله تلقائياً.
-
-**الطريقة الأسهل (من المتصفح):**
-
-1. افتح المستودع على GitHub
-2. **Settings** → **Pages**
-3. تحت **Build and deployment** → **Source**
-4. اختر **GitHub Actions** (وليس *Deploy from a branch*)
-5. أعد تشغيل الـ workflow: **Actions** → **Deploy GitHub Pages** → **Re-run all jobs**
-
-**أو عبر GitHub CLI:**
-
-```bash
-gh api repos/:owner/semantic-doc-search/pages -X POST -f build_type=workflow
-```
-
-(استبدل `:owner` باسم مستخدمك، مثلاً `joseph-goodman`.)
-
-### 4) عنوان الموقع
-
-بعد نجاح الـ workflow، سيكون الموقع متاحاً على:
-
-`https://<اسم-المستخدم>.github.io/semantic-doc-search/`
-
 ## هيكل المشروع
 
 ```
-app.py                    # واجهة Streamlit العربية مع تسجيل الدخول
-src/auth.py               # بوابة تسجيل الدخول
-src/document_store.py     # رفع، تصنيف، فهرس BM25
-docs/                     # نسخة ثابتة للنشر على GitHub Pages
-docs/js/storage.js        # تخزين سحابي مشفّر عبر GitHub API
+docs/                     # نسخة GitHub Pages
+docs/js/storage.js        # تخزين مشفّر عبر GitHub API
+docs/js/ocr.js            # OCR محلي (Tesseract.js)
 .github/workflows/pages.yml
-uploads/                  # الملفات المرفوعة (Streamlit)
-data/                     # البيانات الوصفية + فهرس BM25 + التخزين المشفّر للمتصفح
+data/browser-store.enc.json
+data/users.json
 ```
 
-## ملاحظات
+## ملاحظات أمنية
 
-- **GitHub Pages** يستضيف النسخة الثابتة في `docs/` مع تخزين سحابي مشفّر في المستودع.
-- **Streamlit** يتطلب خادماً Python ويُستخدم للتطوير المحلي أو النشر على Streamlit Cloud.
-- المستندات على GitHub Pages تُحذف فقط عبر زر **حذف** داخل التطبيق.
+- التوكنات تُدمج في `docs/js/config.js` عند النشر (مطلوب لعمل GitHub API من المتصفح). لا تشارك رابط `config.js` علناً.
+- إذا تسرّب التوكن، أنشئ توكناً جديداً وحدّث `DOCSHELF_GITHUB_TOKEN` ثم أعد النشر.
