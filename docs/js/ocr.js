@@ -40,7 +40,7 @@ export function formatOcrProgress({ stage, pct, engine, fallbackReason } = {}) {
   const prefix = engineLabel ? `${engineLabel}: ` : "";
   const label = STAGE_LABELS[stage] || "جارٍ معالجة الصورة";
   if (fallbackReason && stage === "load") {
-    return `فشل OCR.space — التحويل إلى Tesseract…`;
+    return "OCR.space غير متاح — جارٍ استخدام Tesseract المحلي…";
   }
   if (stage === "load" || stage === "ocr" || stage === "upload") {
     return `${prefix}${label}${typeof pct === "number" ? `: ${pct}%` : "…"}`;
@@ -155,6 +155,76 @@ async function ocrWithTesseract(blob) {
   return data.text;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientOcrSpaceError(error, status = 0) {
+  const code = Number(status || error?.status || 0);
+  const text = String(error?.message || "").toLowerCase();
+  return (
+    code === 503 ||
+    code === 502 ||
+    code === 429 ||
+    code === 500 ||
+    text.includes("503") ||
+    text.includes("502") ||
+    text.includes("429") ||
+    text.includes("unavailable") ||
+    text.includes("timeout") ||
+    text.includes("network")
+  );
+}
+
+async function requestOcrSpace(blob, apiKey, engineVersion) {
+  const form = new FormData();
+  form.append("apikey", apiKey);
+  form.append("language", "ara");
+  form.append("isOverlayRequired", "false");
+  form.append("detectOrientation", "true");
+  form.append("scale", "true");
+  form.append("OCREngine", String(engineVersion));
+  form.append("file", blob, "image.jpg");
+
+  const res = await fetch("https://api.ocr.space/parse/image", {
+    method: "POST",
+    body: form,
+  });
+
+  let payload = {};
+  try {
+    payload = await res.json();
+  } catch {
+    payload = {};
+  }
+
+  if (!res.ok) {
+    const error = new Error(
+      payload?.ErrorMessage?.[0] ||
+        payload?.message ||
+        payload?.error ||
+        `OCR.space غير متاح حالياً (${res.status})`
+    );
+    error.status = res.status;
+    throw error;
+  }
+
+  if (payload.IsErroredOnProcessing) {
+    const error = new Error(
+      payload.ErrorMessage?.[0] ||
+        payload.ErrorDetails ||
+        "تعذّر معالجة الصورة عبر OCR.space."
+    );
+    error.status = 503;
+    throw error;
+  }
+
+  return (payload.ParsedResults || [])
+    .map((item) => item.ParsedText || "")
+    .join("\n")
+    .trim();
+}
+
 async function ocrWithOcrSpace(blob) {
   const apiKey = await hydrateOcrSpaceKey();
   if (!apiKey) {
@@ -163,41 +233,31 @@ async function ocrWithOcrSpace(blob) {
 
   activeProgressCallback?.({ stage: "upload", pct: 25, engine: OCR_ENGINES.OCR_SPACE });
 
-  const form = new FormData();
-  form.append("apikey", apiKey);
-  form.append("language", "ara");
-  form.append("isOverlayRequired", "false");
-  form.append("detectOrientation", "true");
-  form.append("scale", "true");
-  form.append("OCREngine", "2");
-  form.append("file", blob, "image.jpg");
+  const attempts = [
+    { engine: 2, delayMs: 0 },
+    { engine: 2, delayMs: 1500 },
+    { engine: 1, delayMs: 0 },
+  ];
 
-  const res = await fetch("https://api.ocr.space/parse/image", {
-    method: "POST",
-    body: form,
-  });
-
-  activeProgressCallback?.({ stage: "ocr", pct: 70, engine: OCR_ENGINES.OCR_SPACE });
-
-  const payload = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(payload?.ErrorMessage?.[0] || payload?.message || `OCR.space (${res.status})`);
-  }
-  if (payload.IsErroredOnProcessing) {
-    throw new Error(
-      payload.ErrorMessage?.[0] ||
-        payload.ErrorDetails ||
-        "تعذّر معالجة الصورة عبر OCR.space."
-    );
+  let lastError = null;
+  for (const attempt of attempts) {
+    if (attempt.delayMs) {
+      await sleep(attempt.delayMs);
+    }
+    try {
+      activeProgressCallback?.({ stage: "ocr", pct: 50, engine: OCR_ENGINES.OCR_SPACE });
+      const text = await requestOcrSpace(blob, apiKey, attempt.engine);
+      activeProgressCallback?.({ stage: "ocr", pct: 100, engine: OCR_ENGINES.OCR_SPACE });
+      return text;
+    } catch (error) {
+      lastError = error;
+      if (!isTransientOcrSpaceError(error, error.status)) {
+        throw error;
+      }
+    }
   }
 
-  const text = (payload.ParsedResults || [])
-    .map((item) => item.ParsedText || "")
-    .join("\n")
-    .trim();
-
-  activeProgressCallback?.({ stage: "ocr", pct: 100, engine: OCR_ENGINES.OCR_SPACE });
-  return text;
+  throw lastError || new Error("OCR.space غير متاح حالياً.");
 }
 
 async function runOcrEngine(engine, blob) {
@@ -212,8 +272,14 @@ export async function extractImageText(file, onProgress, options = {}) {
   activeProgressCallback = onProgress;
   const preferred = options.engine || loadOcrOptions().engine;
   const primary = resolveOcrEngine(preferred);
-  const allowFallback = preferred === OCR_ENGINES.AUTO;
-  const fallback = getOcrFallbackEngine(primary, allowFallback);
+
+  const enginesToTry = [primary];
+  if (primary === OCR_ENGINES.OCR_SPACE) {
+    enginesToTry.push(OCR_ENGINES.TESSERACT);
+  } else {
+    const autoFallback = getOcrFallbackEngine(primary, preferred === OCR_ENGINES.AUTO);
+    if (autoFallback) enginesToTry.push(autoFallback);
+  }
 
   try {
     const source = file instanceof Blob ? file : new Blob([file]);
@@ -222,7 +288,7 @@ export async function extractImageText(file, onProgress, options = {}) {
     const prepared = await prepareImageBlob(source);
     let lastError = null;
 
-    for (const engine of [primary, fallback].filter(Boolean)) {
+    for (const engine of enginesToTry) {
       try {
         if (engine !== primary && lastError) {
           onProgress?.({
@@ -245,10 +311,13 @@ export async function extractImageText(file, onProgress, options = {}) {
           throw new Error("لم يُعثر على نص في الصورة.");
         }
 
-        return { text, engine };
+        return {
+          text,
+          engine,
+          fallbackFrom: engine !== primary ? primary : null,
+        };
       } catch (error) {
         lastError = error;
-        if (!fallback || engine === fallback) break;
       }
     }
 

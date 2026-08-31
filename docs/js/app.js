@@ -20,7 +20,7 @@ import {
 } from "./document-storage.js";
 import { initTheme, toggleTheme } from "./theme.js";
 import { bindSearchResults, renderSearchResults } from "./search-results.js?v=20260830b";
-import { extractImageText, formatOcrProgress, hydrateOcrSpaceKey, isImageFile } from "./ocr.js?v=20260831e";
+import { extractImageText, formatOcrProgress, hydrateOcrSpaceKey, isImageFile } from "./ocr.js?v=20260831f";
 import {
   getAvailableOcrEngines,
   loadOcrOptions,
@@ -542,6 +542,14 @@ async function extractText(file, arrayBuffer, { onOcrProgress } = {}) {
       onOcrProgress,
       { engine: readOcrEngineFromForm() }
     );
+    if (result && typeof result === "object" && result.fallbackFrom) {
+      onOcrProgress?.({
+        stage: "ocr",
+        pct: 100,
+        engine: result.engine,
+        fallbackReason: "done",
+      });
+    }
     return typeof result === "string" ? result : result.text;
   }
   if (fileEndsWith(name, ".pdf")) return extractPdfText(buffer);

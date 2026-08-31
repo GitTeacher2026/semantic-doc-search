@@ -28,7 +28,7 @@ export function getAvailableOcrEngines() {
     engines.unshift({
       id: OCR_ENGINES.OCR_SPACE,
       label: "سحابي — OCR.space",
-      hint: "الافتراضي — أسرع ويدعم العربية",
+      hint: "أسرع — يتحول تلقائياً إلى Tesseract إذا كانت الخدمة مشغولة",
       available: true,
     });
     engines.unshift({
