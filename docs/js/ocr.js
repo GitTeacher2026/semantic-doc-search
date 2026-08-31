@@ -1,5 +1,12 @@
-import { OCR_ENGINES, getOcrFallbackEngine, getOcrEngineLabel, loadOcrOptions, resolveOcrEngine } from "./ocr-options.js";
+import {
+  OCR_ENGINES,
+  buildOcrEngineChain,
+  getOcrEngineLabel,
+  loadOcrOptions,
+} from "./ocr-options.js";
 import { hydrateOcrSpaceKey } from "./ocr-config.js";
+
+const PUTER_SCRIPT_URL = "https://js.puter.com/v2/";
 
 const IMAGE_EXTENSIONS = new Set([
   ".jpg",
@@ -24,6 +31,7 @@ const STAGE_LABELS = {
 };
 
 let workerPromise = null;
+let puterPromise = null;
 let activeProgressCallback = null;
 
 export { getAvailableOcrEngines, loadOcrOptions, saveOcrOptions, OCR_ENGINES } from "./ocr-options.js";
@@ -40,7 +48,7 @@ export function formatOcrProgress({ stage, pct, engine, fallbackReason } = {}) {
   const prefix = engineLabel ? `${engineLabel}: ` : "";
   const label = STAGE_LABELS[stage] || "جارٍ معالجة الصورة";
   if (fallbackReason && stage === "load") {
-    return "OCR.space غير متاح — جارٍ استخدام Tesseract المحلي…";
+    return `تعذّر المحرك السابق — جارٍ تجربة ${engineLabel || "محرك آخر"}…`;
   }
   if (stage === "load" || stage === "ocr" || stage === "upload") {
     return `${prefix}${label}${typeof pct === "number" ? `: ${pct}%` : "…"}`;
@@ -260,7 +268,66 @@ async function ocrWithOcrSpace(blob) {
   throw lastError || new Error("OCR.space غير متاح حالياً.");
 }
 
+async function loadPuter() {
+  if (globalThis.puter?.ai?.img2txt) {
+    return globalThis.puter;
+  }
+  if (!puterPromise) {
+    puterPromise = new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[src*="js.puter.com"]');
+      if (existing) {
+        existing.addEventListener("load", () => resolve(globalThis.puter), { once: true });
+        existing.addEventListener("error", () => reject(new Error("تعذّر تحميل Puter OCR.")), {
+          once: true,
+        });
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = PUTER_SCRIPT_URL;
+      script.async = true;
+      script.onload = () => resolve(globalThis.puter);
+      script.onerror = () => reject(new Error("تعذّر تحميل Puter OCR."));
+      document.head.appendChild(script);
+    });
+  }
+
+  const puter = await puterPromise;
+  if (!puter?.ai?.img2txt) {
+    throw new Error("Puter OCR غير متاح في هذا المتصفح.");
+  }
+  return puter;
+}
+
+async function ocrWithPuter(blob) {
+  activeProgressCallback?.({ stage: "load", pct: 15, engine: OCR_ENGINES.PUTER });
+  const puter = await loadPuter();
+  activeProgressCallback?.({ stage: "upload", pct: 35, engine: OCR_ENGINES.PUTER });
+
+  const providers = ["mistral", "aws-textract"];
+  let lastError = null;
+
+  for (const provider of providers) {
+    try {
+      activeProgressCallback?.({ stage: "ocr", pct: 60, engine: OCR_ENGINES.PUTER });
+      const text = await puter.ai.img2txt(blob, { provider });
+      const normalized = String(text || "").trim();
+      if (!normalized) {
+        throw new Error("لم يُعثر Puter على نص في الصورة.");
+      }
+      activeProgressCallback?.({ stage: "ocr", pct: 100, engine: OCR_ENGINES.PUTER });
+      return normalized;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error("تعذّر استخراج النص عبر Puter AI.");
+}
+
 async function runOcrEngine(engine, blob) {
+  if (engine === OCR_ENGINES.PUTER) {
+    return ocrWithPuter(blob);
+  }
   if (engine === OCR_ENGINES.OCR_SPACE) {
     return ocrWithOcrSpace(blob);
   }
@@ -271,15 +338,8 @@ export async function extractImageText(file, onProgress, options = {}) {
   await hydrateOcrSpaceKey();
   activeProgressCallback = onProgress;
   const preferred = options.engine || loadOcrOptions().engine;
-  const primary = resolveOcrEngine(preferred);
-
-  const enginesToTry = [primary];
-  if (primary === OCR_ENGINES.OCR_SPACE) {
-    enginesToTry.push(OCR_ENGINES.TESSERACT);
-  } else {
-    const autoFallback = getOcrFallbackEngine(primary, preferred === OCR_ENGINES.AUTO);
-    if (autoFallback) enginesToTry.push(autoFallback);
-  }
+  const enginesToTry = buildOcrEngineChain(preferred);
+  const primary = enginesToTry[0] || OCR_ENGINES.TESSERACT;
 
   try {
     const source = file instanceof Blob ? file : new Blob([file]);
