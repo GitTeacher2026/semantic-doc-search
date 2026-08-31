@@ -56,3 +56,8 @@ export function permanentlyDelete(state, docId) {
     trash: normalized.trash.filter((item) => item.id !== docId),
   };
 }
+
+export function purgeAllTrash(state) {
+  const normalized = normalizeState(state);
+  return { ...normalized, trash: [] };
+}

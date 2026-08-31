@@ -20,7 +20,7 @@ import {
 } from "./document-storage.js";
 import { initTheme, toggleTheme } from "./theme.js";
 import { bindSearchResults, renderSearchResults } from "./search-results.js?v=20260830b";
-import { extractImageText, formatOcrProgress, hydrateOcrSpaceKey, isImageFile } from "./ocr.js?v=20260831g";
+import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js?v=20260831h";
 import {
   getAvailableOcrEngines,
   loadOcrOptions,
@@ -74,6 +74,7 @@ import {
   moveToTrash,
   normalizeState,
   permanentlyDelete,
+  purgeAllTrash,
   restoreFromTrash,
   TRASH_RETENTION_DAYS,
 } from "./trash.js";
@@ -124,6 +125,7 @@ const trashPage = document.getElementById("trash-page");
 const navLibraryBtn = document.getElementById("nav-library-btn");
 const navTrashBtn = document.getElementById("nav-trash-btn");
 const trashBackBtn = document.getElementById("trash-back-btn");
+const purgeAllTrashBtn = document.getElementById("purge-all-trash-btn");
 const trashCountBadge = document.getElementById("trash-count-badge");
 const categoryFilter = document.getElementById("category-filter");
 const searchQuery = document.getElementById("search-query");
@@ -727,6 +729,27 @@ function updateTrashBadge() {
 navLibraryBtn?.addEventListener("click", () => switchAppPage("library"));
 navTrashBtn?.addEventListener("click", () => switchAppPage("trash"));
 trashBackBtn?.addEventListener("click", () => switchAppPage("library"));
+purgeAllTrashBtn?.addEventListener("click", async () => {
+  const count = (state.trash || []).length;
+  if (!count) return;
+  if (
+    !window.confirm(
+      `إفراغ سلة المهملات نهائياً؟\nسيتم حذف ${count} ملف بشكل دائم ولا يمكن التراجع.`
+    )
+  ) {
+    return;
+  }
+  state = purgeAllTrash(state);
+  try {
+    setStatus("جارٍ إفراغ سلة المهملات…");
+    await persistState();
+    renderTrash();
+    setStatus("تم إفراغ سلة المهملات.", true);
+    setTimeout(() => setStatus("", false), 2000);
+  } catch (error) {
+    setStatus(`تعذّر إفراغ السلة: ${error.message}`, true);
+  }
+});
 
 function summarizeCategories(documents) {
   const counts = new Map();
@@ -874,6 +897,8 @@ function renderTrash() {
     trash.length === 0
       ? `سلة المهملات فارغة. الملفات المحذوفة تُحذف نهائياً بعد ${TRASH_RETENTION_DAYS} يوماً.`
       : `${trash.length} ملف في السلة — يُحذف تلقائياً بعد ${TRASH_RETENTION_DAYS} يوماً.`;
+
+  purgeAllTrashBtn?.classList.toggle("hidden", trash.length === 0);
 
   if (!trash.length) {
     trashList.innerHTML = `<p class="muted">لا توجد ملفات في سلة المهملات.</p>`;
@@ -1411,7 +1436,6 @@ export async function startApp({ user, auth }) {
 
   try {
     await hydrateDocuments(sessionPassword);
-    await hydrateOcrSpaceKey();
     applySearchOptionsToForm(loadSearchOptions());
     updateOcrEnginePanel();
     updateStoragePanel();

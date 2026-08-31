@@ -4,9 +4,9 @@ import {
   getOcrEngineLabel,
   loadOcrOptions,
 } from "./ocr-options.js";
-import { hydrateOcrSpaceKey } from "./ocr-config.js";
 
 const PUTER_SCRIPT_URL = "https://js.puter.com/v2/";
+const PADDLE_OCR_URL = "https://esm.sh/ppu-paddle-ocr@6.4.3/web";
 
 const IMAGE_EXTENSIONS = new Set([
   ".jpg",
@@ -20,7 +20,7 @@ const IMAGE_EXTENSIONS = new Set([
 ]);
 
 const MAX_EDGE = 2000;
-const OCR_TIMEOUT_MS = 120_000;
+const OCR_TIMEOUT_MS = 180_000;
 const TESSERACT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.esm.min.js";
 
 const STAGE_LABELS = {
@@ -32,10 +32,10 @@ const STAGE_LABELS = {
 
 let workerPromise = null;
 let puterPromise = null;
+let paddleServicePromise = null;
 let activeProgressCallback = null;
 
 export { getAvailableOcrEngines, loadOcrOptions, saveOcrOptions, OCR_ENGINES } from "./ocr-options.js";
-export { hydrateOcrSpaceKey } from "./ocr-config.js";
 
 export function isImageFile(filename) {
   const dot = String(filename || "").lastIndexOf(".");
@@ -91,6 +91,23 @@ async function prepareImageBlob(blob) {
   } catch {
     return blob;
   }
+}
+
+async function blobToCanvas(blob) {
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const ctx = canvas.getContext("2d", { alpha: false });
+  if (!ctx) {
+    bitmap.close();
+    throw new Error("تعذّر تحضير الصورة لمحرك PaddleOCR.");
+  }
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  return canvas;
 }
 
 function withTimeout(promise, ms, message) {
@@ -163,111 +180,6 @@ async function ocrWithTesseract(blob) {
   return data.text;
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isTransientOcrSpaceError(error, status = 0) {
-  const code = Number(status || error?.status || 0);
-  const text = String(error?.message || "").toLowerCase();
-  return (
-    code === 503 ||
-    code === 502 ||
-    code === 429 ||
-    code === 500 ||
-    text.includes("503") ||
-    text.includes("502") ||
-    text.includes("429") ||
-    text.includes("unavailable") ||
-    text.includes("timeout") ||
-    text.includes("network")
-  );
-}
-
-async function requestOcrSpace(blob, apiKey, engineVersion) {
-  const form = new FormData();
-  form.append("apikey", apiKey);
-  form.append("language", "ara");
-  form.append("isOverlayRequired", "false");
-  form.append("detectOrientation", "true");
-  form.append("scale", "true");
-  form.append("OCREngine", String(engineVersion));
-  form.append("file", blob, "image.jpg");
-
-  const res = await fetch("https://api.ocr.space/parse/image", {
-    method: "POST",
-    body: form,
-  });
-
-  let payload = {};
-  try {
-    payload = await res.json();
-  } catch {
-    payload = {};
-  }
-
-  if (!res.ok) {
-    const error = new Error(
-      payload?.ErrorMessage?.[0] ||
-        payload?.message ||
-        payload?.error ||
-        `OCR.space غير متاح حالياً (${res.status})`
-    );
-    error.status = res.status;
-    throw error;
-  }
-
-  if (payload.IsErroredOnProcessing) {
-    const error = new Error(
-      payload.ErrorMessage?.[0] ||
-        payload.ErrorDetails ||
-        "تعذّر معالجة الصورة عبر OCR.space."
-    );
-    error.status = 503;
-    throw error;
-  }
-
-  return (payload.ParsedResults || [])
-    .map((item) => item.ParsedText || "")
-    .join("\n")
-    .trim();
-}
-
-async function ocrWithOcrSpace(blob) {
-  const apiKey = await hydrateOcrSpaceKey();
-  if (!apiKey) {
-    throw new Error("مفتاح OCR.space غير مضبوط. أضف OCR_SPACE_API_KEY في GitHub Secrets ثم أعد النشر.");
-  }
-
-  activeProgressCallback?.({ stage: "upload", pct: 25, engine: OCR_ENGINES.OCR_SPACE });
-
-  const attempts = [
-    { engine: 2, delayMs: 0 },
-    { engine: 2, delayMs: 1500 },
-    { engine: 1, delayMs: 0 },
-  ];
-
-  let lastError = null;
-  for (const attempt of attempts) {
-    if (attempt.delayMs) {
-      await sleep(attempt.delayMs);
-    }
-    try {
-      activeProgressCallback?.({ stage: "ocr", pct: 50, engine: OCR_ENGINES.OCR_SPACE });
-      const text = await requestOcrSpace(blob, apiKey, attempt.engine);
-      activeProgressCallback?.({ stage: "ocr", pct: 100, engine: OCR_ENGINES.OCR_SPACE });
-      return text;
-    } catch (error) {
-      lastError = error;
-      if (!isTransientOcrSpaceError(error, error.status)) {
-        throw error;
-      }
-    }
-  }
-
-  throw lastError || new Error("OCR.space غير متاح حالياً.");
-}
-
 async function loadPuter() {
   if (globalThis.puter?.ai?.img2txt) {
     return globalThis.puter;
@@ -324,18 +236,44 @@ async function ocrWithPuter(blob) {
   throw lastError || new Error("تعذّر استخراج النص عبر Puter AI.");
 }
 
+async function getPaddleService() {
+  if (!paddleServicePromise) {
+    paddleServicePromise = (async () => {
+      activeProgressCallback?.({ stage: "load", pct: 8, engine: OCR_ENGINES.PADDLE });
+      const { PaddleOcrService, V5_ARABIC_MOBILE_MODEL } = await import(PADDLE_OCR_URL);
+      const service = new PaddleOcrService({ model: V5_ARABIC_MOBILE_MODEL });
+      await service.initialize();
+      return service;
+    })();
+  }
+  return paddleServicePromise;
+}
+
+async function ocrWithPaddle(blob) {
+  activeProgressCallback?.({ stage: "load", pct: 12, engine: OCR_ENGINES.PADDLE });
+  const service = await getPaddleService();
+  activeProgressCallback?.({ stage: "ocr", pct: 35, engine: OCR_ENGINES.PADDLE });
+  const canvas = await blobToCanvas(blob);
+  const result = await service.recognize(canvas, { flatten: true });
+  const text = String(result?.text || "").trim();
+  if (!text) {
+    throw new Error("لم يُعثر PaddleOCR على نص في الصورة.");
+  }
+  activeProgressCallback?.({ stage: "ocr", pct: 100, engine: OCR_ENGINES.PADDLE });
+  return text;
+}
+
 async function runOcrEngine(engine, blob) {
   if (engine === OCR_ENGINES.PUTER) {
     return ocrWithPuter(blob);
   }
-  if (engine === OCR_ENGINES.OCR_SPACE) {
-    return ocrWithOcrSpace(blob);
+  if (engine === OCR_ENGINES.PADDLE) {
+    return ocrWithPaddle(blob);
   }
   return ocrWithTesseract(blob);
 }
 
 export async function extractImageText(file, onProgress, options = {}) {
-  await hydrateOcrSpaceKey();
   activeProgressCallback = onProgress;
   const preferred = options.engine || loadOcrOptions().engine;
   const enginesToTry = buildOcrEngineChain(preferred);

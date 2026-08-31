@@ -1,11 +1,9 @@
-import { getOcrSpaceKeySync, hydrateOcrSpaceKey, isOcrSpaceConfigured } from "./ocr-config.js";
-
-const OCR_OPTIONS_KEY = "docshelf_ocr_options_v3";
+const OCR_OPTIONS_KEY = "docshelf_ocr_options_v4";
 
 export const OCR_ENGINES = {
   AUTO: "auto",
   PUTER: "puter",
-  OCR_SPACE: "ocrspace",
+  PADDLE: "paddle",
   TESSERACT: "tesseract",
 };
 
@@ -13,14 +11,12 @@ export const DEFAULT_OCR_OPTIONS = {
   engine: OCR_ENGINES.AUTO,
 };
 
-export { hydrateOcrSpaceKey, isOcrSpaceConfigured };
-
 export function getAvailableOcrEngines() {
   return [
     {
       id: OCR_ENGINES.AUTO,
       label: "تلقائي (سريع ثم محلي)",
-      hint: "يجرب Puter ثم OCR.space ثم Tesseract عند الحاجة",
+      hint: "يجرب Puter ثم PaddleOCR ثم Tesseract عند الحاجة",
       available: true,
     },
     {
@@ -30,12 +26,10 @@ export function getAvailableOcrEngines() {
       available: true,
     },
     {
-      id: OCR_ENGINES.OCR_SPACE,
-      label: "سحابي — OCR.space",
-      hint: isOcrSpaceConfigured()
-        ? "يتطلب OCR_SPACE_API_KEY — يتحول إلى البدائل عند الفشل"
-        : "أضف OCR_SPACE_API_KEY في GitHub Secrets لتفعيله",
-      available: isOcrSpaceConfigured(),
+      id: OCR_ENGINES.PADDLE,
+      label: "محلي — PaddleOCR",
+      hint: "يعمل في المتصفح — دقة عالية للعربية (~12 م.ب في التحميل الأول)",
+      available: true,
     },
     {
       id: OCR_ENGINES.TESSERACT,
@@ -43,7 +37,7 @@ export function getAvailableOcrEngines() {
       hint: "مجاني بالكامل — أبطأ في المرة الأولى",
       available: true,
     },
-  ].filter((item) => item.available);
+  ];
 }
 
 export function loadOcrOptions() {
@@ -86,26 +80,24 @@ export function buildOcrEngineChain(preferred = loadOcrOptions().engine) {
   const chain = [];
   const add = (id) => {
     if (!id) return;
-    if (id === OCR_ENGINES.OCR_SPACE && !isOcrSpaceConfigured()) return;
     if (!chain.includes(id)) chain.push(id);
   };
 
   if (preferred === OCR_ENGINES.TESSERACT) return [OCR_ENGINES.TESSERACT];
-  if (preferred === OCR_ENGINES.OCR_SPACE) {
-    add(OCR_ENGINES.OCR_SPACE);
-    add(OCR_ENGINES.PUTER);
+  if (preferred === OCR_ENGINES.PADDLE) {
+    add(OCR_ENGINES.PADDLE);
     add(OCR_ENGINES.TESSERACT);
     return chain;
   }
   if (preferred === OCR_ENGINES.PUTER) {
     add(OCR_ENGINES.PUTER);
-    add(OCR_ENGINES.OCR_SPACE);
+    add(OCR_ENGINES.PADDLE);
     add(OCR_ENGINES.TESSERACT);
     return chain;
   }
 
   add(OCR_ENGINES.PUTER);
-  add(OCR_ENGINES.OCR_SPACE);
+  add(OCR_ENGINES.PADDLE);
   add(OCR_ENGINES.TESSERACT);
   return chain;
 }

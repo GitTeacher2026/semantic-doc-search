@@ -257,7 +257,6 @@
             <select id="ocr-engine" class="ocr-engine-select" aria-label="محرك استخراج النص من الصور">
               <option value="auto">تلقائي</option>
               <option value="tesseract">محلي — Tesseract</option>
-              <option value="ocrspace" hidden disabled>سحابي — OCR.space</option>
             </select>
             <p id="ocr-engine-hint" class="ocr-engine-hint muted">محلي (عربي + إنجليزي) — لا يحتاج مفتاح API</p>
           </div>
@@ -275,7 +274,7 @@
                 <span class="type-pill text">نص</span>
                 <span class="type-pill image">صور</span>
               </div>
-              <p class="drop-zone-ocr muted">الصور — Puter AI (سريع) · OCR.space · Tesseract (محلي)</p>
+              <p class="drop-zone-ocr muted">الصور — Puter AI (سريع) · PaddleOCR · Tesseract (محلي)</p>
             </div>
           </div>
           <div id="pending-files" class="pending-files-grid hidden"></div>
@@ -337,7 +336,12 @@
     <div id="trash-page" class="app-page hidden">
       <section class="panel trash-page-panel">
         <h2>سلة المهملات</h2>
-        <p id="trash-meta" class="muted">الملفات المحذوفة تُحذف نهائياً بعد 30 يوماً.</p>
+        <div class="trash-toolbar">
+          <p id="trash-meta" class="muted">الملفات المحذوفة تُحذف نهائياً بعد 30 يوماً.</p>
+          <button id="purge-all-trash-btn" class="btn danger small hidden" type="button">
+            إفراغ السلة نهائياً
+          </button>
+        </div>
         <div id="trash-list" class="trash-list"></div>
         <button id="trash-back-btn" class="btn ghost" type="button">العودة إلى المكتبة</button>
       </section>

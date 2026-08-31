@@ -9,7 +9,7 @@
 
 - صفحة تسجيل دخول قبل الوصول إلى أي وظيفة
 - واجهة عربية كاملة مع دعم RTL
-- رفع PDF وOffice ونصوص **والصور** (OCR: Puter AI · OCR.space · Tesseract)
+- رفع PDF وOffice ونصوص **والصور** (OCR: Puter AI · PaddleOCR · Tesseract)
 - تخزين سحابي مشفّر على **GitHub** فقط
 - بحث فوري BM25 مع خيارات متقدمة ووضع داكن
 
@@ -65,22 +65,21 @@
 
 ## استخراج النص من الصور (OCR)
 
-ثلاثة محركات — اختر من القائمة فوق منطقة الرفع:
+أربعة أوضاع — اختر من القائمة فوق منطقة الرفع:
 
 | المحرك | المفتاح | الملاحظات |
 |--------|---------|-----------|
 | **Puter AI** (افتراضي في الوضع التلقائي) | لا يحتاج مفتاح | سريع — AWS/Mistral OCR عبر [Puter.js](https://docs.puter.com/AI/img2txt/) |
-| **OCR.space** | `OCR_SPACE_API_KEY` | سحابي — اختياري |
+| **PaddleOCR** | لا يحتاج مفتاح | محلي في المتصفح — دقة عالية للعربية عبر [ppu-paddle-ocr](https://www.npmjs.com/package/ppu-paddle-ocr) |
 | **Tesseract** | لا يحتاج مفتاح | محلي بالكامل — احتياطي موثوق |
 
-**الوضع التلقائي:** Puter → OCR.space (إن وُجد المفتاح) → Tesseract عند الفشل.
+**الوضع التلقائي:** Puter → PaddleOCR → Tesseract عند الفشل.
 
-### إعداد OCR.space (اختياري)
+## سلة المهملات
 
-1. سجّل مجاناً على https://ocr.space/ocrapi
-2. انسخ **API Key**
-3. في المستودع: Secret باسم **`OCR_SPACE_API_KEY`**
-4. أعد تشغيل **Deploy GitHub Pages**
+- الملفات المحذوفة تبقى 30 يوماً ثم تُحذف تلقائياً.
+- يمكن **استعادة** ملف واحد أو **حذفه نهائياً**.
+- زر **إفراغ السلة نهائياً** يحذف كل الملفات في السلة دفعة واحدة.
 
 ## ربط Cursor بالمستودع الجديد
 
@@ -109,7 +108,7 @@ streamlit run app.py --server.port 8512 --server.address 0.0.0.0
 ```
 docs/                     # نسخة GitHub Pages
 docs/js/storage.js        # تخزين مشفّر عبر GitHub API
-docs/js/ocr.js            # OCR محلي (Tesseract.js)
+docs/js/ocr.js            # OCR (Puter AI · PaddleOCR · Tesseract)
 .github/workflows/pages.yml
 data/browser-store.enc.json
 data/users.json
