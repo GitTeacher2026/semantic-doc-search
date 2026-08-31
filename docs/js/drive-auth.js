@@ -85,10 +85,10 @@ function formatOAuthError(response) {
     return [
       "رفض Google الوصول (403 access_denied).",
       "1) افتح Google Cloud → OAuth consent screen.",
-      "2) أضف amanyak267@gmail.com ضمن Test users (إذا التطبيق في وضع Testing).",
+      `2) أضف ${ADMIN_EMAIL} ضمن Test users (إذا التطبيق في وضع Testing).`,
       "3) من Scopes أضف: drive.file و userinfo.email.",
       "4) أو انشر التطبيق Publish app للاستخدام الشخصي.",
-      "5) سجّل الدخول في النافذة المنبثقة بحساب amanyak267@gmail.com فقط.",
+      `5) سجّل الدخول في النافذة المنبثقة بحساب ${ADMIN_EMAIL} فقط.`,
     ].join(" ");
   }
   return response.error_description || response.error || "تعذّر تسجيل الدخول إلى Google Drive.";

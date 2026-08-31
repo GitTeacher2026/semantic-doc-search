@@ -63,6 +63,8 @@ jobs:
           FORCE_ALL: ${{ github.event.inputs.force_all_pending || 'false' }}
 
       - name: Build email content
+        env:
+          SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: |
           node <<'NODE'
           const fs = require('fs');
@@ -72,7 +74,7 @@ jobs:
             fs.writeFileSync('email-body.txt', '');
             process.exit(0);
           }
-          const site = 'https://amany-moh-sy.github.io/semantic-doc-search';
+          const site = (process.env.SITE_URL || '').replace(/\/$/, '');
           const lines = targets.flatMap((u) => {
             const approve = `${site}/?action=approve&token=${encodeURIComponent(u.approvalToken)}`;
             const reject = `${site}/?action=reject&token=${encodeURIComponent(u.approvalToken)}`;
@@ -132,7 +134,7 @@ jobs:
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
           subject: ${{ steps.subject.outputs.text }}
-          to: amanyak267@gmail.com
+          to: reagon.gm@pm.me
           from: مخزن الوثائق <${{ secrets.MAIL_USERNAME }}>
           body: file://email-body.txt
 
@@ -158,7 +160,7 @@ jobs:
             },
             body: JSON.stringify({
               from: 'مخزن الوثائق <onboarding@resend.dev>',
-              to: ['amanyak267@gmail.com'],
+              to: ['reagon.gm@pm.me'],
               subject,
               text,
             }),
@@ -173,7 +175,7 @@ jobs:
         if: steps.check.outputs.has_email == 'true' && env.HAS_MAIL != 'true' && env.HAS_WEB3FORMS != 'true' && env.HAS_RESEND != 'true'
         run: |
           echo "::warning::No email secrets configured. Add one of:"
-          echo "  - MAIL_USERNAME + MAIL_PASSWORD (Gmail App Password for amanyak267@gmail.com)"
+          echo "  - MAIL_USERNAME + MAIL_PASSWORD (SMTP for reagon.gm@pm.me — e.g. ProtonMail Bridge or Resend)"
           echo "  - WEB3FORMS_ACCESS_KEY (from web3forms.com)"
           echo "  - RESEND_API_KEY (from resend.com)"
           echo ""

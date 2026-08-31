@@ -11,13 +11,14 @@
 - مستكشف ملفات منظم حسب التصنيف ونوع الملف
 - تصنيف تلقائي حسب تداخل الكلمات المفتاحية
 - بحث فوري BM25 (نسخة Streamlit ونسخة GitHub Pages)
-- **تخزين سحابي** — GitHub أو Google Drive (قابل للاختيار عند توفر الاثنين)
+- **تخزين سحابي على GitHub** — الملفات والفهرس المشفّر داخل المستودع (الوضع الافتراضي)
 
 ## بيانات الدخول
 
 | الحقل | القيمة |
 |-------|--------|
 | اسم المستخدم | `admin` |
+| البريد الإداري | `reagon.gm@pm.me` |
 
 كلمة مرور المسؤول تُدار عبر `data/users.json` (نسخة GitHub Pages) أو متغيرات البيئة (نسخة Streamlit):
 
@@ -26,29 +27,38 @@ export DOCSHELF_USERNAME=admin
 export DOCSHELF_PASSWORD=your_password
 ```
 
-## التخزين السحابي (GitHub أو Google Drive)
-
-يمكن حفظ الملفات والفهرس المشفّر في أحد المصدرين:
+## التخزين السحابي (GitHub)
 
 | المصدر | السر المطلوب | السلوك |
 |--------|-------------|--------|
 | **GitHub** | `DOCSHELF_GITHUB_TOKEN` | الملفات والفهرس داخل `data/browser-store.enc.json` في المستودع |
-| **Google Drive** | `GOOGLE_CLIENT_ID` | الملفات في مجلد `مخزن الوثائق` حسب التصنيف + فهرس مشفّر في Drive |
 
-إذا كان كلاهما مضبوطاً، يظهر في التطبيق خيار **مكان التخزين** للتبديل بين GitHub و Google Drive.
+> **ملاحظة:** Google Drive و Gemini اختياريان. بدون `GOOGLE_CLIENT_ID` يعمل التطبيق على GitHub فقط.
 
 ### إعداد GitHub Token (للتخزين على GitHub)
 
-1. افتح [GitHub → Settings → Developer settings → Personal access tokens](https://github.com/settings/tokens)
-2. أنشئ **Fine-grained token** أو **Classic token** بصلاحية **`repo`** على مستودع `semantic-doc-search`
-3. في GitHub: **Settings** → **Secrets and variables** → **Actions** → أضف سراً باسم **`DOCSHELF_GITHUB_TOKEN`**
-4. أعد تشغيل workflow **Deploy GitHub Pages**
+1. سجّل الدخول بحساب GitHub الجديد (**reagon.gm@pm.me**)
+2. افتح [GitHub → Settings → Developer settings → Personal access tokens](https://github.com/settings/tokens)
+3. أنشئ **Fine-grained token** بصلاحية **`repo`** على مستودع `semantic-doc-search`
+4. في المستودع: **Settings** → **Secrets and variables** → **Actions** → أضف:
+   - **`DOCSHELF_GITHUB_TOKEN`** — التوكن الذي أنشأته
+   - **`DOCSHELF_VAULT_PASSWORD`** — كلمة مرور فك تشفير المستندات (اتركها كما كانت إن كنت تنقل بيانات قديمة)
+5. أعد تشغيل workflow **Deploy GitHub Pages**
 
-إذا ظهر **`Bad credentials`** بعد رفع صورة (بعد اكتمال OCR): المفتاح منتهٍ أو ملغى — أنشئ توكناً جديداً وحدّث السر ثم أعد النشر. الصور على GitHub تُحفظ كنص مستخرج فقط (بدون نسخة الصورة الأصلية) لتقليل الحجم.
+إذا ظهر **`Bad credentials`**: أنشئ توكناً جديداً وحدّث السر ثم أعد النشر.
 
-### إعداد Google Drive (مرة واحدة)
+### نقل المشروع إلى حساب GitHub جديد
 
-1. افتح [Google Cloud Console](https://console.cloud.google.com/) وسجّل الدخول بحساب **amanyak267@gmail.com**
+1. أنشئ حساباً على https://github.com/signup بالبريد **reagon.gm@pm.me**
+2. أنشئ مستودعاً عاماً باسم `semantic-doc-search`
+3. ارفع هذا الكود إلى المستودع الجديد (`git push`)
+4. فعّل **GitHub Pages** من **Settings → Pages → Source: GitHub Actions**
+5. أضف الأسرار (`DOCSHELF_GITHUB_TOKEN`, `DOCSHELF_VAULT_PASSWORD`) في المستودع الجديد
+6. عنوان الموقع يُحدَّد تلقائياً: `https://<اسم-المستخدم>.github.io/semantic-doc-search/`
+
+### إعداد Google Drive (اختياري — قديم)
+
+1. افتح [Google Cloud Console](https://console.cloud.google.com/) بحساب Google منفصل
 2. أنشئ مشروعاً جديداً (أو اختر مشروعاً موجوداً)
 3. من **APIs & Services** → **Library**، فعّل **Google Drive API**
 4. من **APIs & Services** → **OAuth consent screen**:
@@ -57,12 +67,12 @@ export DOCSHELF_PASSWORD=your_password
    - من **Scopes** → **Add or Remove Scopes** وأضف:
      - `.../auth/drive.file` (Google Drive)
      - `.../auth/userinfo.email` (See your primary Google Account email address)
-   - من **Test users** → **Add users** → أضف: `amanyak267@gmail.com`
+   - من **Test users** → **Add users** → أضف بريد المسؤول: `reagon.gm@pm.me`
    - (اختياري للاستخدام الشخصي) اضغط **Publish app** إذا استمر الرفض
 5. من **APIs & Services** → **Credentials** → **Create Credentials** → **OAuth client ID**:
    - نوع التطبيق: **Web application**
    - **Authorized JavaScript origins** (مهم جداً):
-     - `https://amany-moh-sy.github.io`
+     - `https://<اسم-مستخدمك>.github.io`
    - لا تستخدم Client Secret في هذا المشروع — المطلوب **Client ID** فقط
 6. انسخ **Client ID** (ينتهي بـ `.apps.googleusercontent.com`)
 7. في GitHub: **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
@@ -72,18 +82,18 @@ export DOCSHELF_PASSWORD=your_password
 9. بعد النشر، افتح الموقع واضغط **Hard refresh** (Ctrl+Shift+R)
 
 **إذا ظهر `Error 403: access_denied`:**
-- التطبيق في وضع **Testing** ولم تُضف `amanyak267@gmail.com` في **Test users**
+- التطبيق في وضع **Testing** ولم يُضف `reagon.gm@pm.me` في **Test users**
 - أو لم تُضف Scopes المطلوبة في شاشة الموافقة (drive.file + email)
-- أو سجّلت الدخول بحساب Google آخر غير `amanyak267@gmail.com`
+- أو سجّلت الدخول بحساب Google آخر غير بريد المسؤول
 - الحل: أضف الحساب في Test users، أو انشر التطبيق **Publish app**، ثم جرّب مرة أخرى
 
 **إذا ظهر `Error 401: invalid_client`:**
 - الـ Client ID غير موجود في Google أو لم يُنشر بعد في الموقع
 - تأكد أن السرّ اسمه بالضبط `GOOGLE_CLIENT_ID` وليس Client Secret
-- تأكد أن origin `https://amany-moh-sy.github.io` مضاف في OAuth client
+- تأكد أن origin `https://<اسم-مستخدمك>.github.io` مضاف في OAuth client
 - تأكد أنك أعدت نشر GitHub Pages بعد إضافة السرّ
 
-عند أول تسجيل دخول بعد الإعداد الصحيح، سيُطلب ربط Google Drive بحساب **amanyak267@gmail.com**. الملفات تُرفع تلقائياً إلى:
+عند أول تسجيل دخول بعد الإعداد الصحيح، سيُطلب ربط Google Drive بحساب **reagon.gm@pm.me**. الملفات تُرفع تلقائياً إلى:
 
 ```
 مخزن الوثائق/

@@ -36,6 +36,8 @@ jobs:
           WEB3FORMS_ACCESS_KEY: ${{ secrets.WEB3FORMS_ACCESS_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           node <<'NODE'
           const fs = require("fs");
@@ -44,18 +46,20 @@ jobs:
           const web3formsKey = process.env.WEB3FORMS_ACCESS_KEY || "";
           const googleClientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
           const geminiApiKey = (process.env.GEMINI_API_KEY || "").trim();
+          const [owner, repo] = String(process.env.GITHUB_REPOSITORY || "owner/repo").split("/");
+          const siteUrl = `https://${owner}.github.io/${repo}/`;
           if (geminiApiKey && !/^(AIza|AQ\.)/.test(geminiApiKey)) {
             console.warn("WARNING: GEMINI_API_KEY does not look like a Google AI Studio key (expected AIza… or AQ.…)");
           }
           const config = `/** Generated during deploy — do not edit manually. */
-          export const GITHUB_OWNER = "amany-moh-sy";
-          export const GITHUB_REPO = "semantic-doc-search";
+          export const GITHUB_OWNER = ${JSON.stringify(owner)};
+          export const GITHUB_REPO = ${JSON.stringify(repo)};
           export const GITHUB_BRANCH = "main";
           export const GITHUB_TOKEN = ${JSON.stringify(token)};
           export const STORE_PATH = "data/browser-store.enc.json";
           export const USERS_PATH = "data/users.json";
-          export const ADMIN_EMAIL = "amanyak267@gmail.com";
-          export const SITE_URL = "https://amany-moh-sy.github.io/semantic-doc-search/";
+          export const ADMIN_EMAIL = "reagon.gm@pm.me";
+          export const SITE_URL = ${JSON.stringify(siteUrl)};
           export const VAULT_PASSWORD = ${JSON.stringify(vaultPassword)};
           export const WEB3FORMS_ACCESS_KEY = ${JSON.stringify(web3formsKey)};
           export const GOOGLE_CLIENT_ID = ${JSON.stringify(googleClientId)};

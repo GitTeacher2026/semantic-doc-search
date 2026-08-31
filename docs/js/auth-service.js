@@ -530,7 +530,7 @@ export async function resendPendingSignupEmails() {
     total: pending.length,
     message:
       sent > 0
-        ? `تم إرسال ${sent} بريد إلى amanyak267@gmail.com. تحقق من صندوق الوارد والرسائل غير المرغوبة.`
+        ? `تم إرسال ${sent} بريد إلى ${ADMIN_EMAIL}. تحقق من صندوق الوارد والرسائل غير المرغوبة.`
         : lastError || "تعذّر إرسال البريد.",
   };
 }
