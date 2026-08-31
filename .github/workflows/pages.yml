@@ -36,7 +36,6 @@ jobs:
           WEB3FORMS_ACCESS_KEY: ${{ secrets.WEB3FORMS_ACCESS_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        env:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           node <<'NODE'
