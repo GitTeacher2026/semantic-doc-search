@@ -640,7 +640,7 @@ export function renderFileBrowser(documents, options = {}) {
   folderRecords = options.folders || [];
   rootElement.innerHTML = renderContent(documents);
   bindActions(rootElement);
-  bindFolderActions(rootElement, onChange);
+  bindFolderActions(rootElement, options.onChange);
   bindDragDrop(rootElement, options.onChange);
   bindNavigation(rootElement, options.onChange);
 }
