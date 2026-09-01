@@ -142,6 +142,8 @@ import {
 import {
   canSyncGitHubMega,
   describeSyncSummary,
+  loadMergedGitHubMegaIndex,
+  saveMergedGitHubMegaIndex,
   syncDocumentsGitHubMega,
 } from "./storage-sync.js";
 import { isGitHubStorageConfigured } from "./github-storage.js";
@@ -1305,6 +1307,11 @@ async function handleSyncGitHubMega() {
   }
 
   try {
+    setStatus("جارٍ تحميل الفهارس من GitHub و MEGA…");
+    const merged = await loadMergedGitHubMegaIndex(sessionPassword);
+    state = normalizeState(merged.state);
+    state.folders = syncFoldersFromDocuments(state.documents, state.folders);
+
     setStatus("جارٍ المزامنة بين GitHub و MEGA…");
     const result = await syncDocumentsGitHubMega(state.documents, {
       onProgress: ({ index, total, filename }) => {
@@ -1312,7 +1319,10 @@ async function handleSyncGitHubMega() {
       },
     });
     state.documents = result.documents;
-    await persistState();
+    state.folders = syncFoldersFromDocuments(state.documents, state.folders);
+
+    setStatus("جارٍ حفظ الفهارس في GitHub و MEGA…");
+    await saveMergedGitHubMegaIndex(sessionPassword, state, merged);
     renderLibrary();
     setStatus(describeSyncSummary(result), true);
     setTimeout(() => setStatus("", false), 3500);

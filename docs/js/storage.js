@@ -78,8 +78,7 @@ export function isUsingRemoteFileStorage() {
   return isUsingDriveStorage() || isUsingMegaStorage() || isUsingOneDriveStorage();
 }
 
-async function fetchRemoteStore() {
-  const mode = getResolvedStorageMode();
+async function fetchRemoteStoreForMode(mode) {
   if (mode === STORAGE_MODES.GITHUB && isGitHubStorageConfigured()) {
     const { envelope, sha } = await fetchGitHubStore();
     return { envelope, handle: { type: STORAGE_MODES.GITHUB, sha } };
@@ -99,8 +98,11 @@ async function fetchRemoteStore() {
   return { envelope: null, handle: null };
 }
 
-async function uploadRemoteStore(envelope, handle) {
-  const mode = handle?.type || getResolvedStorageMode();
+async function fetchRemoteStore() {
+  return fetchRemoteStoreForMode(getResolvedStorageMode());
+}
+
+async function uploadRemoteStoreForMode(mode, envelope, handle) {
   if (mode === STORAGE_MODES.GITHUB) {
     const sha = await uploadGitHubStore(envelope, handle?.sha ?? null);
     return { type: STORAGE_MODES.GITHUB, sha };
@@ -118,6 +120,63 @@ async function uploadRemoteStore(envelope, handle) {
     return { type: STORAGE_MODES.ONEDRIVE, fileId };
   }
   return handle;
+}
+
+async function uploadRemoteStore(envelope, handle) {
+  return uploadRemoteStoreForMode(handle?.type || getResolvedStorageMode(), envelope, handle);
+}
+
+async function decryptEnvelope(password, envelope) {
+  const salt = base64ToBytes(envelope.salt);
+  const key = await deriveKey(password, salt);
+  const decrypted = await decryptJson(key, envelope.iv, envelope.ciphertext);
+  return { state: finalizeState(decrypted), crypto: { salt, key } };
+}
+
+async function buildEnvelope(password, state, envelopeCrypto) {
+  const salt = envelopeCrypto?.salt || crypto.getRandomValues(new Uint8Array(16));
+  const key = envelopeCrypto?.key || (await deriveKey(password, salt));
+  const { iv, ciphertext } = await encryptJson(key, finalizeState(state));
+  return {
+    envelope: {
+      version: 1,
+      salt: bytesToBase64(salt),
+      iv,
+      ciphertext,
+    },
+    crypto: { salt, key },
+  };
+}
+
+export async function loadDocumentsForMode(password, mode) {
+  if (mode === STORAGE_MODES.LOCAL || !isModeReady(mode)) {
+    return { state: finalizeState(loadLocalDocuments()), handle: null, crypto: null };
+  }
+
+  const { envelope, handle } = await fetchRemoteStoreForMode(mode);
+  if (!envelope) {
+    return { state: normalizeState({}), handle, crypto: null };
+  }
+
+  try {
+    const { state, crypto } = await decryptEnvelope(password, envelope);
+    return { state, handle, crypto };
+  } catch {
+    throw new Error("كلمة المرور غير صحيحة أو بيانات التخزين تالفة.");
+  }
+}
+
+export async function saveDocumentsForMode(password, state, mode, handle, crypto) {
+  const payload = finalizeState(state);
+  if (mode === STORAGE_MODES.LOCAL || !isModeReady(mode)) {
+    saveLocalDocuments(payload);
+    return { handle, crypto };
+  }
+
+  const { envelope, crypto: nextCrypto } = await buildEnvelope(password, payload, crypto);
+  const nextHandle = await uploadRemoteStoreForMode(mode, envelope, handle);
+  saveLocalDocuments(payload);
+  return { handle: nextHandle, crypto: nextCrypto };
 }
 
 export async function loadDocuments(password) {
@@ -139,12 +198,11 @@ export async function loadDocuments(password) {
     return normalizeState({});
   }
 
-  currentSalt = base64ToBytes(envelope.salt);
-  sessionKey = await deriveKey(password, currentSalt);
-
   try {
-    const decrypted = await decryptJson(sessionKey, envelope.iv, envelope.ciphertext);
-    return finalizeState(decrypted);
+    const { state, crypto: envelopeCrypto } = await decryptEnvelope(password, envelope);
+    currentSalt = envelopeCrypto.salt;
+    sessionKey = envelopeCrypto.key;
+    return state;
   } catch {
     throw new Error("كلمة المرور غير صحيحة أو بيانات التخزين تالفة.");
   }
@@ -157,18 +215,12 @@ export async function saveDocuments(password, state) {
     return;
   }
 
-  if (!sessionKey || !currentSalt) {
-    currentSalt = currentSalt || crypto.getRandomValues(new Uint8Array(16));
-    sessionKey = await deriveKey(password, currentSalt);
-  }
-
-  const { iv, ciphertext } = await encryptJson(sessionKey, payload);
-  const envelope = {
-    version: 1,
-    salt: bytesToBase64(currentSalt),
-    iv,
-    ciphertext,
-  };
+  const { envelope, crypto: envelopeCrypto } = await buildEnvelope(password, payload, {
+    salt: currentSalt,
+    key: sessionKey,
+  });
+  currentSalt = envelopeCrypto.salt;
+  sessionKey = envelopeCrypto.key;
 
   try {
     remoteHandle = await uploadRemoteStore(envelope, remoteHandle);

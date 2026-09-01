@@ -23,7 +23,7 @@ const DEFAULT_STATE = {
   query: "",
   view: "grid",
   sort: "name",
-  showAll: false,
+  showAll: true,
 };
 
 let browserState = loadBrowserState();
@@ -84,10 +84,14 @@ function normalizeQuery(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function getStorageFilteredDocuments(documents) {
+  return documents.filter((doc) =>
+    documentMatchesActiveStorage(doc, { showAll: browserState.showAll })
+  );
+}
+
 function getVisibleDocuments(documents) {
-  return documents
-    .filter((doc) => documentMatchesActiveStorage(doc, { showAll: browserState.showAll }))
-    .filter((doc) => isDocumentAccessible(doc));
+  return getStorageFilteredDocuments(documents).filter((doc) => isDocumentAccessible(doc));
 }
 
 function filterDocuments(documents) {
@@ -138,12 +142,12 @@ function sortDocuments(documents) {
 }
 
 function collectNavData(documents) {
-  const visible = getVisibleDocuments(documents);
+  const storageFiltered = getStorageFilteredDocuments(documents);
   const storages = new Map();
   const categories = new Map();
   const groups = new Map();
 
-  for (const doc of visible) {
+  for (const doc of storageFiltered) {
     const storage = inferDocumentStorage(doc);
     const category = doc.category || "عام";
     const group = doc.fileGroup || fileGroup(doc.filename);
@@ -154,8 +158,15 @@ function collectNavData(documents) {
     groups.set(groupKey, (groups.get(groupKey) || 0) + 1);
   }
 
+  for (const folder of folderRecords) {
+    const category = folder?.name;
+    if (!category || categories.has(category)) continue;
+    const count = storageFiltered.filter((doc) => (doc.category || "عام") === category).length;
+    categories.set(category, count);
+  }
+
   return {
-    total: visible.length,
+    total: storageFiltered.length,
     storages: [...storages.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ar")),
     categories: [...categories.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ar")),
     groups,

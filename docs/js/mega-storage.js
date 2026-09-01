@@ -47,6 +47,10 @@ async function findChildFile(parent, name) {
   );
 }
 
+function extractMegaNodeId(uploaded) {
+  return uploaded?.nodeId || uploaded?.node?.nodeId || uploaded?.downloadId || null;
+}
+
 export async function uploadDocumentFile(category, filename, blob) {
   const root = await getRootFolder();
   const categoryFolder = await getOrCreateChildFolder(root, sanitizeFolderName(category));
@@ -66,7 +70,11 @@ export async function uploadDocumentFile(category, filename, blob) {
       bytes
     )
     .complete;
-  return uploaded.nodeId;
+  const nodeId = extractMegaNodeId(uploaded);
+  if (!nodeId) {
+    throw new Error(`تعذّر الحصول على معرّف الملف في MEGA بعد رفع «${safeName}».`);
+  }
+  return nodeId;
 }
 
 export async function downloadMegaFile(nodeId) {

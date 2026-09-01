@@ -10,8 +10,10 @@ export const STORAGE_BACKENDS = {
 };
 
 export function inferDocumentStorage(doc) {
+  if (doc?.fileData && doc?.megaFileId) {
+    return getActiveStorageBackend();
+  }
   if (doc?.storageBackend) return doc.storageBackend;
-  if (doc?.fileData && doc?.megaFileId) return getActiveStorageBackend();
   if (doc?.onedriveFileId) return STORAGE_BACKENDS.ONEDRIVE;
   if (doc?.megaFileId) return STORAGE_BACKENDS.MEGA;
   if (doc?.driveFileId) return STORAGE_BACKENDS.DRIVE;
@@ -67,5 +69,6 @@ export function getDocumentStoragePath(doc) {
 
 export function documentMatchesActiveStorage(doc, { showAll = false } = {}) {
   if (showAll) return true;
+  if (doc?.fileData && doc?.megaFileId) return true;
   return inferDocumentStorage(doc) === getActiveStorageBackend();
 }
