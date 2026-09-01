@@ -751,10 +751,11 @@ function renderPendingFolderOptions(selected = "") {
   const categories = getExistingCategories();
   const options = [
     `<option value=""${selected === "" ? " selected" : ""}>— اختر مجلداً —</option>`,
-    ...categories.map(
-      (category) =>
-        `<option value="${escapeHtml(category)}"${selected === category ? " selected" : ""}>${escapeHtml(category)}</option>`
-    ),
+    ...categories.map((category) => {
+      const locked = getFolderByName(state.folders, category)?.isLocked;
+      const label = locked ? `${category} 🔒` : category;
+      return `<option value="${escapeHtml(category)}"${selected === category ? " selected" : ""}>${escapeHtml(label)}</option>`;
+    }),
     `<option value="__new__"${selected === "__new__" ? " selected" : ""}>+ مجلد جديد…</option>`,
   ];
   return options.join("");
