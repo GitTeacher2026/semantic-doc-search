@@ -1,3 +1,5 @@
+import { PUTER_AUTH_TOKEN } from "./config.js";
+
 const PUTER_SCRIPT_URL = "https://js.puter.com/v2/";
 const EMAIL_KEY = "docshelf_puter_email";
 const TOKEN_KEY = "docshelf_puter_token";
@@ -20,6 +22,14 @@ function isLikelyApiToken(value) {
   return token.length >= 24 && !/\s/.test(token);
 }
 
+export function getConfiguredPuterToken() {
+  return String(PUTER_AUTH_TOKEN || "").trim();
+}
+
+export function isPuterPreconfigured() {
+  return Boolean(getConfiguredPuterToken());
+}
+
 export function getPuterEmail() {
   return sessionStorage.getItem(EMAIL_KEY) || "";
 }
@@ -28,7 +38,12 @@ export function getStoredPuterToken() {
   return sessionStorage.getItem(TOKEN_KEY) || "";
 }
 
+function getActivePuterToken() {
+  return getStoredPuterToken() || getConfiguredPuterToken();
+}
+
 export function isPuterConnected() {
+  if (isPuterPreconfigured()) return true;
   if (globalThis.puter?.authToken) return true;
   if (getStoredPuterToken()) return true;
   try {
@@ -41,10 +56,13 @@ export function isPuterConnected() {
 export async function getPuterUserLabel() {
   try {
     const puter = await loadPuter();
-    if (!puter.authToken && !puter.auth?.isSignedIn?.()) return getPuterEmail();
+    if (!puter.authToken && !puter.auth?.isSignedIn?.()) {
+      return isPuterPreconfigured() ? "Puter AI" : getPuterEmail();
+    }
     const user = await puter.auth.getUser();
     return user?.username || user?.email || getPuterEmail() || "Puter";
   } catch {
+    if (isPuterPreconfigured()) return "Puter AI";
     return getPuterEmail() || "Puter";
   }
 }
@@ -78,9 +96,9 @@ export async function loadPuter() {
     throw new Error("Puter.js غير متاح في هذا المتصفح.");
   }
 
-  const savedToken = getStoredPuterToken();
-  if (savedToken && !puter.authToken) {
-    puter.setAuthToken(savedToken);
+  const token = getActivePuterToken();
+  if (token && !puter.authToken) {
+    puter.setAuthToken(token);
   }
 
   return puter;
@@ -90,7 +108,34 @@ async function verifyPuterSession(puter) {
   if (!puter.authToken && !puter.auth?.isSignedIn?.()) {
     throw new Error("لم يكتمل تسجيل الدخول إلى Puter.");
   }
-  await puter.auth.getUser();
+  try {
+    await puter.auth.getUser();
+  } catch {
+    if (!puter.authToken) {
+      throw new Error("لم يكتمل تسجيل الدخول إلى Puter.");
+    }
+    // JWT/API tokens may not return a user profile but still work for AI calls.
+  }
+}
+
+async function applyToken(puter, token, { persist = false } = {}) {
+  const secret = String(token || "").trim();
+  if (!secret) return false;
+
+  puter.setAuthToken(secret);
+  try {
+    await verifyPuterSession(puter);
+    if (persist) {
+      sessionStorage.setItem(TOKEN_KEY, secret);
+    }
+    return true;
+  } catch (error) {
+    puter.setAuthToken("");
+    if (persist) {
+      sessionStorage.removeItem(TOKEN_KEY);
+    }
+    throw error;
+  }
 }
 
 export async function loginToPuter({ email = "", password = "" } = {}) {
@@ -103,14 +148,10 @@ export async function loginToPuter({ email = "", password = "" } = {}) {
   }
 
   if (secret && isLikelyApiToken(secret)) {
-    puter.setAuthToken(secret);
     try {
-      await verifyPuterSession(puter);
-      sessionStorage.setItem(TOKEN_KEY, secret);
+      await applyToken(puter, secret, { persist: true });
       return puter;
-    } catch (error) {
-      puter.setAuthToken("");
-      sessionStorage.removeItem(TOKEN_KEY);
+    } catch {
       throw new Error("رمز Puter API غير صالح. أنشئ رمزاً من puter.com/dashboard.");
     }
   }
@@ -137,14 +178,33 @@ export async function loginToPuter({ email = "", password = "" } = {}) {
 
 export async function ensurePuterConnected() {
   const puter = await loadPuter();
+
   if (puter.authToken || puter.auth?.isSignedIn?.()) {
     try {
       await verifyPuterSession(puter);
       return puter;
     } catch {
-      logoutPuter();
+      puter.setAuthToken("");
     }
   }
+
+  const savedToken = getStoredPuterToken();
+  if (savedToken) {
+    try {
+      await applyToken(puter, savedToken);
+      return puter;
+    } catch {
+      sessionStorage.removeItem(TOKEN_KEY);
+      puter.setAuthToken("");
+    }
+  }
+
+  const configToken = getConfiguredPuterToken();
+  if (configToken) {
+    await applyToken(puter, configToken);
+    return puter;
+  }
+
   throw new Error("يلزم تسجيل الدخول إلى Puter AI أولاً — أدخل رمز API أو اتصل بحساب Puter.");
 }
 
@@ -156,5 +216,11 @@ export function logoutPuter() {
     /* ignore */
   }
   sessionStorage.removeItem(TOKEN_KEY);
+
+  const configToken = getConfiguredPuterToken();
+  if (configToken && globalThis.puter) {
+    globalThis.puter.setAuthToken(configToken);
+  }
+
   puterPromise = null;
 }

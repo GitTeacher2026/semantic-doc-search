@@ -18,14 +18,16 @@ import { bytesToBase64 } from "./crypto.js";
 import { bindSearchResults, renderSearchResults } from "./search-results.js?v=20260830b";
 import {
   extractImageText,
+  ensurePuterConnected,
   formatOcrProgress,
   getPuterEmail,
   getPuterUserLabel,
   isImageFile,
   isPuterConnected,
+  isPuterPreconfigured,
   loginToPuter,
   logoutPuter,
-} from "./ocr.js?v=20260901a";
+} from "./ocr.js?v=20260901v";
 import {
   getAvailableOcrEngines,
   loadOcrOptions,
@@ -362,13 +364,22 @@ async function attachRemoteFileTargets(category, filename, blob, fileBytes) {
 function updatePuterConnectPanel() {
   if (!puterConnectPanel) return;
 
+  const preconfigured = isPuterPreconfigured();
   const connected = isPuterConnected();
+  const loginFields = document.getElementById("puter-login-fields");
+  const loginNote = puterConnectPanel.querySelector(".puter-login-note");
+
   puterConnectTitle.textContent = "Puter AI";
-  puterConnectHint.textContent = connected
-    ? `متصل — ${getPuterEmail() ? `آخر بريد: ${getPuterEmail()}` : "جاهز لاستخراج النص من الصور"}`
-    : "أدخل رمز API من لوحة Puter، أو اترك كلمة المرور فارغة لفتح نافذة تسجيل Puter.";
+  puterConnectHint.textContent = preconfigured
+    ? "جاهز — اضغط «استخراج النص» لبدء Puter AI تلقائياً."
+    : connected
+      ? `متصل — ${getPuterEmail() ? `آخر بريد: ${getPuterEmail()}` : "جاهز لاستخراج النص من الصور"}`
+      : "أدخل رمز API من لوحة Puter، أو اترك كلمة المرور فارغة لفتح نافذة تسجيل Puter.";
   puterConnectBtn.textContent = connected ? "إعادة الاتصال" : "الاتصال بـ Puter";
-  puterDisconnectBtn?.classList.toggle("hidden", !connected);
+  puterConnectBtn.classList.toggle("hidden", preconfigured);
+  puterDisconnectBtn?.classList.toggle("hidden", preconfigured || !connected);
+  loginFields?.classList.toggle("hidden", preconfigured);
+  loginNote?.classList.toggle("hidden", preconfigured);
 
   if (puterEmailInput && !puterEmailInput.value) {
     puterEmailInput.value = getPuterEmail();
@@ -452,7 +463,9 @@ function updateOcrEnginePanel() {
 
   const active = engines.find((item) => item.id === select.value) || engines[0];
   if (hint && active?.hint) {
-    hint.textContent = active.hint;
+    hint.textContent = isPuterPreconfigured()
+      ? "Puter AI مُعد مسبقاً — اضغط «استخراج النص» للبدء."
+      : active.hint;
   }
   updatePuterConnectPanel();
   refreshPuterConnectPanel();
@@ -1489,7 +1502,7 @@ async function extractOcrForDocument(doc) {
   return text;
 }
 
-function openOcrDialog(docId) {
+async function openOcrDialog(docId) {
   const doc = findDocumentById(docId);
   if (!doc || !isImageFile(doc.filename)) return;
   if (doc.isLocked && !isDocUnlocked(doc)) {
@@ -1507,6 +1520,16 @@ function openOcrDialog(docId) {
   updateOcrEnginePanel();
   ocrExtractBtn.disabled = false;
   ocrDialog?.classList.remove("hidden");
+
+  if (isPuterPreconfigured()) {
+    try {
+      setOcrDialogStatus("جارٍ تجهيز Puter AI…");
+      await ensurePuterConnected();
+      setOcrDialogStatus("");
+    } catch (error) {
+      setOcrDialogStatus(error.message, true);
+    }
+  }
 }
 
 function closeOcrDialog() {

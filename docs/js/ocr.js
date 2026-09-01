@@ -30,6 +30,7 @@ export {
   getPuterEmail,
   getPuterUserLabel,
   isPuterConnected,
+  isPuterPreconfigured,
   loadPuter,
   loginToPuter,
   logoutPuter,
