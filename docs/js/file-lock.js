@@ -1,6 +1,25 @@
 import { bytesToBase64 } from "./crypto.js";
 
 const unlockedDocIds = new Set();
+const unlockedFolderNames = new Set();
+
+export function isFolderUnlocked(folderName) {
+  if (!folderName) return true;
+  return unlockedFolderNames.has(folderName);
+}
+
+export function unlockFolder(folderName) {
+  if (folderName) unlockedFolderNames.add(folderName);
+}
+
+export function lockFolderSession(folderName) {
+  if (folderName) unlockedFolderNames.delete(folderName);
+}
+
+export function isFolderAccessible(folder, folderName = folder?.name) {
+  if (!folder?.isLocked) return true;
+  return isFolderUnlocked(folderName || folder?.name);
+}
 
 export async function hashPassword(password) {
   const data = new TextEncoder().encode(String(password || ""));
@@ -23,6 +42,7 @@ export function lockDocSession(docId) {
 
 export function clearUnlockSession() {
   unlockedDocIds.clear();
+  unlockedFolderNames.clear();
 }
 
 export async function verifyLockPassword(doc, password) {

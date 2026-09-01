@@ -6,6 +6,7 @@ export function normalizeState(state) {
   return {
     documents: Array.isArray(next.documents) ? next.documents : [],
     trash: Array.isArray(next.trash) ? next.trash : [],
+    folders: Array.isArray(next.folders) ? next.folders : [],
   };
 }
 

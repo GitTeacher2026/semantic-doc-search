@@ -29,6 +29,23 @@ const DEFAULT_STATE = {
 let browserState = loadBrowserState();
 let rootElement = null;
 let actionHandlers = {};
+let folderRecords = [];
+
+function isFolderLocked(name) {
+  const folder = folderRecords.find((item) => item.name === name);
+  return Boolean(folder?.isLocked);
+}
+
+function canAccessFolder(name) {
+  if (!name) return true;
+  if (!isFolderLocked(name)) return true;
+  return actionHandlers.isFolderUnlocked?.(name) === true;
+}
+
+function isDocumentAccessible(doc) {
+  const category = doc.category || "عام";
+  return canAccessFolder(category);
+}
 
 function loadBrowserState() {
   try {
@@ -65,7 +82,9 @@ function normalizeQuery(value) {
 }
 
 function getVisibleDocuments(documents) {
-  return documents.filter((doc) => documentMatchesActiveStorage(doc, { showAll: browserState.showAll }));
+  return documents
+    .filter((doc) => documentMatchesActiveStorage(doc, { showAll: browserState.showAll }))
+    .filter((doc) => isDocumentAccessible(doc));
 }
 
 function filterDocuments(documents) {
@@ -275,6 +294,20 @@ function renderListRow(doc) {
     </article>`;
 }
 
+function renderFolderActions(category) {
+  const locked = isFolderLocked(category);
+  const unlocked = actionHandlers.isFolderUnlocked?.(category);
+  const lockTitle = locked ? (unlocked ? "إعادة قفل المجلد" : "فتح المجلد") : "قفل المجلد";
+  const lockIcon = locked ? (unlocked ? "🔒" : "🔓") : "🔒";
+  const lockAction = locked ? (unlocked ? "folder-relock" : "folder-unlock") : "folder-lock";
+  return `
+    <div class="fb-folder-actions">
+      <button class="fb-folder-action-btn" type="button" data-folder-action="rename" data-folder="${escapeHtml(category)}" title="إعادة تسمية المجلد">✏️</button>
+      <button class="fb-folder-action-btn" type="button" data-folder-action="${lockAction}" data-folder="${escapeHtml(category)}" title="${lockTitle}">${lockIcon}</button>
+      <button class="fb-folder-action-btn danger" type="button" data-folder-action="delete" data-folder="${escapeHtml(category)}" title="حذف المجلد">🗑</button>
+    </div>`;
+}
+
 function renderSidebar(navData) {
   const activeStorage = browserState.storage;
   const activeCategory = browserState.category;
@@ -291,14 +324,20 @@ function renderSidebar(navData) {
     .join("");
 
   const categoryItems = navData.categories
-    .map(
-      ([category, count]) => `
-      <button class="fb-nav-item${activeCategory === category ? " active" : ""}" type="button" data-nav="category" data-value="${escapeHtml(category)}">
-        <span class="fb-nav-icon">📁</span>
-        <span class="fb-nav-label">${escapeHtml(category)}</span>
-        <span class="fb-nav-count">${count}</span>
-      </button>`
-    )
+    .map(([category, count]) => {
+      const locked = isFolderLocked(category);
+      const unlocked = actionHandlers.isFolderUnlocked?.(category);
+      const needsUnlock = locked && !unlocked;
+      return `
+      <div class="fb-folder-row${activeCategory === category ? " active" : ""}${needsUnlock ? " is-locked" : ""}">
+        <button class="fb-nav-item${activeCategory === category ? " active" : ""}" type="button" data-nav="category" data-value="${escapeHtml(category)}" data-locked="${needsUnlock ? "1" : "0"}">
+          <span class="fb-nav-icon">${locked ? "🔒" : "📁"}</span>
+          <span class="fb-nav-label">${escapeHtml(category)}</span>
+          <span class="fb-nav-count">${count}</span>
+        </button>
+        ${renderFolderActions(category)}
+      </div>`;
+    })
     .join("");
 
   return `
@@ -377,6 +416,22 @@ function renderContent(documents) {
       </div>`;
   }
 
+  if (browserState.category && !canAccessFolder(browserState.category)) {
+    return `
+      <div class="fb-shell">
+        ${renderSidebar(navData)}
+        <section class="fb-main">
+          ${renderToolbar(0, navData.total)}
+          <div class="fb-empty">
+            <div class="fb-empty-icon" aria-hidden="true">🔒</div>
+            <h3>مجلد مقفل</h3>
+            <p class="muted">أدخل كلمة مرور المجلد لعرض محتويات «${escapeHtml(browserState.category)}».</p>
+            <button id="fb-unlock-folder-btn" class="btn primary" type="button" data-folder="${escapeHtml(browserState.category)}">فتح المجلد</button>
+          </div>
+        </section>
+      </div>`;
+  }
+
   if (!filtered.length) {
     return `
       <div class="fb-shell">
@@ -433,10 +488,37 @@ function bindActions(container) {
   });
 }
 
+function bindFolderActions(container, onChange) {
+  container.querySelectorAll("[data-folder-action]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const action = btn.dataset.folderAction;
+      const folder = btn.dataset.folder;
+      if (action === "rename") actionHandlers.onFolderRename?.(folder);
+      else if (action === "delete") actionHandlers.onFolderDelete?.(folder);
+      else if (action === "folder-lock") actionHandlers.onFolderLock?.(folder);
+      else if (action === "folder-unlock") actionHandlers.onFolderUnlock?.(folder, onChange);
+      else if (action === "folder-relock") actionHandlers.onFolderRelock?.(folder, onChange);
+    });
+  });
+
+  container.querySelector("#fb-unlock-folder-btn")?.addEventListener("click", () => {
+    const folder = container.querySelector("#fb-unlock-folder-btn")?.dataset.folder;
+    if (folder) actionHandlers.onFolderUnlock?.(folder, onChange);
+  });
+}
+
 function bindNavigation(container, onChange) {
   container.querySelectorAll("[data-nav]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const nav = btn.dataset.nav;
+      if (nav === "category" && btn.dataset.locked === "1") {
+        actionHandlers.onFolderUnlock?.(btn.dataset.value, () => {
+          setFileBrowserState({ category: btn.dataset.value, group: null });
+          onChange?.();
+        });
+        return;
+      }
       if (nav === "root") {
         setFileBrowserState({ storage: null, category: null, group: null });
       } else if (nav === "storage") {
@@ -493,10 +575,12 @@ export function initFileBrowser(element, handlers = {}) {
   actionHandlers = handlers;
 }
 
-export function renderFileBrowser(documents, { onChange } = {}) {
+export function renderFileBrowser(documents, { folders = [], onChange } = {}) {
   if (!rootElement) return;
+  folderRecords = folders;
   rootElement.innerHTML = renderContent(documents);
   bindActions(rootElement);
+  bindFolderActions(rootElement, onChange);
   bindNavigation(rootElement, onChange);
 }
 

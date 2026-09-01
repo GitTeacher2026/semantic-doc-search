@@ -52,8 +52,11 @@ import {
   clearUnlockSession,
   hashPassword,
   isDocUnlocked,
+  isFolderUnlocked,
   lockDocSession,
+  lockFolderSession,
   unlockDoc,
+  unlockFolder,
   verifyLockPassword,
 } from "./file-lock.js";
 import {
@@ -119,9 +122,22 @@ import {
   TRASH_RETENTION_DAYS,
 } from "./trash.js";
 import {
+  getFileBrowserState,
   initFileBrowser,
   renderFileBrowser,
+  setFileBrowserState,
 } from "./file-browser.js";
+import {
+  clearFolderLock,
+  countDocumentsInFolder,
+  deleteFolderFromState,
+  ensureFolderRecord,
+  getFolderByName,
+  listFolderNames,
+  renameFolderInState,
+  setFolderLock,
+  syncFoldersFromDocuments,
+} from "./folders.js";
 
 const CHUNK_SIZE = 800;
 const CHUNK_OVERLAP = 120;
@@ -138,6 +154,11 @@ let pendingLockId = null;
 let pendingUnlockId = null;
 let pendingUnlockAction = null;
 let pendingOcrId = null;
+let pendingFolderRenameName = null;
+let pendingFolderLockName = null;
+let pendingFolderUnlockName = null;
+let pendingFolderUnlockCallback = null;
+let pendingFolderUnlockCancel = null;
 let authApi = null;
 let currentUser = null;
 let adminMembersApi = null;
@@ -248,6 +269,7 @@ async function hydrateDocuments(password) {
   setStatus("جارٍ تحميل المستندات…");
   try {
     state = normalizeState(await loadDocuments(password));
+    state.folders = syncFoldersFromDocuments(state.documents, state.folders);
     migrateDocumentOcrFlags(state.documents);
     renderLibrary();
     renderTrash();
@@ -265,6 +287,7 @@ async function hydrateDocuments(password) {
 async function persistState() {
   if (!sessionPassword) return;
   state = normalizeState(state);
+  state.folders = syncFoldersFromDocuments(state.documents, state.folders);
   await saveDocuments(sessionPassword, state);
 }
 
@@ -525,16 +548,16 @@ function updateUploadAccess() {
 }
 
 function getExistingCategories() {
-  const categories = new Set();
-  for (const doc of state.documents) {
-    if (doc.category) categories.add(doc.category);
-  }
-  return [...categories].sort((a, b) => a.localeCompare(b, "ar"));
+  return listFolderNames(state.folders, state.documents);
+}
+
+function defaultFileBaseName(filename) {
+  const dot = String(filename || "").lastIndexOf(".");
+  return dot > 0 ? filename.slice(0, dot) : filename;
 }
 
 function defaultImageBaseName(filename) {
-  const dot = String(filename || "").lastIndexOf(".");
-  return dot > 0 ? filename.slice(0, dot) : filename;
+  return defaultFileBaseName(filename);
 }
 
 function sanitizeCategoryInput(value) {
@@ -549,17 +572,16 @@ function createPendingItem(file) {
   const image = isImageFile(file.name);
   return {
     file,
-    meta: image
-      ? {
-          displayName: defaultImageBaseName(file.name),
-          folder: "",
-          newFolder: "",
-        }
-      : null,
+    meta: {
+      displayName: image ? defaultImageBaseName(file.name) : defaultFileBaseName(file.name),
+      folder: "",
+      newFolder: "",
+      customizeOpen: image,
+    },
   };
 }
 
-function resolveImageCategory(meta) {
+function resolvePendingCategory(meta) {
   if (!meta) return "";
   if (meta.folder === "__new__") {
     return sanitizeCategoryInput(meta.newFolder);
@@ -567,7 +589,7 @@ function resolveImageCategory(meta) {
   return sanitizeCategoryInput(meta.folder);
 }
 
-function buildImageUploadFilename(displayName, originalName) {
+function buildUploadFilename(displayName, originalName) {
   const base = sanitizeFilenameInput(displayName);
   if (!base) return "";
   const ext = fileExtension(originalName);
@@ -577,10 +599,32 @@ function buildImageUploadFilename(displayName, originalName) {
 }
 
 function isPendingImageReady(item) {
-  if (!item?.meta) return true;
-  const filename = buildImageUploadFilename(item.meta.displayName, item.file.name);
-  const category = resolveImageCategory(item.meta);
+  if (!item?.meta || !isImageFile(item.file.name)) return true;
+  const filename = buildUploadFilename(item.meta.displayName, item.file.name);
+  const category = resolvePendingCategory(item.meta);
   return Boolean(filename && category);
+}
+
+function hasPendingCustomize(item) {
+  const meta = item?.meta;
+  if (!meta) return false;
+  const category = resolvePendingCategory(meta);
+  const customName = sanitizeFilenameInput(meta.displayName);
+  const defaultName = defaultFileBaseName(item.file.name);
+  return Boolean(category || (customName && customName !== defaultName));
+}
+
+async function requireFolderAccess(folderName) {
+  const name = sanitizeCategoryInput(folderName);
+  if (!name) return;
+  const folder = getFolderByName(state.folders, name);
+  if (!folder?.isLocked || isFolderUnlocked(name)) return;
+  await new Promise((resolve, reject) => {
+    openFolderUnlockDialog(name, {
+      onSuccess: () => resolve(),
+      onCancel: () => reject(new Error(`يلزم فتح المجلد المقفل «${name}» لإضافة ملفات إليه.`)),
+    });
+  });
 }
 
 function updateIngestButtonState() {
@@ -716,23 +760,24 @@ function renderPendingFolderOptions(selected = "") {
   return options.join("");
 }
 
-function renderPendingImageFields(item, index) {
+function renderPendingCustomizeFields(item, index, { required = false } = {}) {
   const meta = item.meta;
-  const ready = isPendingImageReady(item);
+  const ready = !required || isPendingImageReady(item);
   const showNewFolder = meta.folder === "__new__";
+  const nameLabel = isImageFile(item.file.name) ? "اسم الصورة" : "اسم الملف";
   return `
     <div class="pending-image-fields${ready ? "" : " is-incomplete"}">
-      <label class="pending-image-label" for="pending-image-name-${index}">اسم الصورة</label>
+      <label class="pending-image-label" for="pending-image-name-${index}">${nameLabel}</label>
       <input
         id="pending-image-name-${index}"
         class="pending-image-name-input"
         type="text"
         data-index="${index}"
         value="${escapeHtml(meta.displayName)}"
-        placeholder="مثال: مخطط الطابق الثاني"
+        placeholder="${required ? "مثال: مخطط الطابق الثاني" : "اتركه فارغاً لاستخدام الاسم الأصلي"}"
         autocomplete="off"
       />
-      <label class="pending-image-label" for="pending-image-folder-${index}">المجلد / الموقع</label>
+      <label class="pending-image-label" for="pending-image-folder-${index}">المجلد / الموقع${required ? "" : " (اختياري)"}</label>
       <select id="pending-image-folder-${index}" class="pending-image-folder-select" data-index="${index}">
         ${renderPendingFolderOptions(meta.folder)}
       </select>
@@ -744,8 +789,15 @@ function renderPendingImageFields(item, index) {
         placeholder="اسم المجلد الجديد"
         autocomplete="off"
       />
-      <p class="pending-image-hint muted">يُحفظ الملف في المجلد المحدد — استخراج النص لاحقاً من صفحة الملفات.</p>
+      <p class="pending-image-hint muted">
+        ${required ? "مطلوب للصور — استخراج النص لاحقاً من صفحة الملفات." : "اختياري — إن تُرك فارغاً يُصنَّف الملف تلقائياً."}
+        ${!required ? " المجلدات المقفلة تتطلب كلمة المرور." : " المجلدات المقفلة تتطلب كلمة المرور."}
+      </p>
     </div>`;
+}
+
+function renderPendingImageFields(item, index) {
+  return renderPendingCustomizeFields(item, index, { required: true });
 }
 
 function renderPendingFileCard(item, index) {
@@ -775,11 +827,23 @@ function renderPendingFileCard(item, index) {
       ${visual}
       <div class="pending-file-name">${escapeHtml(file.name)}</div>
       <div class="pending-file-size">${formatFileSize(file.size)}</div>
+      <details class="pending-customize"${item.meta.customizeOpen ? " open" : ""} data-index="${index}">
+        <summary>تخصيص الاسم والمجلد (اختياري)</summary>
+        ${renderPendingCustomizeFields(item, index, { required: false })}
+      </details>
       <button class="pending-file-remove" type="button" data-index="${index}">إزالة</button>
     </article>`;
 }
 
 function bindPendingImageFields() {
+  pendingFilesEl.querySelectorAll(".pending-customize").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      const index = Number(details.dataset.index);
+      const item = pendingItems[index];
+      if (item?.meta) item.meta.customizeOpen = details.open;
+    });
+  });
+
   pendingFilesEl.querySelectorAll(".pending-image-name-input").forEach((input) => {
     input.addEventListener("input", () => {
       const index = Number(input.dataset.index);
@@ -787,21 +851,37 @@ function bindPendingImageFields() {
       if (!item?.meta) return;
       item.meta.displayName = input.value;
       updateIngestButtonState();
-      input.closest(".pending-image-fields")?.classList.toggle("is-incomplete", !isPendingImageReady(item));
+      if (isImageFile(item.file.name)) {
+        input.closest(".pending-image-fields")?.classList.toggle("is-incomplete", !isPendingImageReady(item));
+      }
     });
   });
 
   pendingFilesEl.querySelectorAll(".pending-image-folder-select").forEach((select) => {
-    select.addEventListener("change", () => {
+    select.addEventListener("change", async () => {
       const index = Number(select.dataset.index);
       const item = pendingItems[index];
       if (!item?.meta) return;
-      item.meta.folder = select.value;
+      const previous = item.meta.folder;
+      const next = select.value;
+      if (next && next !== "__new__") {
+        const folder = getFolderByName(state.folders, next);
+        if (folder?.isLocked && !isFolderUnlocked(next)) {
+          try {
+            await requireFolderAccess(next);
+          } catch (error) {
+            select.value = previous;
+            setStatus(error.message, true);
+            return;
+          }
+        }
+      }
+      item.meta.folder = next;
       const card = select.closest(".pending-file-card");
       const newInput = card?.querySelector(".pending-image-folder-new");
       if (newInput) {
-        newInput.classList.toggle("hidden", select.value !== "__new__");
-        if (select.value !== "__new__") {
+        newInput.classList.toggle("hidden", next !== "__new__");
+        if (next !== "__new__") {
           item.meta.newFolder = "";
           newInput.value = "";
         } else {
@@ -809,7 +889,9 @@ function bindPendingImageFields() {
         }
       }
       updateIngestButtonState();
-      card?.querySelector(".pending-image-fields")?.classList.toggle("is-incomplete", !isPendingImageReady(item));
+      if (isImageFile(item.file.name)) {
+        card?.querySelector(".pending-image-fields")?.classList.toggle("is-incomplete", !isPendingImageReady(item));
+      }
     });
   });
 
@@ -820,7 +902,9 @@ function bindPendingImageFields() {
       if (!item?.meta) return;
       item.meta.newFolder = input.value;
       updateIngestButtonState();
-      input.closest(".pending-image-fields")?.classList.toggle("is-incomplete", !isPendingImageReady(item));
+      if (isImageFile(item.file.name)) {
+        input.closest(".pending-image-fields")?.classList.toggle("is-incomplete", !isPendingImageReady(item));
+      }
     });
   });
 }
@@ -834,8 +918,10 @@ function renderPendingFiles() {
   }
 
   const hasImages = pendingItems.some((item) => isImageFile(item.file.name));
+  const hasDocs = pendingItems.some((item) => !isImageFile(item.file.name));
   pendingFilesEl.classList.remove("hidden");
   pendingFilesEl.classList.toggle("has-images", hasImages);
+  pendingFilesEl.classList.toggle("has-mixed", hasImages && hasDocs);
   pendingFilesEl.innerHTML = pendingItems
     .map((item, index) => renderPendingFileCard(item, index))
     .join("");
@@ -1129,7 +1215,10 @@ function updateLibraryFilesSummary(docs) {
 }
 
 function renderFilesPage() {
-  renderFileBrowser(state.documents, { onChange: renderFilesPage });
+  renderFileBrowser(state.documents, {
+    folders: state.folders,
+    onChange: renderFilesPage,
+  });
 }
 
 function renderLibrary() {
@@ -1454,9 +1543,79 @@ function hasDuplicateFilename(filename, excludeId = null) {
   );
 }
 
+function openFolderRenameDialog(folderName) {
+  if (!renameDialog) return;
+  pendingFolderRenameName = folderName;
+  pendingRenameId = null;
+  renameDialogTitle.textContent = "إعادة تسمية المجلد";
+  renameDialogSub.textContent = `المجلد الحالي: ${folderName}`;
+  renameFilename.value = folderName;
+  renameDialogError.classList.add("hidden");
+  renameDialog.classList.remove("hidden");
+  renameFilename.focus();
+  renameFilename.select();
+}
+
+async function handleFolderDelete(folderName) {
+  const count = countDocumentsInFolder(state.documents, folderName);
+  if (
+    !window.confirm(
+      count
+        ? `حذف مجلد «${folderName}» ونقل ${count} ملف إلى سلة المهملات؟`
+        : `حذف مجلد «${folderName}» الفارغ؟`
+    )
+  ) {
+    return;
+  }
+  try {
+    setStatus("جارٍ حذف المجلد…");
+    state = deleteFolderFromState(state, folderName);
+    lockFolderSession(folderName);
+    const browser = getFileBrowserState();
+    if (browser?.category === folderName) {
+      setFileBrowserState({ category: null, group: null });
+    }
+    await persistState();
+    renderLibrary();
+    setStatus("تم حذف المجلد.", true);
+    setTimeout(() => setStatus("", false), 2000);
+  } catch (error) {
+    setStatus(`تعذّر حذف المجلد: ${error.message}`, true);
+  }
+}
+
+function openFolderLockDialog(folderName) {
+  if (!lockDialog) return;
+  pendingFolderLockName = folderName;
+  pendingLockId = null;
+  lockDialogTitle.textContent = `قفل مجلد «${folderName}»`;
+  lockDialogSub.textContent = "أدخل كلمة مرور لحماية محتويات هذا المجلد. لن تُعرض الملفات حتى تفتح المجلد.";
+  lockPassword.value = "";
+  lockPasswordConfirm.value = "";
+  lockDialogError.classList.add("hidden");
+  lockDialog.classList.remove("hidden");
+  lockPassword.focus();
+}
+
+function openFolderUnlockDialog(folderName, { onSuccess, onCancel } = {}) {
+  if (!unlockDialog) return;
+  pendingFolderUnlockName = folderName;
+  pendingFolderUnlockCallback = onSuccess || null;
+  pendingFolderUnlockCancel = onCancel || null;
+  pendingUnlockId = null;
+  pendingUnlockAction = null;
+  unlockDialogTitle.textContent = `فتح مجلد «${folderName}»`;
+  unlockDialogSub.textContent = "أدخل كلمة مرور المجلد للوصول إلى محتوياته.";
+  unlockPassword.value = "";
+  unlockDialogError.classList.add("hidden");
+  unlockDialog.classList.remove("hidden");
+  unlockPassword.focus();
+}
+
 function openRenameDialog(docId) {
   const doc = findDocumentById(docId);
   if (!doc || !renameDialog) return;
+  pendingFolderRenameName = null;
   pendingRenameId = docId;
   renameDialogTitle.textContent = "إعادة تسمية الملف";
   renameDialogSub.textContent = `الاسم الحالي: ${doc.filename}`;
@@ -1469,12 +1628,52 @@ function openRenameDialog(docId) {
 
 function closeRenameDialog() {
   pendingRenameId = null;
+  pendingFolderRenameName = null;
   if (renameDialog) renameDialog.classList.add("hidden");
   if (renameFilename) renameFilename.value = "";
   renameDialogError?.classList.add("hidden");
 }
 
 async function confirmRename() {
+  if (pendingFolderRenameName) {
+    const nextName = sanitizeCategoryInput(renameFilename.value);
+    if (!nextName) {
+      renameDialogError.textContent = "أدخل اسماً صالحاً للمجلد.";
+      renameDialogError.classList.remove("hidden");
+      return;
+    }
+    if (nextName === pendingFolderRenameName) {
+      closeRenameDialog();
+      return;
+    }
+    if (getFolderByName(state.folders, nextName) || state.documents.some((doc) => doc.category === nextName)) {
+      renameDialogError.textContent = "يوجد مجلد آخر بنفس الاسم.";
+      renameDialogError.classList.remove("hidden");
+      return;
+    }
+    try {
+      const oldName = pendingFolderRenameName;
+      state = renameFolderInState(state, oldName, nextName);
+      if (isFolderUnlocked(oldName)) {
+        lockFolderSession(oldName);
+        unlockFolder(nextName);
+      }
+      const browser = getFileBrowserState();
+      if (browser?.category === oldName) {
+        setFileBrowserState({ category: nextName, group: null });
+      }
+      await persistState();
+      closeRenameDialog();
+      renderLibrary();
+      setStatus(`تمت إعادة تسمية المجلد إلى «${nextName}».`, true);
+      setTimeout(() => setStatus("", false), 2000);
+    } catch (error) {
+      renameDialogError.textContent = error.message;
+      renameDialogError.classList.remove("hidden");
+    }
+    return;
+  }
+
   if (!pendingRenameId) return;
   const doc = findDocumentById(pendingRenameId);
   if (!doc) return closeRenameDialog();
@@ -1562,6 +1761,7 @@ async function confirmDelete() {
 function openLockDialog(docId) {
   const doc = findDocumentById(docId);
   if (!doc || !lockDialog) return;
+  pendingFolderLockName = null;
   pendingLockId = docId;
   lockDialogTitle.textContent = `قفل «${doc.filename}»`;
   lockDialogSub.textContent = "أدخل كلمة مرور لحماية هذا الملف. لن يظهر محتواه في البحث حتى تفتحه.";
@@ -1574,11 +1774,11 @@ function openLockDialog(docId) {
 
 function closeLockDialog() {
   pendingLockId = null;
+  pendingFolderLockName = null;
   if (lockDialog) lockDialog.classList.add("hidden");
 }
 
 async function confirmLock() {
-  if (!pendingLockId) return;
   const password = lockPassword.value;
   const confirm = lockPasswordConfirm.value;
   if (password.length < 4) {
@@ -1591,6 +1791,24 @@ async function confirmLock() {
     lockDialogError.classList.remove("hidden");
     return;
   }
+
+  if (pendingFolderLockName) {
+    try {
+      state = setFolderLock(state, pendingFolderLockName, await hashPassword(password));
+      state.folders = ensureFolderRecord(state.folders, pendingFolderLockName);
+      lockFolderSession(pendingFolderLockName);
+      closeLockDialog();
+      await persistState();
+      renderLibrary();
+      setStatus("تم قفل المجلد.", true);
+      setTimeout(() => setStatus("", false), 2000);
+    } catch (error) {
+      setStatus(`تعذّر قفل المجلد: ${error.message}`, true);
+    }
+    return;
+  }
+
+  if (!pendingLockId) return;
 
   const doc = findDocumentById(pendingLockId);
   if (!doc) return closeLockDialog();
@@ -1613,6 +1831,9 @@ async function confirmLock() {
 function openUnlockDialog(docId, action = "unlock") {
   const doc = findDocumentById(docId);
   if (!doc || !unlockDialog) return;
+  pendingFolderUnlockName = null;
+  pendingFolderUnlockCallback = null;
+  pendingFolderUnlockCancel = null;
   pendingUnlockId = docId;
   pendingUnlockAction = action;
   unlockDialogTitle.textContent = `فتح «${doc.filename}»`;
@@ -1627,12 +1848,34 @@ function openUnlockDialog(docId, action = "unlock") {
 }
 
 function closeUnlockDialog() {
+  if (pendingFolderUnlockName && pendingFolderUnlockCancel) {
+    pendingFolderUnlockCancel();
+  }
   pendingUnlockId = null;
   pendingUnlockAction = null;
+  pendingFolderUnlockName = null;
+  pendingFolderUnlockCallback = null;
+  pendingFolderUnlockCancel = null;
   if (unlockDialog) unlockDialog.classList.add("hidden");
 }
 
 async function confirmUnlock() {
+  if (pendingFolderUnlockName) {
+    const folder = getFolderByName(state.folders, pendingFolderUnlockName);
+    const valid = await verifyLockPassword(folder, unlockPassword.value);
+    if (!valid) {
+      unlockDialogError.textContent = "كلمة مرور المجلد غير صحيحة.";
+      unlockDialogError.classList.remove("hidden");
+      return;
+    }
+    unlockFolder(pendingFolderUnlockName);
+    const callback = pendingFolderUnlockCallback;
+    closeUnlockDialog();
+    renderLibrary();
+    callback?.();
+    return;
+  }
+
   if (!pendingUnlockId) return;
   const doc = findDocumentById(pendingUnlockId);
   if (!doc) return closeUnlockDialog();
@@ -1678,14 +1921,16 @@ async function ingestFiles(items) {
       const blob = new Blob([arrayBuffer]);
 
       if (image) {
-        const uploadName = buildImageUploadFilename(item.meta?.displayName, file.name);
-        const category = resolveImageCategory(item.meta);
+        const uploadName = buildUploadFilename(item.meta?.displayName, file.name);
+        const category = resolvePendingCategory(item.meta);
         if (!uploadName) {
           throw new Error("أدخل اسماً صالحاً لكل صورة قبل الفهرسة.");
         }
         if (!category) {
           throw new Error(`اختر مجلداً أو أنشئ مجلداً جديداً للصورة «${uploadName}».`);
         }
+        await requireFolderAccess(category);
+        state.folders = ensureFolderRecord(state.folders, category);
         if (hasDuplicateFilename(uploadName)) {
           throw new Error(`يوجد ملف بنفس الاسم «${uploadName}». غيّر الاسم أو احذف النسخة القديمة.`);
         }
@@ -1723,12 +1968,29 @@ async function ingestFiles(items) {
           isLocked: false,
           lockHash: null,
         });
+        state.folders = ensureFolderRecord(state.folders, category);
         continue;
       }
 
       const text = await extractText(file, arrayBuffer);
       if (!text) throw new Error(`لم يُعثر على نص في ${file.name}`);
-      const category = assignCategory(text, file.name, state.documents);
+
+      let filename = file.name;
+      let category = assignCategory(text, file.name, state.documents);
+      const chosenCategory = resolvePendingCategory(item.meta);
+      if (chosenCategory) {
+        await requireFolderAccess(chosenCategory);
+        category = chosenCategory;
+        state.folders = ensureFolderRecord(state.folders, category);
+      }
+      const chosenName = buildUploadFilename(item.meta?.displayName, file.name);
+      if (chosenName && sanitizeFilenameInput(item.meta?.displayName)) {
+        filename = chosenName;
+      }
+      if (hasDuplicateFilename(filename)) {
+        throw new Error(`يوجد ملف بنفس الاسم «${filename}». غيّر الاسم أو احذف النسخة القديمة.`);
+      }
+
       const chunks = chunkText(text).map((content) => ({ content }));
       let fileData = null;
       let driveFileId = null;
@@ -1736,21 +1998,21 @@ async function ingestFiles(items) {
       let onedriveFileId = null;
 
       if (backend === STORAGE_BACKENDS.DRIVE) {
-        driveFileId = await uploadDriveDocumentFile(category, file.name, blob);
+        driveFileId = await uploadDriveDocumentFile(category, filename, blob);
       } else if (backend === STORAGE_BACKENDS.MEGA) {
-        megaFileId = await uploadMegaDocumentFile(category, file.name, blob);
+        megaFileId = await uploadMegaDocumentFile(category, filename, blob);
       } else if (backend === STORAGE_BACKENDS.ONEDRIVE) {
-        onedriveFileId = await uploadOneDriveDocumentFile(category, file.name, blob);
+        onedriveFileId = await uploadOneDriveDocumentFile(category, filename, blob);
       } else {
         fileData = arrayBufferToBase64(arrayBuffer);
       }
 
       state.documents.push({
         id: crypto.randomUUID(),
-        filename: file.name,
+        filename,
         category,
-        fileGroup: fileGroup(file.name),
-        extension: fileExtension(file.name),
+        fileGroup: fileGroup(filename),
+        extension: fileExtension(filename),
         charCount: text.length,
         preview: text.replace(/\s+/g, " ").slice(0, 280),
         fileData,
@@ -1801,13 +2063,21 @@ function clearSearchResults() {
   setSearchResults("");
 }
 
+function getSearchableDocuments() {
+  return accessibleDocuments(state.documents).filter((doc) => {
+    const folder = getFolderByName(state.folders, doc.category || "عام");
+    if (!folder?.isLocked) return true;
+    return isFolderUnlocked(folder.name);
+  });
+}
+
 function runSearch() {
   const query = searchQuery.value.trim();
   if (!query) {
     setSearchResults(`<p class="muted search-empty">أدخل عبارة البحث.</p>`);
     return;
   }
-  const searchable = accessibleDocuments(state.documents);
+  const searchable = getSearchableDocuments();
   if (!searchable.length) {
     setSearchResults(`<p class="muted search-empty">ارفع مستندات أو افتح الملفات المقفلة قبل البحث.</p>`);
     return;
@@ -1892,6 +2162,30 @@ lockPasswordConfirm?.addEventListener("keydown", (event) => {
   if (event.key === "Enter") confirmLock();
 });
 
+function handleFolderUnlock(folderName, onSuccess) {
+  const folder = getFolderByName(state.folders, folderName);
+  if (!folder?.isLocked || isFolderUnlocked(folderName)) {
+    onSuccess?.();
+    return;
+  }
+  openFolderUnlockDialog(folderName, {
+    onSuccess: () => {
+      onSuccess?.();
+      renderLibrary();
+    },
+    onCancel: () => {},
+  });
+}
+
+function handleFolderRelock(folderName) {
+  lockFolderSession(folderName);
+  const browser = getFileBrowserState();
+  if (browser?.category === folderName) {
+    setFileBrowserState({ category: null, group: null });
+  }
+  renderLibrary();
+}
+
 setupDropZone();
 initImagePreview();
 initFileBrowser(fileBrowserRoot, {
@@ -1901,7 +2195,13 @@ initFileBrowser(fileBrowserRoot, {
   onLock: openLockDialog,
   onUnlock: handleUnlockButton,
   onOcr: openOcrDialog,
+  onFolderRename: openFolderRenameDialog,
+  onFolderDelete: handleFolderDelete,
+  onFolderLock: openFolderLockDialog,
+  onFolderUnlock: handleFolderUnlock,
+  onFolderRelock: handleFolderRelock,
   isDocUnlocked,
+  isFolderUnlocked,
 });
 applySearchOptionsToForm(loadSearchOptions());
 initTheme();

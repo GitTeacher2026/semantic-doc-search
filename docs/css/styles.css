@@ -1830,6 +1830,67 @@ html[data-theme="dark"] .pending-image-fields.is-incomplete {
   color: var(--muted);
 }
 
+.fb-folder-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.2rem;
+  align-items: center;
+  border-radius: 10px;
+}
+
+.fb-folder-row.active {
+  background: var(--accent-soft);
+}
+
+.fb-folder-row.is-locked .fb-nav-item {
+  opacity: 0.88;
+}
+
+.fb-folder-actions {
+  display: inline-flex;
+  gap: 0.15rem;
+  padding-inline-end: 0.25rem;
+}
+
+.fb-folder-action-btn {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0.2rem 0.35rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  line-height: 1;
+}
+
+.fb-folder-action-btn:hover {
+  background: var(--hover-bg);
+}
+
+.fb-folder-action-btn.danger:hover {
+  background: #fee4e2;
+}
+
+.pending-customize {
+  width: 100%;
+  text-align: start;
+}
+
+.pending-customize summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 0.35rem;
+}
+
+.pending-customize .pending-image-fields {
+  margin-top: 0.35rem;
+}
+
+.pending-files-grid.has-mixed {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+
 .fb-nav-item {
   display: grid;
   grid-template-columns: auto 1fr auto;
