@@ -5,6 +5,9 @@ const EMAIL_KEY = "docshelf_puter_email";
 const TOKEN_KEY = "docshelf_puter_token";
 
 let puterPromise = null;
+let puterAuthNeedsRecovery = false;
+let lastPuterAuthError = null;
+let overrideConfiguredToken = false;
 
 function formatPuterAuthError(error) {
   const code = error?.error || error?.code || "";
@@ -27,7 +30,33 @@ export function getConfiguredPuterToken() {
 }
 
 export function isPuterPreconfigured() {
-  return Boolean(getConfiguredPuterToken());
+  return Boolean(getConfiguredPuterToken()) && !overrideConfiguredToken;
+}
+
+export function needsPuterAuthRecovery() {
+  return puterAuthNeedsRecovery;
+}
+
+export function getLastPuterAuthError() {
+  return lastPuterAuthError;
+}
+
+export function markPuterAuthFailed(message) {
+  puterAuthNeedsRecovery = true;
+  lastPuterAuthError = message || "تعذّر الاتصال بـ Puter AI.";
+}
+
+export function clearPuterAuthFailed() {
+  puterAuthNeedsRecovery = false;
+  lastPuterAuthError = null;
+}
+
+export function shouldShowPuterLoginFields() {
+  return !isPuterPreconfigured() || needsPuterAuthRecovery();
+}
+
+export function shouldShowPuterConnectButton() {
+  return shouldShowPuterLoginFields() || needsPuterAuthRecovery() || !isPuterConnected();
 }
 
 export function getPuterEmail() {
@@ -39,10 +68,11 @@ export function getStoredPuterToken() {
 }
 
 function getActivePuterToken() {
-  return getStoredPuterToken() || getConfiguredPuterToken();
+  return getStoredPuterToken() || (isPuterPreconfigured() ? getConfiguredPuterToken() : "");
 }
 
 export function isPuterConnected() {
+  if (needsPuterAuthRecovery()) return false;
   if (isPuterPreconfigured()) return true;
   if (globalThis.puter?.authToken) return true;
   if (getStoredPuterToken()) return true;
@@ -62,7 +92,7 @@ export async function getPuterUserLabel() {
     const user = await puter.auth.getUser();
     return user?.username || user?.email || getPuterEmail() || "Puter";
   } catch {
-    if (isPuterPreconfigured()) return "Puter AI";
+    if (isPuterPreconfigured() && !needsPuterAuthRecovery()) return "Puter AI";
     return getPuterEmail() || "Puter";
   }
 }
@@ -127,7 +157,9 @@ async function applyToken(puter, token, { persist = false } = {}) {
     await verifyPuterSession(puter);
     if (persist) {
       sessionStorage.setItem(TOKEN_KEY, secret);
+      overrideConfiguredToken = true;
     }
+    clearPuterAuthFailed();
     return true;
   } catch (error) {
     puter.setAuthToken("");
@@ -152,6 +184,7 @@ export async function loginToPuter({ email = "", password = "" } = {}) {
       await applyToken(puter, secret, { persist: true });
       return puter;
     } catch {
+      markPuterAuthFailed("رمز Puter API غير صالح. أنشئ رمزاً من puter.com/dashboard.");
       throw new Error("رمز Puter API غير صالح. أنشئ رمزاً من puter.com/dashboard.");
     }
   }
@@ -169,22 +202,28 @@ export async function loginToPuter({ email = "", password = "" } = {}) {
       await puter.auth.signIn({ request_auth: true });
     }
     sessionStorage.removeItem(TOKEN_KEY);
+    overrideConfiguredToken = true;
     await verifyPuterSession(puter);
+    clearPuterAuthFailed();
     return puter;
   } catch (error) {
-    throw new Error(formatPuterAuthError(error));
+    const message = formatPuterAuthError(error);
+    markPuterAuthFailed(message);
+    throw new Error(message);
   }
 }
 
 export async function ensurePuterConnected() {
   const puter = await loadPuter();
 
-  if (puter.authToken || puter.auth?.isSignedIn?.()) {
+  if (!needsPuterAuthRecovery() && (puter.authToken || puter.auth?.isSignedIn?.())) {
     try {
       await verifyPuterSession(puter);
+      clearPuterAuthFailed();
       return puter;
     } catch {
       puter.setAuthToken("");
+      markPuterAuthFailed("انتهت جلسة Puter. أعد إدخال رمز API أو اتصل من جديد.");
     }
   }
 
@@ -196,16 +235,26 @@ export async function ensurePuterConnected() {
     } catch {
       sessionStorage.removeItem(TOKEN_KEY);
       puter.setAuthToken("");
+      markPuterAuthFailed("رمز Puter المحفوظ غير صالح. أدخل رمزاً جديداً.");
     }
   }
 
-  const configToken = getConfiguredPuterToken();
+  const configToken = isPuterPreconfigured() ? getConfiguredPuterToken() : "";
   if (configToken) {
-    await applyToken(puter, configToken);
-    return puter;
+    try {
+      await applyToken(puter, configToken);
+      return puter;
+    } catch {
+      markPuterAuthFailed("رمز Puter المُعد مسبقاً غير صالح أو منتهٍ. أدخل رمز API جديداً أدناه.");
+      throw new Error("رمز Puter المُعد مسبقاً غير صالح أو منتهٍ. أدخل رمز API جديداً أدناه.");
+    }
   }
 
-  throw new Error("يلزم تسجيل الدخول إلى Puter AI أولاً — أدخل رمز API أو اتصل بحساب Puter.");
+  const message =
+    lastPuterAuthError ||
+    "يلزم تسجيل الدخول إلى Puter AI أولاً — أدخل رمز API أو اتصل بحساب Puter.";
+  markPuterAuthFailed(message);
+  throw new Error(message);
 }
 
 export function logoutPuter() {
@@ -216,11 +265,7 @@ export function logoutPuter() {
     /* ignore */
   }
   sessionStorage.removeItem(TOKEN_KEY);
-
-  const configToken = getConfiguredPuterToken();
-  if (configToken && globalThis.puter) {
-    globalThis.puter.setAuthToken(configToken);
-  }
-
+  overrideConfiguredToken = true;
+  markPuterAuthFailed("تم قطع اتصال Puter. أدخل رمز API أو اتصل من جديد.");
   puterPromise = null;
 }

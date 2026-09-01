@@ -1104,6 +1104,27 @@ mark.query-hit, .query-hit {
   color: var(--ink);
 }
 
+.mega-connect-panel {
+  margin-bottom: 1rem;
+}
+
+.mega-connect-panel.is-recovery,
+.puter-connect-panel.is-recovery {
+  border-color: color-mix(in srgb, var(--danger, #c0392b) 45%, var(--line));
+  background: color-mix(in srgb, var(--danger, #c0392b) 6%, var(--surface));
+}
+
+.auth-recovery-error {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--danger, #c0392b);
+}
+
+.auth-recovery-error.hidden {
+  display: none;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

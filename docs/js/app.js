@@ -20,6 +20,7 @@ import {
   extractImageText,
   ensurePuterConnected,
   formatOcrProgress,
+  getLastPuterAuthError,
   getPuterEmail,
   getPuterUserLabel,
   isImageFile,
@@ -27,7 +28,11 @@ import {
   isPuterPreconfigured,
   loginToPuter,
   logoutPuter,
-} from "./ocr.js?v=20260901v";
+  markPuterAuthFailed,
+  needsPuterAuthRecovery,
+  shouldShowPuterConnectButton,
+  shouldShowPuterLoginFields,
+} from "./ocr.js?v=20260901w";
 import {
   ensurePreviewUrl,
   initImagePreview,
@@ -83,7 +88,7 @@ import {
   logoutGoogleDrive,
 } from "./drive-auth.js";
 import { downloadDriveFile, renameDriveFile, uploadDocumentFile as uploadDriveDocumentFile } from "./drive-storage.js";
-import { isMegaConnected, ensureMegaAutoLogin } from "./mega-auth.js";
+import { isMegaConnected, ensureMegaAutoLogin, getMegaEmail, getLastMegaAuthError, loginToMega, logoutMega, needsMegaAuthRecovery, markMegaAuthFailed } from "./mega-auth.js";
 import {
   downloadMegaFile,
   renameMegaFile,
@@ -196,9 +201,18 @@ const fileInput = document.getElementById("file-input");
 const uploadDestinationPicker = document.getElementById("upload-destination-picker");
 const uploadDestinationOptions = document.getElementById("upload-destination-options");
 const uploadDestinationHint = document.getElementById("upload-destination-hint");
+const megaConnectPanel = document.getElementById("mega-connect-panel");
+const megaConnectTitle = document.getElementById("mega-connect-title");
+const megaConnectHint = document.getElementById("mega-connect-hint");
+const megaConnectError = document.getElementById("mega-connect-error");
+const megaConnectBtn = document.getElementById("mega-connect-btn");
+const megaDisconnectBtn = document.getElementById("mega-disconnect-btn");
+const megaEmailInput = document.getElementById("mega-email");
+const megaPasswordInput = document.getElementById("mega-password");
 const puterConnectPanel = document.getElementById("puter-connect-panel");
 const puterConnectTitle = document.getElementById("puter-connect-title");
 const puterConnectHint = document.getElementById("puter-connect-hint");
+const puterConnectError = document.getElementById("puter-connect-error");
 const puterConnectBtn = document.getElementById("puter-connect-btn");
 const puterDisconnectBtn = document.getElementById("puter-disconnect-btn");
 const puterEmailInput = document.getElementById("puter-email");
@@ -358,25 +372,123 @@ async function attachRemoteFileTargets(category, filename, blob, fileBytes) {
   };
 }
 
+function isLikelyAuthError(message) {
+  const text = String(message || "").toLowerCase();
+  return /auth|token|credential|login|sign|mega|puter|صلاح|اعتماد|تسجيل|رمز|غير صالح|expired|unauthorized|401|403|session|جلسة/.test(
+    text
+  );
+}
+
+function setAuthRecoveryMessage(element, message) {
+  if (!element) return;
+  const text = String(message || "").trim();
+  if (!text) {
+    element.textContent = "";
+    element.classList.add("hidden");
+    return;
+  }
+  element.textContent = text;
+  element.classList.remove("hidden");
+}
+
+function updateMegaConnectPanel() {
+  if (!megaConnectPanel) return;
+
+  const connected = isMegaConnected();
+  const recovery = needsMegaAuthRecovery();
+  const showPanel = recovery || !connected;
+  megaConnectPanel.classList.toggle("hidden", !showPanel);
+  megaConnectPanel.classList.toggle("is-recovery", recovery);
+
+  const lastError = getLastMegaAuthError();
+  setAuthRecoveryMessage(
+    megaConnectError,
+    recovery && lastError ? lastError : ""
+  );
+
+  megaConnectTitle.textContent = connected ? "تخزين MEGA" : "الاتصال بـ MEGA";
+  if (connected) {
+    megaConnectHint.textContent = `متصل — ${getMegaEmail()}`;
+  } else if (recovery && lastError) {
+    megaConnectHint.textContent = "فشل الاتصال التلقائي. أعد إدخال بيانات MEGA.";
+  } else {
+    megaConnectHint.textContent = "سجّل الدخول لرفع الملفات ومزامنة المكتبة.";
+  }
+
+  megaConnectBtn.textContent = connected ? "إعادة الاتصال" : "الاتصال بـ MEGA";
+  megaDisconnectBtn?.classList.toggle("hidden", !connected);
+
+  if (megaEmailInput && !megaEmailInput.value) {
+    megaEmailInput.value = getMegaEmail();
+  }
+}
+
+async function handleMegaConnect() {
+  try {
+    setStatus("جارٍ الاتصال بـ MEGA…");
+    await loginToMega(megaEmailInput?.value, megaPasswordInput?.value, { persistSession: true });
+    if (megaPasswordInput) megaPasswordInput.value = "";
+    updateMegaConnectPanel();
+    updateUploadAccess();
+
+    if (sessionPassword && !isHydrating) {
+      setStatus("جارٍ مزامنة المكتبة من MEGA…");
+      await hydrateDocuments(sessionPassword);
+    }
+
+    setStatus("تم الاتصال بـ MEGA.", true);
+    setTimeout(() => setStatus("", false), 2000);
+  } catch (error) {
+    updateMegaConnectPanel();
+    updateUploadAccess();
+    setStatus(error.message, true);
+  }
+}
+
+function handleMegaDisconnect() {
+  logoutMega({ clearSession: true });
+  if (megaPasswordInput) megaPasswordInput.value = "";
+  markMegaAuthFailed("تم قطع اتصال MEGA. أعد إدخال بيانات الاعتماد للمتابعة.");
+  updateMegaConnectPanel();
+  updateUploadAccess();
+  setStatus("تم قطع اتصال MEGA.", true);
+  setTimeout(() => setStatus("", false), 2000);
+}
+
 function updatePuterConnectPanel() {
   if (!puterConnectPanel) return;
 
   const preconfigured = isPuterPreconfigured();
   const connected = isPuterConnected();
+  const recovery = needsPuterAuthRecovery();
+  const showFields = shouldShowPuterLoginFields();
+  const showConnect = shouldShowPuterConnectButton();
   const loginFields = document.getElementById("puter-login-fields");
   const loginNote = puterConnectPanel.querySelector(".puter-login-note");
+  const lastError = getLastPuterAuthError();
+
+  puterConnectPanel.classList.toggle("is-recovery", recovery);
+  setAuthRecoveryMessage(puterConnectError, recovery && lastError ? lastError : "");
 
   puterConnectTitle.textContent = "Puter AI";
-  puterConnectHint.textContent = preconfigured
-    ? "جاهز — اضغط «استخراج النص» لبدء Puter AI تلقائياً."
-    : connected
-      ? `متصل — ${getPuterEmail() ? `آخر بريد: ${getPuterEmail()}` : "جاهز لاستخراج النص من الصور"}`
-      : "أدخل رمز API من لوحة Puter، أو اترك كلمة المرور فارغة لفتح نافذة تسجيل Puter.";
+  if (recovery && lastError) {
+    puterConnectHint.textContent = "فشل الاتصال بـ Puter. أدخل رمز API جديداً أو اتصل من جديد.";
+  } else if (preconfigured && connected) {
+    puterConnectHint.textContent = "جاهز — اضغط «استخراج النص» لبدء Puter AI تلقائياً.";
+  } else if (connected) {
+    puterConnectHint.textContent = getPuterEmail()
+      ? `متصل — آخر بريد: ${getPuterEmail()}`
+      : "جاهز لاستخراج النص من الصور";
+  } else {
+    puterConnectHint.textContent =
+      "أدخل رمز API من لوحة Puter، أو اترك كلمة المرور فارغة لفتح نافذة تسجيل Puter.";
+  }
+
   puterConnectBtn.textContent = connected ? "إعادة الاتصال" : "الاتصال بـ Puter";
-  puterConnectBtn.classList.toggle("hidden", preconfigured);
-  puterDisconnectBtn?.classList.toggle("hidden", preconfigured || !connected);
-  loginFields?.classList.toggle("hidden", preconfigured);
-  loginNote?.classList.toggle("hidden", preconfigured);
+  puterConnectBtn.classList.toggle("hidden", !showConnect);
+  puterDisconnectBtn?.classList.toggle("hidden", !connected && !recovery);
+  loginFields?.classList.toggle("hidden", !showFields);
+  loginNote?.classList.toggle("hidden", !showFields);
 
   if (puterEmailInput && !puterEmailInput.value) {
     puterEmailInput.value = getPuterEmail();
@@ -417,6 +529,10 @@ async function handlePuterConnect() {
       setTimeout(() => setStatus("", false), 2000);
     }
   } catch (error) {
+    if (isLikelyAuthError(error.message)) {
+      markPuterAuthFailed(error.message);
+      updatePuterConnectPanel();
+    }
     if (ocrDialog && !ocrDialog.classList.contains("hidden")) {
       setOcrDialogStatus(error.message, true);
     } else {
@@ -436,9 +552,13 @@ function handlePuterDisconnect() {
 function updateOcrDialogPanel() {
   const hint = document.getElementById("ocr-engine-hint");
   if (hint) {
-    hint.textContent = isPuterPreconfigured()
-      ? "Puter AI مُعد مسبقاً — اضغط «استخراج النص» للبدء."
-      : "استخراج النص عبر Puter AI — يبدأ تلقائياً عند الضغط على «استخراج النص»";
+    if (needsPuterAuthRecovery()) {
+      hint.textContent = "يلزم إعادة الاتصال بـ Puter AI — أدخل رمز API أو اتصل من جديد.";
+    } else {
+      hint.textContent = isPuterPreconfigured()
+        ? "Puter AI مُعد مسبقاً — اضغط «استخراج النص» للبدء."
+        : "استخراج النص عبر Puter AI — يبدأ تلقائياً عند الضغط على «استخراج النص»";
+    }
   }
   updatePuterConnectPanel();
   refreshPuterConnectPanel();
@@ -446,13 +566,17 @@ function updateOcrDialogPanel() {
 
 function updateUploadAccess() {
   renderUploadDestinationPicker();
+  updateMegaConnectPanel();
   const allowed = canUploadFiles();
   dropZone?.classList.toggle("is-disabled", !allowed);
   if (fileInput) fileInput.disabled = !allowed;
-  if (uploadDestinationHint && !allowed && hasUploadDestinationChoice()) {
+  if (uploadDestinationHint && !allowed) {
     const dest = getUploadDestination();
     if (dest === STORAGE_MODES.MEGA && !isMegaConnected()) {
-      uploadDestinationHint.textContent = "جارٍ الاتصال بـ MEGA… إن استمر التعطيل، حدّث الصفحة.";
+      uploadDestinationHint.textContent =
+        needsMegaAuthRecovery() && getLastMegaAuthError()
+          ? `MEGA: ${getLastMegaAuthError()}`
+          : "يلزم الاتصال بـ MEGA — أدخل بيانات الاعتماد أعلاه.";
     }
   }
   updateIngestButtonState();
@@ -1566,14 +1690,18 @@ async function openOcrDialog(docId) {
   ocrExtractBtn.disabled = false;
   ocrDialog?.classList.remove("hidden");
 
-  if (isPuterPreconfigured()) {
+  if (isPuterPreconfigured() && !needsPuterAuthRecovery()) {
     try {
       setOcrDialogStatus("جارٍ تجهيز Puter AI…");
       await ensurePuterConnected();
       setOcrDialogStatus("");
     } catch (error) {
+      markPuterAuthFailed(error.message);
+      updateOcrDialogPanel();
       setOcrDialogStatus(error.message, true);
     }
+  } else if (needsPuterAuthRecovery()) {
+    updateOcrDialogPanel();
   }
 }
 
@@ -1610,6 +1738,10 @@ async function confirmOcrExtract() {
       setStatus("", false);
     }, 1200);
   } catch (error) {
+    if (isLikelyAuthError(error.message)) {
+      markPuterAuthFailed(error.message);
+      updateOcrDialogPanel();
+    }
     setOcrDialogStatus(error.message, true);
     setStatus(`تعذّر استخراج النص: ${error.message}`, true);
     ocrExtractBtn.disabled = false;
@@ -2206,6 +2338,11 @@ async function ingestFiles(items) {
     setTimeout(() => setStatus("", false), 2500);
   } catch (error) {
     state.documents = state.documents.slice(0, documentsBefore);
+    if (isLikelyAuthError(error.message)) {
+      markMegaAuthFailed(error.message);
+      updateMegaConnectPanel();
+      updateUploadAccess();
+    }
     const hint = /bad credentials|DOCSHELF_GITHUB_TOKEN/i.test(error.message || "")
       ? " (تحقق من إعداد DOCSHELF_GITHUB_TOKEN في GitHub Actions.)"
       : "";
@@ -2409,6 +2546,14 @@ ocrExtractBtn?.addEventListener("click", () => confirmOcrExtract());
 ocrCancelBtn?.addEventListener("click", closeOcrDialog);
 ocrDialogBackdrop?.addEventListener("click", closeOcrDialog);
 
+megaConnectBtn?.addEventListener("click", () => {
+  handleMegaConnect();
+});
+
+megaDisconnectBtn?.addEventListener("click", () => {
+  handleMegaDisconnect();
+});
+
 puterConnectBtn?.addEventListener("click", () => {
   handlePuterConnect();
 });
@@ -2432,12 +2577,23 @@ export async function startApp({ user, auth }) {
   try {
     setStatus("جارٍ الاتصال بـ MEGA…");
     await ensureMegaAutoLogin();
+  } catch (error) {
+    markMegaAuthFailed(error.message);
+    setStatus(`تعذّر الاتصال بـ MEGA: ${error.message}`, true);
+  }
+
+  try {
     await hydrateDocuments(sessionPassword);
     applySearchOptionsToForm(loadSearchOptions());
     updateOcrDialogPanel();
     updateUploadAccess();
+    if (isMegaConnected()) {
+      setStatus("", false);
+    }
     showView();
   } catch (error) {
+    updateMegaConnectPanel();
+    updateUploadAccess();
     setStatus(`تعذّر تحميل المستندات: ${error.message}`, true);
     showView();
   }

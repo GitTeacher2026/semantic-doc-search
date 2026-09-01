@@ -1,5 +1,5 @@
 import { OCR_ENGINE, getOcrEngineLabel } from "./ocr-options.js";
-import { ensurePuterConnected, loadPuter } from "./puter-auth.js";
+import { ensurePuterConnected, loadPuter, markPuterAuthFailed } from "./puter-auth.js";
 
 const IMAGE_EXTENSIONS = new Set([
   ".jpg",
@@ -27,6 +27,7 @@ let activeProgressCallback = null;
 export { getOcrEngineLabel, OCR_ENGINE } from "./ocr-options.js";
 export {
   ensurePuterConnected,
+  getLastPuterAuthError,
   getPuterEmail,
   getPuterUserLabel,
   isPuterConnected,
@@ -34,6 +35,10 @@ export {
   loadPuter,
   loginToPuter,
   logoutPuter,
+  markPuterAuthFailed,
+  needsPuterAuthRecovery,
+  shouldShowPuterConnectButton,
+  shouldShowPuterLoginFields,
 } from "./puter-auth.js";
 
 export function isImageFile(filename) {
@@ -137,6 +142,10 @@ async function ocrWithPuter(blob) {
       return normalized;
     } catch (error) {
       lastError = error;
+      const message = error?.message || String(error);
+      if (/auth|token|401|403|unauthorized|permission|صلاح|رمز|جلسة/i.test(message)) {
+        markPuterAuthFailed("فشلت مصادقة Puter أثناء الاستخراج. أعد إدخال رمز API.");
+      }
     }
   }
 
