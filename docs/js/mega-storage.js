@@ -81,6 +81,22 @@ export async function downloadMegaFile(nodeId) {
   return data.buffer || data;
 }
 
+export async function moveMegaFileToCategory(nodeId, filename, newCategory) {
+  const buffer = await downloadMegaFile(nodeId);
+  const blob = new Blob([new Uint8Array(buffer)]);
+  const newId = await uploadDocumentFile(newCategory, filename, blob);
+  try {
+    const storage = getMegaStorage();
+    const file =
+      storage.files?.[nodeId] ||
+      Object.values(storage.files || {}).find((item) => item.nodeId === nodeId);
+    if (file) await file.delete(true);
+  } catch {
+    /* old file may already be gone */
+  }
+  return newId;
+}
+
 export async function renameMegaFile(nodeId, newName) {
   const storage = getMegaStorage();
   const file =

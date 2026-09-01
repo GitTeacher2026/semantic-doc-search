@@ -93,6 +93,7 @@ import {
 import {
   downloadMegaFile,
   renameMegaFile,
+  moveMegaFileToCategory,
   uploadDocumentFile as uploadMegaDocumentFile,
 } from "./mega-storage.js";
 import {
@@ -138,6 +139,12 @@ import {
   setFolderLock,
   syncFoldersFromDocuments,
 } from "./folders.js";
+import {
+  canSyncGitHubMega,
+  describeSyncSummary,
+  syncDocumentsGitHubMega,
+} from "./storage-sync.js";
+import { isGitHubStorageConfigured } from "./github-storage.js";
 
 const CHUNK_SIZE = 800;
 const CHUNK_OVERLAP = 120;
@@ -159,6 +166,7 @@ let pendingFolderLockName = null;
 let pendingFolderUnlockName = null;
 let pendingFolderUnlockCallback = null;
 let pendingFolderUnlockCancel = null;
+let pendingMoveTargetCategory = null;
 let authApi = null;
 let currentUser = null;
 let adminMembersApi = null;
@@ -377,12 +385,16 @@ function updateStoragePanel() {
   const label = getStorageModeLabel(mode);
   const hint = getStorageModeHint(mode);
   if (storageModeStatus) {
+    const syncHint =
+      isGitHubStorageConfigured() && isMegaConnected()
+        ? " · المزامنة بين GitHub و MEGA متاحة من صفحة الملفات"
+        : "";
     if (!canUploadFiles() && isCloudMode(mode)) {
-      storageModeStatus.textContent = `${label}: ${hint} — يلزم الاتصال قبل الرفع.`;
+      storageModeStatus.textContent = `${label}: ${hint} — يلزم الاتصال قبل الرفع.${syncHint}`;
     } else if (isCloudSyncEnabled()) {
-      storageModeStatus.textContent = `${label}: ${hint}`;
+      storageModeStatus.textContent = `${label}: ${hint}${syncHint}`;
     } else {
-      storageModeStatus.textContent = `${label}: ${hint}`;
+      storageModeStatus.textContent = `${label}: ${hint}${syncHint}`;
     }
   }
 }
@@ -1220,8 +1232,93 @@ function updateLibraryFilesSummary(docs) {
 function renderFilesPage() {
   renderFileBrowser(state.documents, {
     folders: state.folders,
+    syncAvailable: canSyncGitHubMega(),
     onChange: renderFilesPage,
   });
+}
+
+async function executeMoveDocumentToCategory(doc, category) {
+  const nextCategory = sanitizeCategoryInput(category);
+  if (!nextCategory || nextCategory === (doc.category || "عام")) return;
+  await requireFolderAccess(nextCategory);
+
+  if (doc.megaFileId) {
+    setStatus(`جارٍ نقل «${doc.filename}» إلى ${nextCategory}…`);
+    doc.megaFileId = await moveMegaFileToCategory(doc.megaFileId, doc.filename, nextCategory);
+  }
+
+  doc.category = nextCategory;
+  state.folders = ensureFolderRecord(state.folders, nextCategory);
+  await persistState();
+  renderLibrary();
+  setStatus(`تم نقل «${doc.filename}» إلى ${nextCategory}.`, true);
+  setTimeout(() => setStatus("", false), 2000);
+}
+
+async function moveDocumentToCategory(docId, targetCategory) {
+  const doc = findDocumentById(docId);
+  if (!doc) return;
+  if (doc.isLocked && !isDocUnlocked(doc)) {
+    pendingMoveTargetCategory = targetCategory;
+    openUnlockDialog(docId, "move");
+    return;
+  }
+  try {
+    await executeMoveDocumentToCategory(doc, targetCategory);
+  } catch (error) {
+    setStatus(`تعذّر نقل الملف: ${error.message}`, true);
+  }
+}
+
+async function ingestExternalFilesToCategory(fileList, category) {
+  if (!canUploadFiles()) {
+    setStatus("تعذّر رفع الملفات. تحقق من إعدادات التخزين.", true);
+    return;
+  }
+  const files = [...fileList];
+  if (!files.length) return;
+
+  try {
+    if (category) await requireFolderAccess(category);
+    const items = files.map((file) => {
+      const item = createPendingItem(file);
+      if (category) item.meta.folder = category;
+      return item;
+    });
+    await ingestFiles(items);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+async function handleSyncGitHubMega() {
+  if (!canSyncGitHubMega()) {
+    setStatus("يلزم ضبط GitHub والاتصال بـ MEGA للمزامنة.", true);
+    return;
+  }
+  if (
+    !window.confirm(
+      "مزامنة الملفات بين GitHub و MEGA؟\nسيتم نسخ كل ملف ليظهر في كلا المصدرين (قد يستغرق وقتاً)."
+    )
+  ) {
+    return;
+  }
+
+  try {
+    setStatus("جارٍ المزامنة بين GitHub و MEGA…");
+    const result = await syncDocumentsGitHubMega(state.documents, {
+      onProgress: ({ index, total, filename }) => {
+        setStatus(`مزامنة ${index}/${total}: ${filename}…`);
+      },
+    });
+    state.documents = result.documents;
+    await persistState();
+    renderLibrary();
+    setStatus(describeSyncSummary(result), true);
+    setTimeout(() => setStatus("", false), 3500);
+  } catch (error) {
+    setStatus(`تعذّرت المزامنة: ${error.message}`, true);
+  }
 }
 
 function renderLibrary() {
@@ -1900,6 +1997,9 @@ async function confirmUnlock() {
     downloadDocument(doc);
   } else if (action === "ocr") {
     openOcrDialog(docId);
+  } else if (action === "move" && pendingMoveTargetCategory) {
+    await executeMoveDocumentToCategory(doc, pendingMoveTargetCategory);
+    pendingMoveTargetCategory = null;
   } else {
     setStatus("تم فتح الملف المقفل.", true);
     setTimeout(() => setStatus("", false), 2000);
@@ -2205,6 +2305,9 @@ initFileBrowser(fileBrowserRoot, {
   onFolderRelock: handleFolderRelock,
   isDocUnlocked,
   isFolderUnlocked,
+  onDocumentMove: moveDocumentToCategory,
+  onExternalDrop: ingestExternalFilesToCategory,
+  onSyncGitHubMega: handleSyncGitHubMega,
 });
 applySearchOptionsToForm(loadSearchOptions());
 initTheme();

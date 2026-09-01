@@ -29,7 +29,10 @@ const DEFAULT_STATE = {
 let browserState = loadBrowserState();
 let rootElement = null;
 let actionHandlers = {};
+let browserOptions = {};
 let folderRecords = [];
+
+const DOC_DRAG_TYPE = "application/x-docshelf-doc-id";
 
 function isFolderLocked(name) {
   const folder = folderRecords.find((item) => item.name === name);
@@ -257,7 +260,7 @@ function renderGridItem(doc) {
   const storage = inferDocumentStorage(doc);
   const lockedClass = doc.isLocked ? " is-locked" : "";
   return `
-    <article class="fb-card${lockedClass}" data-id="${doc.id}">
+    <article class="fb-card fb-draggable${lockedClass}" draggable="true" data-doc-id="${doc.id}" data-id="${doc.id}">
       <div class="fb-card-icon" aria-hidden="true">${GROUP_ICONS[groupName] || GROUP_ICONS.other}</div>
       <div class="fb-card-body">
         <h3 class="fb-card-title" title="${escapeHtml(doc.filename)}">${escapeHtml(doc.filename)}</h3>
@@ -277,7 +280,7 @@ function renderListRow(doc) {
   const storage = inferDocumentStorage(doc);
   const lockedClass = doc.isLocked ? " is-locked" : "";
   return `
-    <article class="fb-list-row${lockedClass}" data-id="${doc.id}">
+    <article class="fb-list-row fb-draggable${lockedClass}" draggable="true" data-doc-id="${doc.id}" data-id="${doc.id}">
       <div class="fb-list-main">
         <span class="fb-list-icon" aria-hidden="true">${GROUP_ICONS[groupName] || GROUP_ICONS.other}</span>
         <div class="fb-list-info">
@@ -329,7 +332,7 @@ function renderSidebar(navData) {
       const unlocked = actionHandlers.isFolderUnlocked?.(category);
       const needsUnlock = locked && !unlocked;
       return `
-      <div class="fb-folder-row${activeCategory === category ? " active" : ""}${needsUnlock ? " is-locked" : ""}">
+      <div class="fb-folder-row${activeCategory === category ? " active" : ""}${needsUnlock ? " is-locked" : ""}" data-drop-category="${escapeHtml(category)}">
         <button class="fb-nav-item${activeCategory === category ? " active" : ""}" type="button" data-nav="category" data-value="${escapeHtml(category)}" data-locked="${needsUnlock ? "1" : "0"}">
           <span class="fb-nav-icon">${locked ? "🔒" : "📁"}</span>
           <span class="fb-nav-label">${escapeHtml(category)}</span>
@@ -388,12 +391,14 @@ function renderToolbar(filteredCount, totalCount) {
         <button id="fb-toggle-sources" class="btn ghost small" type="button">
           ${browserState.showAll ? "المصدر الحالي فقط" : "كل المصادر"}
         </button>
+        ${browserOptions.syncAvailable ? `<button id="fb-sync-github-mega" class="btn ghost small" type="button" title="نسخ الملفات بين GitHub و MEGA">مزامنة GitHub ⟷ MEGA</button>` : ""}
       </div>
     </div>
     <p class="fb-summary muted">
       ${filteredCount.toLocaleString("ar-EG")} ملف
       ${browserState.showAll ? "من كل المصادر" : `من ${activeLabel}`}
       ${browserState.query ? `— نتائج «${escapeHtml(browserState.query)}»` : ""}
+      · اسحب الملفات إلى المجلدات أو أفلتها من جهازك
     </p>`;
 }
 
@@ -462,7 +467,7 @@ function renderContent(documents) {
       ${renderSidebar(navData)}
       <section class="fb-main">
         ${renderToolbar(filtered.length, navData.total)}
-        <div class="fb-content">${content}</div>
+        <div class="fb-content" data-drop-category="${escapeHtml(browserState.category || "")}">${content}</div>
       </section>
     </div>`;
 }
@@ -505,6 +510,60 @@ function bindFolderActions(container, onChange) {
   container.querySelector("#fb-unlock-folder-btn")?.addEventListener("click", () => {
     const folder = container.querySelector("#fb-unlock-folder-btn")?.dataset.folder;
     if (folder) actionHandlers.onFolderUnlock?.(folder, onChange);
+  });
+}
+
+function bindDragDrop(container, onChange) {
+  container.querySelectorAll(".fb-draggable").forEach((element) => {
+    element.addEventListener("dragstart", (event) => {
+      const docId = element.dataset.docId;
+      if (!docId) return;
+      event.dataTransfer?.setData(DOC_DRAG_TYPE, docId);
+      event.dataTransfer?.setData("text/plain", docId);
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+      element.classList.add("is-dragging");
+    });
+    element.addEventListener("dragend", () => {
+      element.classList.remove("is-dragging");
+      container.querySelectorAll(".fb-drop-target").forEach((el) => el.classList.remove("fb-drop-target"));
+    });
+  });
+
+  const bindDropZone = (element) => {
+    element.addEventListener("dragover", (event) => {
+      const hasFiles = [...(event.dataTransfer?.types || [])].includes("Files");
+      const hasDoc = [...(event.dataTransfer?.types || [])].includes(DOC_DRAG_TYPE);
+      if (!hasFiles && !hasDoc) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = hasDoc ? "move" : "copy";
+      element.classList.add("fb-drop-target");
+    });
+    element.addEventListener("dragleave", (event) => {
+      if (event.currentTarget.contains(event.relatedTarget)) return;
+      element.classList.remove("fb-drop-target");
+    });
+    element.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      element.classList.remove("fb-drop-target");
+      const category = element.dataset.dropCategory || browserState.category || "";
+      const docId = event.dataTransfer?.getData(DOC_DRAG_TYPE);
+      const files = [...(event.dataTransfer?.files || [])];
+      if (docId && category) {
+        await actionHandlers.onDocumentMove?.(docId, category);
+        onChange?.();
+        return;
+      }
+      if (files.length) {
+        await actionHandlers.onExternalDrop?.(files, category || null);
+        onChange?.();
+      }
+    });
+  };
+
+  container.querySelectorAll("[data-drop-category]").forEach(bindDropZone);
+
+  container.querySelector("#fb-sync-github-mega")?.addEventListener("click", () => {
+    actionHandlers.onSyncGitHubMega?.();
   });
 }
 
@@ -575,13 +634,15 @@ export function initFileBrowser(element, handlers = {}) {
   actionHandlers = handlers;
 }
 
-export function renderFileBrowser(documents, { folders = [], onChange } = {}) {
+export function renderFileBrowser(documents, options = {}) {
   if (!rootElement) return;
-  folderRecords = folders;
+  browserOptions = options;
+  folderRecords = options.folders || [];
   rootElement.innerHTML = renderContent(documents);
   bindActions(rootElement);
   bindFolderActions(rootElement, onChange);
-  bindNavigation(rootElement, onChange);
+  bindDragDrop(rootElement, options.onChange);
+  bindNavigation(rootElement, options.onChange);
 }
 
 export function getFileCountLabel(documents) {

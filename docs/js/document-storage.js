@@ -11,6 +11,7 @@ export const STORAGE_BACKENDS = {
 
 export function inferDocumentStorage(doc) {
   if (doc?.storageBackend) return doc.storageBackend;
+  if (doc?.fileData && doc?.megaFileId) return getActiveStorageBackend();
   if (doc?.onedriveFileId) return STORAGE_BACKENDS.ONEDRIVE;
   if (doc?.megaFileId) return STORAGE_BACKENDS.MEGA;
   if (doc?.driveFileId) return STORAGE_BACKENDS.DRIVE;
