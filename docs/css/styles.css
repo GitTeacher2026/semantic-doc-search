@@ -2182,7 +2182,18 @@ body.pdf-studio-open {
   cursor: pointer;
 }
 
-.fb-card.is-pdf .fb-card-icon:hover {
+button.fb-card-icon {
+  border: 0;
+  background: transparent;
+  padding: 0.35rem;
+  width: 100%;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+}
+
+.fb-card.is-pdf .fb-card-icon:hover,
+button.fb-card-icon:hover {
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
 }
 
