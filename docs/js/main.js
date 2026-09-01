@@ -7,9 +7,15 @@ import {
   isAuthenticated,
 } from "./auth-page.js";
 import { initTheme } from "./theme.js";
-import { startApp } from "./app.js?v=20260901r";
+
+const APP_MODULE_URL = "./app.js?v=20260901s";
 
 initTheme();
+
+async function loadApp() {
+  const module = await import(APP_MODULE_URL);
+  return module.startApp;
+}
 
 async function main() {
   const resetToken = handleResetFromUrl();
@@ -18,6 +24,7 @@ async function main() {
   const auth = initAuthPage({
     async onLoginSuccess(user) {
       auth.showApp();
+      const startApp = await loadApp();
       await startApp({ user, auth });
     },
   });
@@ -31,6 +38,7 @@ async function main() {
     const user = getCurrentUser();
     if (user) {
       auth.showApp();
+      const startApp = await loadApp();
       await startApp({ user, auth });
       return;
     }

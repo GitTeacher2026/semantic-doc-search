@@ -620,10 +620,6 @@ export async function authenticateOrRegisterWithOAuth(profile) {
   return { type: "pending", message, pendingUser, notification };
 }
 
-export async function upgradeMemberToAdmin(memberId, actor) {
-  return setMemberRole(memberId, "admin", actor);
-}
-
 export async function deleteMember(memberId, actor) {
   assertAdminActor(actor);
   const { db, sha } = await loadUsersDbWithSha();
