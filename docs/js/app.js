@@ -232,6 +232,13 @@ const renameConfirmBtn = document.getElementById("rename-confirm-btn");
 const renameCancelBtn = document.getElementById("rename-cancel-btn");
 const renameDialogBackdrop = document.getElementById("rename-dialog-backdrop");
 
+const folderCreateDialog = document.getElementById("folder-create-dialog");
+const folderCreateName = document.getElementById("folder-create-name");
+const folderCreateError = document.getElementById("folder-create-dialog-error");
+const folderCreateConfirmBtn = document.getElementById("folder-create-confirm-btn");
+const folderCreateCancelBtn = document.getElementById("folder-create-cancel-btn");
+const folderCreateDialogBackdrop = document.getElementById("folder-create-dialog-backdrop");
+
 const lockDialog = document.getElementById("lock-dialog");
 const lockDialogTitle = document.getElementById("lock-dialog-title");
 const lockDialogSub = document.getElementById("lock-dialog-sub");
@@ -1519,6 +1526,12 @@ function hasDuplicateFilename(filename, excludeId = null) {
   );
 }
 
+function hasDuplicateFolderName(name) {
+  const target = sanitizeCategoryInput(name);
+  if (!target) return false;
+  return Boolean(getFolderByName(state.folders, target));
+}
+
 function openFolderRenameDialog(folderName) {
   if (!renameDialog) return;
   pendingFolderRenameName = folderName;
@@ -1530,6 +1543,47 @@ function openFolderRenameDialog(folderName) {
   renameDialog.classList.remove("hidden");
   renameFilename.focus();
   renameFilename.select();
+}
+
+function openFolderCreateDialog() {
+  if (!folderCreateDialog) return;
+  folderCreateName.value = "";
+  folderCreateError.classList.add("hidden");
+  folderCreateDialog.classList.remove("hidden");
+  folderCreateName.focus();
+}
+
+function closeFolderCreateDialog() {
+  folderCreateDialog?.classList.add("hidden");
+  folderCreateError?.classList.add("hidden");
+}
+
+async function confirmFolderCreate() {
+  const name = sanitizeCategoryInput(folderCreateName?.value);
+  if (!name) {
+    folderCreateError.textContent = "أدخل اسماً صالحاً للمجلد.";
+    folderCreateError.classList.remove("hidden");
+    return;
+  }
+  if (hasDuplicateFolderName(name)) {
+    folderCreateError.textContent = `المجلد «${name}» موجود بالفعل.`;
+    folderCreateError.classList.remove("hidden");
+    return;
+  }
+
+  try {
+    setStatus("جارٍ إنشاء المجلد…");
+    state.folders = ensureFolderRecord(state.folders, name);
+    await persistState();
+    closeFolderCreateDialog();
+    setFileBrowserState({ category: name, group: null });
+    renderLibrary();
+    setStatus(`تم إنشاء المجلد «${name}».`, true);
+    setTimeout(() => setStatus("", false), 2000);
+  } catch (error) {
+    folderCreateError.textContent = error.message;
+    folderCreateError.classList.remove("hidden");
+  }
 }
 
 async function handleFolderDelete(folderName) {
@@ -2102,6 +2156,13 @@ renameFilename?.addEventListener("keydown", (event) => {
   if (event.key === "Enter") confirmRename();
 });
 
+if (folderCreateConfirmBtn) folderCreateConfirmBtn.addEventListener("click", confirmFolderCreate);
+if (folderCreateCancelBtn) folderCreateCancelBtn.addEventListener("click", closeFolderCreateDialog);
+if (folderCreateDialogBackdrop) folderCreateDialogBackdrop.addEventListener("click", closeFolderCreateDialog);
+folderCreateName?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") confirmFolderCreate();
+});
+
 if (lockConfirmBtn) lockConfirmBtn.addEventListener("click", confirmLock);
 if (lockCancelBtn) lockCancelBtn.addEventListener("click", closeLockDialog);
 if (lockDialogBackdrop) lockDialogBackdrop.addEventListener("click", closeLockDialog);
@@ -2151,6 +2212,7 @@ initFileBrowser(fileBrowserRoot, {
   onUnlock: handleUnlockButton,
   onOcr: openOcrDialog,
   onFolderRename: openFolderRenameDialog,
+  onFolderCreate: openFolderCreateDialog,
   onFolderDelete: handleFolderDelete,
   onFolderLock: openFolderLockDialog,
   onFolderUnlock: handleFolderUnlock,

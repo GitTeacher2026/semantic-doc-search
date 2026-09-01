@@ -13,14 +13,13 @@ import {
   listDocumentStorageBackends,
 } from "./document-storage.js";
 
-const BROWSER_STATE_KEY = "docshelf_file_browser_v2";
+const BROWSER_STATE_KEY = "docshelf_file_browser_v3";
 
 const DEFAULT_STATE = {
   storage: null,
   category: null,
   group: null,
   query: "",
-  view: "grid",
   sort: "name",
 };
 
@@ -244,30 +243,21 @@ function renderOcrAction(doc, { compact = false } = {}) {
   return `<button class="btn ghost small ocr-btn" data-id="${doc.id}" type="button">${label}</button>`;
 }
 
-function renderDocActions(doc, { compact = false } = {}) {
+function renderDocActions(doc) {
   const locked = doc.isLocked;
   const unlocked = actionHandlers.isDocUnlocked?.(doc);
   const lockBtn = locked
     ? `<button class="btn ghost small unlock-btn" data-id="${doc.id}" type="button" title="${unlocked ? "إعادة القفل" : "فتح"}">${unlocked ? "🔒" : "🔓"}</button>`
     : `<button class="btn ghost small lock-btn" data-id="${doc.id}" type="button" title="قفل">🔒</button>`;
 
-  if (compact) {
-    return `
-      <div class="fb-card-actions">
-        ${renderOcrAction(doc, { compact: true })}
-        <button class="btn ghost small download-btn" data-id="${doc.id}" type="button" title="تنزيل">⬇</button>
-        <button class="btn ghost small rename-btn" data-id="${doc.id}" type="button" title="إعادة تسمية">✏️</button>
-        ${lockBtn}
-        <button class="btn ghost small delete-btn" data-id="${doc.id}" type="button" title="حذف">🗑</button>
-      </div>`;
-  }
-
   return `
-    ${renderOcrAction(doc)}
-    <button class="btn ghost small download-btn" data-id="${doc.id}" type="button">تنزيل</button>
-    <button class="btn ghost small rename-btn" data-id="${doc.id}" type="button">إعادة تسمية</button>
-    ${locked ? `<button class="btn ghost small unlock-btn" data-id="${doc.id}" type="button">${unlocked ? "إعادة القفل" : "فتح"}</button>` : `<button class="btn ghost small lock-btn" data-id="${doc.id}" type="button">قفل</button>`}
-    <button class="btn ghost small delete-btn" data-id="${doc.id}" type="button">حذف</button>`;
+    <div class="fb-card-actions">
+      ${renderOcrAction(doc, { compact: true })}
+      <button class="btn ghost small download-btn" data-id="${doc.id}" type="button" title="تنزيل">⬇</button>
+      <button class="btn ghost small rename-btn" data-id="${doc.id}" type="button" title="إعادة تسمية">✏️</button>
+      ${lockBtn}
+      <button class="btn ghost small delete-btn" data-id="${doc.id}" type="button" title="حذف">🗑</button>
+    </div>`;
 }
 
 function renderStorageBadges(doc) {
@@ -301,15 +291,7 @@ function renderSourceSection(title, icon, storage, docs) {
       </section>`;
   }
 
-  const content =
-    browserState.view === "list"
-      ? `<div class="fb-list">
-          <div class="fb-list-header muted">
-            <span>الملف</span><span>التصنيف</span><span>التخزين</span><span>الحجم</span><span>إجراءات</span>
-          </div>
-          ${docs.map((doc) => renderListRow(doc)).join("")}
-        </div>`
-      : `<div class="fb-grid">${docs.map((doc) => renderGridItem(doc)).join("")}</div>`;
+  const content = `<div class="fb-grid">${docs.map((doc) => renderGridItem(doc)).join("")}</div>`;
 
   return `
     <section class="fb-source-section" data-source-section="${storage}">
@@ -346,26 +328,7 @@ function renderGridItem(doc) {
           ${doc.isLocked ? '<span class="lock-badge">🔒 مقفل</span>' : ""}
         </div>
       </div>
-      ${renderDocActions(doc, { compact: true })}
-    </article>`;
-}
-
-function renderListRow(doc) {
-  const groupName = doc.fileGroup || fileGroup(doc.filename);
-  const lockedClass = doc.isLocked ? " is-locked" : "";
-  return `
-    <article class="fb-list-row fb-draggable${lockedClass}" draggable="true" data-doc-id="${doc.id}" data-id="${doc.id}">
-      <div class="fb-list-main">
-        <span class="fb-list-icon" aria-hidden="true">${GROUP_ICONS[groupName] || GROUP_ICONS.other}</span>
-        <div class="fb-list-info">
-          <div class="fb-list-title">${doc.isLocked ? "🔒 " : ""}${escapeHtml(doc.filename)}</div>
-          <div class="fb-list-sub muted">${escapeHtml(getDocumentStoragePath(doc))}</div>
-        </div>
-      </div>
-      <div class="fb-list-category muted">${escapeHtml(doc.category || "عام")}</div>
-      <div class="fb-list-storage">${renderStorageBadges(doc)}</div>
-      <div class="fb-list-size muted">${formatDocSizeLabel(doc)}</div>
-      <div class="fb-list-actions">${renderDocActions(doc)}</div>
+      ${renderDocActions(doc)}
     </article>`;
 }
 
@@ -423,7 +386,11 @@ function renderSidebar(navData) {
         <span class="fb-nav-count">${navData.total}</span>
       </button>
       ${storageItems ? `<div class="fb-nav-section">مصادر التخزين</div>${storageItems}` : ""}
-      ${categoryItems ? `<div class="fb-nav-section">التصنيفات</div>${categoryItems}` : ""}
+      <div class="fb-nav-section fb-nav-section-head">
+        <span>التصنيفات</span>
+        <button id="fb-create-folder-btn" class="btn ghost small fb-create-folder-btn" type="button" title="إنشاء مجلد جديد">+ مجلد</button>
+      </div>
+      ${categoryItems || `<p class="fb-nav-empty muted">لا توجد مجلدات بعد.</p>`}
     </aside>`;
 }
 
@@ -458,10 +425,6 @@ function renderToolbar(filteredCount, totalCount) {
             <option value="category"${browserState.sort === "category" ? " selected" : ""}>التصنيف</option>
           </select>
         </label>
-        <div class="fb-view-toggle" role="group" aria-label="طريقة العرض">
-          <button id="fb-view-grid" class="fb-view-btn${browserState.view === "grid" ? " active" : ""}" type="button" title="شبكة">▦</button>
-          <button id="fb-view-list" class="fb-view-btn${browserState.view === "list" ? " active" : ""}" type="button" title="قائمة">☰</button>
-        </div>
         ${browserOptions.syncAvailable ? `<button id="fb-sync-github-mega" class="btn ghost small" type="button" title="نسخ الملفات بين GitHub و MEGA">مزامنة GitHub ⟷ MEGA</button>` : ""}
       </div>
     </div>
@@ -477,16 +440,16 @@ function renderContent(documents) {
   const filtered = filterDocuments(documents);
   const navData = collectNavData(documents);
 
-  if (!documents.length) {
+  if (!documents.length && !folderRecords.length) {
     return `
       <div class="fb-shell">
-        ${renderSidebar({ total: 0, storages: [], categories: [], groups: new Map() })}
+        ${renderSidebar(navData)}
         <section class="fb-main">
           ${renderToolbar(0, 0)}
           <div class="fb-empty">
             <div class="fb-empty-icon" aria-hidden="true">📂</div>
             <h3>لا توجد ملفات بعد</h3>
-            <p class="muted">ارفع ملفات من صفحة الرفع والفهرسة لعرضها هنا.</p>
+            <p class="muted">أنشئ مجلداً من الشريط الجانبي أو ارفع ملفات من صفحة الرفع والفهرسة.</p>
           </div>
         </section>
       </div>`;
@@ -509,15 +472,25 @@ function renderContent(documents) {
   }
 
   if (!filtered.length) {
+    const emptyTitle = browserState.query
+      ? "لا توجد ملفات مطابقة"
+      : browserState.category
+        ? "المجلد فارغ"
+        : "لا توجد ملفات";
+    const emptyHint = browserState.query
+      ? "جرّب تغيير البحث أو اختيار مجلد آخر من الشريط الجانبي."
+      : browserState.category
+        ? `لا توجد ملفات في «${escapeHtml(browserState.category)}» بعد. اسحب ملفات إلى هذا المجلد أو ارفعها من صفحة الرفع.`
+        : "أنشئ مجلداً من الشريط الجانبي أو ارفع ملفات من صفحة الرفع والفهرسة.";
     return `
       <div class="fb-shell">
         ${renderSidebar(navData)}
         <section class="fb-main">
           ${renderToolbar(0, navData.total)}
           <div class="fb-empty">
-            <div class="fb-empty-icon" aria-hidden="true">🔍</div>
-            <h3>لا توجد ملفات مطابقة</h3>
-            <p class="muted">جرّب تغيير البحث أو اختيار مجلد آخر من الشريط الجانبي.</p>
+            <div class="fb-empty-icon" aria-hidden="true">${browserState.query ? "🔍" : "📂"}</div>
+            <h3>${emptyTitle}</h3>
+            <p class="muted">${emptyHint}</p>
           </div>
         </section>
       </div>`;
@@ -525,14 +498,7 @@ function renderContent(documents) {
 
   const content = shouldRenderSplitSources()
     ? renderSplitSourceContent(filtered)
-    : browserState.view === "list"
-      ? `<div class="fb-list">
-          <div class="fb-list-header muted">
-            <span>الملف</span><span>التصنيف</span><span>التخزين</span><span>الحجم</span><span>إجراءات</span>
-          </div>
-          ${filtered.map((doc) => renderListRow(doc)).join("")}
-        </div>`
-      : `<div class="fb-grid">${filtered.map((doc) => renderGridItem(doc)).join("")}</div>`;
+    : `<div class="fb-grid">${filtered.map((doc) => renderGridItem(doc)).join("")}</div>`;
 
   return `
     <div class="fb-shell">
@@ -685,14 +651,8 @@ function bindNavigation(container, onChange) {
     onChange?.();
   });
 
-  container.querySelector("#fb-view-grid")?.addEventListener("click", () => {
-    setFileBrowserState({ view: "grid" });
-    onChange?.();
-  });
-
-  container.querySelector("#fb-view-list")?.addEventListener("click", () => {
-    setFileBrowserState({ view: "list" });
-    onChange?.();
+  container.querySelector("#fb-create-folder-btn")?.addEventListener("click", () => {
+    actionHandlers.onFolderCreate?.();
   });
 }
 

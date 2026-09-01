@@ -1830,6 +1830,26 @@ html[data-theme="dark"] .pending-image-fields.is-incomplete {
   color: var(--muted);
 }
 
+.fb-nav-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.85rem;
+}
+
+.fb-create-folder-btn {
+  padding: 0.2rem 0.55rem;
+  min-height: auto;
+}
+
+.fb-nav-empty {
+  margin: 0.25rem 0.75rem 0.5rem;
+  font-size: 0.85rem;
+}
+
 .fb-folder-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

@@ -394,6 +394,21 @@
     </div>
   </div>
 
+  <div id="folder-create-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="folder-create-dialog-title">
+    <div class="modal-backdrop" id="folder-create-dialog-backdrop"></div>
+    <div class="modal-card">
+      <h2 id="folder-create-dialog-title">مجلد جديد</h2>
+      <p class="muted">أدخل اسماً للمجلد الجديد. يمكنك رفع الملفات إليه لاحقاً.</p>
+      <label for="folder-create-name">اسم المجلد</label>
+      <input id="folder-create-name" type="text" autocomplete="off" placeholder="مثال: إدارة ومشاريع" />
+      <p id="folder-create-dialog-error" class="error hidden"></p>
+      <div class="modal-actions">
+        <button id="folder-create-cancel-btn" class="btn ghost" type="button">إلغاء</button>
+        <button id="folder-create-confirm-btn" class="btn primary" type="button">إنشاء</button>
+      </div>
+    </div>
+  </div>
+
   <div id="delete-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title">
     <div class="modal-backdrop" id="delete-dialog-backdrop"></div>
     <div class="modal-card">
@@ -514,6 +529,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/main.js?v=20260901m"></script>
+  <script type="module" src="js/main.js?v=20260901n"></script>
 </body>
 </html>
