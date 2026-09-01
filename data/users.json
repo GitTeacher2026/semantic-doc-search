@@ -14,5 +14,16 @@
       "resetExpiresAt": "2026-08-31T19:21:17.466Z"
     }
   ],
-  "pending": []
+  "pending": [
+    {
+      "id": "ef6da808-3716-4c71-8f75-e6f14ed1027f",
+      "username": "UgaritPharma",
+      "firstName": "Ugarit",
+      "lastName": "Pharma",
+      "email": "qraywi2026@proton.me",
+      "passwordHash": "GYmkJLDsbptlmHpeOfgrkpQ+qcKwhWfh4WOSoFXPLuI=",
+      "approvalToken": "4db4d2ba38974adeab06117d174b1e7c",
+      "createdAt": "2026-09-01T09:00:19.665Z"
+    }
+  ]
 }
