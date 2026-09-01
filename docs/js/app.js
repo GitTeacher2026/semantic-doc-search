@@ -1460,7 +1460,8 @@ navTrashBtn?.addEventListener("click", () => switchAppPage("trash"));
 gotoFilesBtn?.addEventListener("click", () => switchAppPage("files"));
 trashBackBtn?.addEventListener("click", () => switchAppPage("library"));
 purgeAllTrashBtn?.addEventListener("click", async () => {
-  const count = (state.trash || []).length;
+  const trashSnapshot = [...(state.trash || [])];
+  const count = trashSnapshot.length;
   if (!count) return;
   if (
     !window.confirm(
@@ -1469,11 +1470,13 @@ purgeAllTrashBtn?.addEventListener("click", async () => {
   ) {
     return;
   }
-  state = purgeAllTrash(state);
+
   try {
     setStatus("جارٍ إفراغ سلة المهملات…");
-    await purgeDocumentsStorage(trash);
+    await purgeDocumentsStorage(trashSnapshot);
+    state = purgeAllTrash(state);
     await persistState();
+    renderLibrary();
     renderTrash();
     setStatus("تم إفراغ سلة المهملات.", true);
     setTimeout(() => setStatus("", false), 2000);
@@ -1542,11 +1545,12 @@ function renderTrash() {
       const doc = state.trash.find((item) => item.id === btn.dataset.id);
       if (!doc) return;
       if (!window.confirm(`حذف «${doc.filename}» نهائياً؟ لا يمكن التراجع.`)) return;
-      await purgeDocumentStorage(doc);
-      state = permanentlyDelete(state, btn.dataset.id);
       try {
         setStatus("جارٍ الحذف النهائي…");
+        await purgeDocumentStorage(doc);
+        state = permanentlyDelete(state, btn.dataset.id);
         await persistState();
+        renderLibrary();
         renderTrash();
         setStatus("تم الحذف النهائي.", true);
         setTimeout(() => setStatus("", false), 2000);

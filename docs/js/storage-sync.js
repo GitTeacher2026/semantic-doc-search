@@ -56,11 +56,18 @@ function mergeFolderRecords(left = [], right = []) {
 
 export function mergeDocumentStates(...states) {
   const normalized = states.map((state) => normalizeState(state));
+  const purgedDocumentIds = uniqueIds(normalized.flatMap((state) => state.purgedDocumentIds));
+
   return normalizeState({
     documents: mergeDocuments(normalized.flatMap((state) => state.documents)),
     trash: mergeDocuments(normalized.flatMap((state) => state.trash)),
     folders: mergeFolderRecords(...normalized.map((state) => state.folders)),
+    purgedDocumentIds,
   });
+}
+
+function uniqueIds(ids = []) {
+  return [...new Set(ids.filter(Boolean))];
 }
 
 function stripEmbeddedFileData(state) {

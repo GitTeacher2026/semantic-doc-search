@@ -176,15 +176,32 @@ export async function renameMegaFile(nodeId, newName) {
   return safeName;
 }
 
+function sortIndexFiles(matches) {
+  return [...matches].sort((a, b) => {
+    const aTs = Number(a.timestamp || a.mtime || a.modified || 0);
+    const bTs = Number(b.timestamp || b.mtime || b.modified || 0);
+    if (aTs !== bTs) return bTs - aTs;
+    return String(b.nodeId || "").localeCompare(String(a.nodeId || ""));
+  });
+}
+
 export async function fetchEncryptedStore() {
   const root = await getRootFolder();
-  const matches = listChildFiles(root, INDEX_FILE_NAME);
+  const matches = sortIndexFiles(listChildFiles(root, INDEX_FILE_NAME));
   if (!matches.length) {
     indexFile = null;
     return { envelope: null, fileId: null };
   }
 
-  const existing = matches[matches.length - 1];
+  const existing = matches[0];
+  for (const stale of matches.slice(1)) {
+    try {
+      await stale.delete(true);
+    } catch {
+      /* ignore duplicate index files */
+    }
+  }
+
   indexFile = existing;
   const buffer = await existing.downloadBuffer();
   const text = new TextDecoder().decode(buffer);
