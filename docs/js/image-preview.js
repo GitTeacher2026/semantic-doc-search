@@ -1,12 +1,14 @@
 const previewUrlCache = new Map();
 
-const MIN_SCALE = 0.25;
-const MAX_SCALE = 5;
+const MIN_SCALE = 0.1;
+const MAX_SCALE = 8;
 
 let lightboxReady = false;
 let scale = 1;
 let translateX = 0;
 let translateY = 0;
+let baseWidth = 0;
+let baseHeight = 0;
 let isDragging = false;
 let dragStartX = 0;
 let dragStartY = 0;
@@ -14,6 +16,7 @@ let dragOriginX = 0;
 let dragOriginY = 0;
 let pinchStartDistance = 0;
 let pinchStartScale = 1;
+let stageResizeObserver = null;
 
 let activeObjectUrl = "";
 let previewContext = {
@@ -30,6 +33,7 @@ function releaseActiveObjectUrl() {
 
 let modalEl;
 let stageEl;
+let frameEl;
 let imgEl;
 let titleEl;
 let zoomLevelEl;
@@ -76,12 +80,31 @@ function clampScale(value) {
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
 }
 
+function getStageRect() {
+  return stageEl?.getBoundingClientRect() || { width: 0, height: 0, left: 0, top: 0 };
+}
+
 function getStageCenter() {
-  const rect = stageEl?.getBoundingClientRect();
-  if (!rect) return { x: 0, y: 0 };
+  const rect = getStageRect();
   return {
     x: rect.left + rect.width / 2,
     y: rect.top + rect.height / 2,
+  };
+}
+
+function computeFitSize() {
+  const naturalWidth = imgEl?.naturalWidth || 0;
+  const naturalHeight = imgEl?.naturalHeight || 0;
+  const { width: stageWidth, height: stageHeight } = getStageRect();
+
+  if (!naturalWidth || !naturalHeight || !stageWidth || !stageHeight) {
+    return { width: 0, height: 0 };
+  }
+
+  const ratio = Math.min(stageWidth / naturalWidth, stageHeight / naturalHeight);
+  return {
+    width: Math.max(1, Math.round(naturalWidth * ratio)),
+    height: Math.max(1, Math.round(naturalHeight * ratio)),
   };
 }
 
@@ -91,20 +114,60 @@ function updateZoomButtons() {
 }
 
 function updateTransform() {
-  if (!imgEl) return;
-  imgEl.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+  if (!frameEl) return;
+  frameEl.style.transform =
+    `translate(calc(-50% + ${translateX}px), calc(-50% + ${translateY}px)) scale(${scale})`;
   if (zoomLevelEl) {
     zoomLevelEl.textContent = `${Math.round(scale * 100)}%`;
   }
   stageEl?.classList.toggle("is-zoomed", scale > 1.01);
+  stageEl?.classList.toggle("is-dragging", isDragging);
   updateZoomButtons();
+}
+
+function resetPan() {
+  translateX = 0;
+  translateY = 0;
 }
 
 function resetView() {
   scale = 1;
-  translateX = 0;
-  translateY = 0;
+  resetPan();
   updateTransform();
+}
+
+function setFrameSize(width, height) {
+  if (!frameEl) return;
+  baseWidth = width;
+  baseHeight = height;
+  frameEl.style.width = `${width}px`;
+  frameEl.style.height = `${height}px`;
+}
+
+function applyImageLayout({ preserveScale = false } = {}) {
+  if (!imgEl || !frameEl || !stageEl) return;
+
+  const previousScale = scale;
+  const fit = computeFitSize();
+  if (!fit.width || !fit.height) return;
+
+  setFrameSize(fit.width, fit.height);
+
+  if (!preserveScale) {
+    scale = 1;
+    resetPan();
+  } else {
+    scale = clampScale(previousScale);
+  }
+
+  updateTransform();
+}
+
+function scheduleImageLayout({ preserveScale = false } = {}) {
+  requestAnimationFrame(() => {
+    applyImageLayout({ preserveScale });
+    requestAnimationFrame(() => applyImageLayout({ preserveScale }));
+  });
 }
 
 function setScale(nextScale, originX, originY) {
@@ -123,9 +186,7 @@ function setScale(nextScale, originX, originY) {
   translateY = (translateY - focalY) * ratio + focalY;
 
   if (scale <= 1.01) {
-    scale = Math.max(MIN_SCALE, scale);
-    translateX = 0;
-    translateY = 0;
+    resetPan();
   }
 
   updateTransform();
@@ -136,11 +197,7 @@ function zoomBy(delta, originX, originY) {
 }
 
 function fitImage() {
-  resetView();
-}
-
-function applyImageLayout() {
-  resetView();
+  applyImageLayout({ preserveScale: false });
 }
 
 function updateCommentsPanel() {
@@ -184,21 +241,28 @@ function closeLightbox() {
   document.body.classList.remove("image-preview-open");
   if (imgEl) {
     imgEl.removeAttribute("src");
-    imgEl.removeAttribute("style");
     imgEl.alt = "";
     imgEl.onload = null;
+  }
+  if (frameEl) {
+    frameEl.removeAttribute("style");
   }
   releaseActiveObjectUrl();
   previewContext = { docId: null, comment: "", onSaveComment: null };
   updateCommentsPanel();
   scale = 1;
-  translateX = 0;
-  translateY = 0;
+  baseWidth = 0;
+  baseHeight = 0;
+  resetPan();
+}
+
+function handleImageReady() {
+  scheduleImageLayout({ preserveScale: false });
 }
 
 function openLightbox(url, filename = "", options = {}) {
   ensureLightbox();
-  if (!modalEl || !imgEl) return;
+  if (!modalEl || !imgEl || !frameEl) return;
 
   previewContext = {
     docId: options.docId || null,
@@ -207,13 +271,25 @@ function openLightbox(url, filename = "", options = {}) {
   };
   updateCommentsPanel();
 
-  resetView();
-  imgEl.onload = () => applyImageLayout();
+  scale = 1;
+  resetPan();
+  setFrameSize(1, 1);
+  updateTransform();
+
+  imgEl.onload = handleImageReady;
   imgEl.src = url;
   imgEl.alt = filename;
   if (titleEl) titleEl.textContent = filename;
+
   modalEl.classList.remove("hidden");
   document.body.classList.add("image-preview-open");
+
+  if (imgEl.complete && imgEl.naturalWidth > 0) {
+    handleImageReady();
+  } else {
+    scheduleImageLayout({ preserveScale: false });
+  }
+
   updateZoomButtons();
 }
 
@@ -236,7 +312,7 @@ function onPointerDown(event) {
   dragOriginX = translateX;
   dragOriginY = translateY;
   stageEl.setPointerCapture?.(event.pointerId);
-  stageEl.classList.add("is-dragging");
+  updateTransform();
 }
 
 function onPointerMove(event) {
@@ -249,14 +325,14 @@ function onPointerMove(event) {
 function onPointerUp(event) {
   if (!isDragging) return;
   isDragging = false;
-  stageEl?.classList.remove("is-dragging");
   stageEl?.releasePointerCapture?.(event.pointerId);
+  updateTransform();
 }
 
 function onWheel(event) {
   if (!modalEl || modalEl.classList.contains("hidden")) return;
   event.preventDefault();
-  const delta = event.deltaY < 0 ? 0.12 : -0.12;
+  const delta = event.deltaY < 0 ? 0.15 : -0.15;
   zoomBy(delta, event.clientX, event.clientY);
 }
 
@@ -301,9 +377,15 @@ function onKeyDown(event) {
     closeLightbox();
   }
   const center = getStageCenter();
-  if (event.key === "+" || event.key === "=") zoomBy(0.2, center.x, center.y);
-  if (event.key === "-") zoomBy(-0.2, center.x, center.y);
+  if (event.key === "+" || event.key === "=") zoomBy(0.25, center.x, center.y);
+  if (event.key === "-") zoomBy(-0.25, center.x, center.y);
   if (event.key === "0") fitImage();
+}
+
+function onStageResize() {
+  if (!modalEl || modalEl.classList.contains("hidden")) return;
+  if (!imgEl?.naturalWidth) return;
+  applyImageLayout({ preserveScale: true });
 }
 
 function ensureLightbox() {
@@ -311,6 +393,7 @@ function ensureLightbox() {
 
   modalEl = document.getElementById("image-preview-modal");
   stageEl = document.getElementById("image-preview-stage");
+  frameEl = document.getElementById("image-preview-frame");
   imgEl = document.getElementById("image-preview-img");
   titleEl = document.getElementById("image-preview-title");
   zoomLevelEl = document.getElementById("image-preview-zoom-level");
@@ -321,7 +404,7 @@ function ensureLightbox() {
   commentSaveBtn = document.getElementById("image-preview-save-comment");
   commentStatus = document.getElementById("image-preview-comment-status");
 
-  if (!modalEl || !stageEl || !imgEl) return;
+  if (!modalEl || !stageEl || !frameEl || !imgEl) return;
 
   document.getElementById("image-preview-close")?.addEventListener("click", closeLightbox);
   zoomInBtn?.addEventListener("click", () => {
@@ -346,6 +429,11 @@ function ensureLightbox() {
   stageEl.addEventListener("touchmove", onTouchMove, { passive: false });
   stageEl.addEventListener("touchend", onTouchEnd);
   modalEl.addEventListener("wheel", onWheel, { passive: false });
+
+  if (typeof ResizeObserver !== "undefined" && stageEl) {
+    stageResizeObserver = new ResizeObserver(() => onStageResize());
+    stageResizeObserver.observe(stageEl);
+  }
 
   document.addEventListener("keydown", onKeyDown);
   lightboxReady = true;
