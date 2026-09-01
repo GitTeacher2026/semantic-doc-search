@@ -10,12 +10,7 @@ import {
   saveSearchOptions,
 } from "./search-options.js?v=20260830b";
 import {
-  documentMatchesActiveStorage,
   getActiveStorageBackend,
-  getDocumentStoragePath,
-  getStorageBackendIcon,
-  getStorageBackendLabel,
-  inferDocumentStorage,
   STORAGE_BACKENDS,
 } from "./document-storage.js";
 import { initTheme, toggleTheme } from "./theme.js";
@@ -47,7 +42,6 @@ import {
 import {
   EXT_GROUPS,
   GROUP_ICONS,
-  GROUP_LABELS,
   fileEndsWith,
   fileExtension,
   fileGroup,
@@ -124,11 +118,15 @@ import {
   restoreFromTrash,
   TRASH_RETENTION_DAYS,
 } from "./trash.js";
+import {
+  initFileBrowser,
+  renderFileBrowser,
+} from "./file-browser.js";
 
 const CHUNK_SIZE = 800;
 const CHUNK_OVERLAP = 120;
 
-let explorerShowAll = false;
+let currentAppPage = "library";
 let pendingFiles = [];
 let state = normalizeState({});
 let sessionPassword = "";
@@ -175,20 +173,23 @@ const puterEmailInput = document.getElementById("puter-email");
 const puterPasswordInput = document.getElementById("puter-password");
 const pendingFilesEl = document.getElementById("pending-files");
 const ingestBtn = document.getElementById("ingest-btn");
-const libraryList = document.getElementById("library-list");
-const explorerStorageLabel = document.getElementById("explorer-storage-label");
-const explorerToggleAllBtn = document.getElementById("explorer-toggle-all-btn");
+const libraryFilesSummary = document.getElementById("library-files-summary");
+const gotoFilesBtn = document.getElementById("goto-files-btn");
+const fileBrowserRoot = document.getElementById("file-browser-root");
 const advancedSearchPanel = document.getElementById("advanced-search-panel");
 const themeToggleBtn = document.getElementById("theme-toggle-btn");
 const trashMeta = document.getElementById("trash-meta");
 const trashList = document.getElementById("trash-list");
 const libraryPage = document.getElementById("library-page");
+const filesPage = document.getElementById("files-page");
 const trashPage = document.getElementById("trash-page");
 const navLibraryBtn = document.getElementById("nav-library-btn");
+const navFilesBtn = document.getElementById("nav-files-btn");
 const navTrashBtn = document.getElementById("nav-trash-btn");
 const trashBackBtn = document.getElementById("trash-back-btn");
 const purgeAllTrashBtn = document.getElementById("purge-all-trash-btn");
 const trashCountBadge = document.getElementById("trash-count-badge");
+const filesCountBadge = document.getElementById("files-count-badge");
 const categoryFilter = document.getElementById("category-filter");
 const searchQuery = document.getElementById("search-query");
 const searchBtn = document.getElementById("search-btn");
@@ -891,84 +892,54 @@ openPendingBtn?.addEventListener("click", openPendingDialog);
 pendingCloseBtn?.addEventListener("click", closePendingDialog);
 pendingDialogBackdrop?.addEventListener("click", closePendingDialog);
 
-function buildExplorerTree(documents, { showAll = false } = {}) {
-  const visibleDocs = documents.filter((doc) => documentMatchesActiveStorage(doc, { showAll }));
-  const storageGroups = new Map();
-
-  for (const doc of visibleDocs) {
-    const storage = inferDocumentStorage(doc);
-    const category = doc.category || "عام";
-    const group = doc.fileGroup || fileGroup(doc.filename);
-
-    if (!storageGroups.has(storage)) storageGroups.set(storage, new Map());
-    const categories = storageGroups.get(storage);
-    if (!categories.has(category)) categories.set(category, new Map());
-    const groups = categories.get(category);
-    if (!groups.has(group)) groups.set(group, []);
-    groups.get(group).push(doc);
+function updateLibraryFilesSummary(docs) {
+  const count = docs?.length || 0;
+  if (libraryFilesSummary) {
+    libraryFilesSummary.textContent = count
+      ? `${count.toLocaleString("ar-EG")} ملف مفهرس — تصفّحها من مستكشف الملفات.`
+      : "لا توجد ملفات مفهرسة بعد. ارفع ملفات ثم اضغط «فهرسة وتصنيف».";
   }
-
-  const storageOrder = [
-    getActiveStorageBackend(),
-    STORAGE_BACKENDS.GITHUB,
-    STORAGE_BACKENDS.DRIVE,
-    STORAGE_BACKENDS.MEGA,
-    STORAGE_BACKENDS.ONEDRIVE,
-    STORAGE_BACKENDS.LOCAL,
-  ];
-  const orderedStorages = [...storageGroups.keys()].sort(
-    (a, b) => storageOrder.indexOf(a) - storageOrder.indexOf(b) || a.localeCompare(b, "ar")
-  );
-
-  return orderedStorages.map((storage) => ({
-    storage,
-    label: getStorageBackendLabel(storage),
-    icon: getStorageBackendIcon(storage),
-    count: [...storageGroups.get(storage).values()].reduce(
-      (sum, groups) => sum + [...groups.values()].reduce((inner, files) => inner + files.length, 0),
-      0
-    ),
-    categories: [...storageGroups.get(storage).entries()]
-      .sort((a, b) => a[0].localeCompare(b[0], "ar"))
-      .map(([category, groups]) => ({
-        category,
-        count: [...groups.values()].reduce((sum, files) => sum + files.length, 0),
-        groups: [...groups.entries()]
-          .sort((a, b) => GROUP_LABELS[a[0]].localeCompare(GROUP_LABELS[b[0]], "ar"))
-          .map(([group, files]) => ({
-            group,
-            label: GROUP_LABELS[group] || group,
-            icon: GROUP_ICONS[group] || GROUP_ICONS.other,
-            files: [...files].sort((a, b) => a.filename.localeCompare(b.filename, "ar")),
-          })),
-      })),
-  }));
+  if (filesCountBadge) {
+    if (count > 0) {
+      filesCountBadge.textContent = String(count);
+      filesCountBadge.classList.remove("hidden");
+    } else {
+      filesCountBadge.classList.add("hidden");
+    }
+  }
 }
 
-function updateExplorerToolbar(docs) {
-  const active = getActiveStorageBackend();
-  const activeLabel = getStorageBackendLabel(active);
-  const otherCount = docs.filter((doc) => !documentMatchesActiveStorage(doc)).length;
+function renderFilesPage() {
+  renderFileBrowser(state.documents, { onChange: renderFilesPage });
+}
 
-  if (explorerStorageLabel) {
-    explorerStorageLabel.textContent = explorerShowAll
-      ? "عرض جميع الملفات من كل مصادر التخزين"
-      : `عرض ملفات ${activeLabel} فقط`;
-  }
+function renderLibrary() {
+  const docs = state.documents;
+  const categories = summarizeCategories(docs);
 
-  if (explorerToggleAllBtn) {
-    explorerToggleAllBtn.textContent = explorerShowAll ? `عرض ${activeLabel} فقط` : "عرض كل المصادر";
-    explorerToggleAllBtn.classList.toggle("hidden", otherCount === 0 && !explorerShowAll);
+  categoryFilter.innerHTML = `<option value="">جميع التصنيفات</option>${categories
+    .map(([name]) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+    .join("")}`;
+
+  updateLibraryFilesSummary(docs);
+
+  if (currentAppPage === "files") {
+    renderFilesPage();
   }
 }
 
 function switchAppPage(page) {
+  currentAppPage = page;
   const isTrash = page === "trash";
-  libraryPage?.classList.toggle("hidden", isTrash);
+  const isFiles = page === "files";
+  libraryPage?.classList.toggle("hidden", isTrash || isFiles);
+  filesPage?.classList.toggle("hidden", !isFiles);
   trashPage?.classList.toggle("hidden", !isTrash);
-  navLibraryBtn?.classList.toggle("active", !isTrash);
+  navLibraryBtn?.classList.toggle("active", page === "library");
+  navFilesBtn?.classList.toggle("active", isFiles);
   navTrashBtn?.classList.toggle("active", isTrash);
   if (isTrash) renderTrash();
+  if (isFiles) renderFilesPage();
 }
 
 function updateTrashBadge() {
@@ -983,7 +954,9 @@ function updateTrashBadge() {
 }
 
 navLibraryBtn?.addEventListener("click", () => switchAppPage("library"));
+navFilesBtn?.addEventListener("click", () => switchAppPage("files"));
 navTrashBtn?.addEventListener("click", () => switchAppPage("trash"));
+gotoFilesBtn?.addEventListener("click", () => switchAppPage("files"));
 trashBackBtn?.addEventListener("click", () => switchAppPage("library"));
 purgeAllTrashBtn?.addEventListener("click", async () => {
   const count = (state.trash || []).length;
@@ -1011,139 +984,6 @@ function summarizeCategories(documents) {
   const counts = new Map();
   for (const doc of documents) counts.set(doc.category, (counts.get(doc.category) || 0) + 1);
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ar"));
-}
-
-function renderDocActions(doc) {
-  const locked = doc.isLocked;
-  const unlocked = isDocUnlocked(doc);
-  const lockBtn = locked
-    ? `<button class="btn ghost small unlock-btn" data-id="${doc.id}" type="button">${unlocked ? "إعادة القفل" : "فتح"}</button>`
-    : `<button class="btn ghost small lock-btn" data-id="${doc.id}" type="button">قفل</button>`;
-  return `
-    <button class="btn ghost small download-btn" data-id="${doc.id}" type="button">تنزيل</button>
-    <button class="btn ghost small rename-btn" data-id="${doc.id}" type="button">إعادة تسمية</button>
-    ${lockBtn}
-    <button class="btn ghost small delete-btn" data-id="${doc.id}" type="button">حذف</button>`;
-}
-
-function renderTreeFile(doc) {
-  const groupName = doc.fileGroup || fileGroup(doc.filename);
-  const lockedClass = doc.isLocked ? " locked" : "";
-  const lockBadge = doc.isLocked ? `<span class="lock-badge">🔒</span>` : "";
-  const storage = inferDocumentStorage(doc);
-  const storageClass = `storage-${storage}`;
-  return `
-    <li class="tree-file${lockedClass}" role="treeitem" data-id="${doc.id}">
-      <div class="tree-file-row">
-        <span class="tree-file-icon" aria-hidden="true">${GROUP_ICONS[groupName] || GROUP_ICONS.other}</span>
-        <div class="tree-file-info">
-          <span class="tree-file-name">${lockBadge}${escapeHtml(doc.filename)}</span>
-          <span class="tree-file-meta">
-            <span class="storage-badge ${storageClass}">${getStorageBackendIcon(storage)} ${escapeHtml(getStorageBackendLabel(storage))}</span>
-            <span class="tree-file-path">${escapeHtml(getDocumentStoragePath(doc))}</span>
-            <span class="tree-file-size">${doc.charCount.toLocaleString("ar-EG")} حرف</span>
-          </span>
-        </div>
-        <div class="tree-file-actions explorer-actions">
-          ${renderDocActions(doc)}
-        </div>
-      </div>
-    </li>`;
-}
-
-function renderLibrary() {
-  const docs = state.documents;
-  const categories = summarizeCategories(docs);
-
-  categoryFilter.innerHTML = `<option value="">جميع التصنيفات</option>${categories
-    .map(([name]) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
-    .join("")}`;
-
-  updateExplorerToolbar(docs);
-
-  if (!docs.length) {
-    libraryList.innerHTML = `<p class="muted tree-empty">لا توجد مستندات بعد. اسحب ملفاً إلى منطقة الرفع للبدء.</p>`;
-    return;
-  }
-
-  const tree = buildExplorerTree(docs, { showAll: explorerShowAll });
-  const visibleCount = tree.reduce((sum, storageNode) => sum + storageNode.count, 0);
-
-  if (!visibleCount) {
-    libraryList.innerHTML = `<p class="muted tree-empty">لا توجد ملفات في ${escapeHtml(getStorageBackendLabel(getActiveStorageBackend()))}. جرّب «عرض كل المصادر» أو غيّر مكان التخزين.</p>`;
-    return;
-  }
-
-  libraryList.innerHTML = tree
-    .map(
-      (storageNode) => `
-      <details class="tree-storage-root" open>
-        <summary class="tree-storage-label">
-          <span class="tree-chevron" aria-hidden="true"></span>
-          <span class="tree-storage-icon" aria-hidden="true">${storageNode.icon}</span>
-          <span class="tree-storage-name">${escapeHtml(storageNode.label)}</span>
-          <span class="tree-folder-count">${storageNode.count}</span>
-        </summary>
-        <div class="tree-storage-children">
-          ${storageNode.categories
-            .map(
-              (folder) => `
-            <details class="tree-folder" open>
-              <summary class="tree-folder-label">
-                <span class="tree-chevron" aria-hidden="true"></span>
-                <span class="tree-folder-icon" aria-hidden="true">📁</span>
-                <span class="tree-folder-name">${escapeHtml(folder.category)}</span>
-                <span class="tree-folder-count">${folder.count}</span>
-              </summary>
-              <div class="tree-children">
-                ${folder.groups
-                  .map(
-                    (group) => `
-                  <details class="tree-folder tree-folder-nested" open>
-                    <summary class="tree-folder-label">
-                      <span class="tree-chevron" aria-hidden="true"></span>
-                      <span class="tree-folder-icon" aria-hidden="true">${group.icon}</span>
-                      <span class="tree-folder-name">${escapeHtml(group.label)}</span>
-                      <span class="tree-folder-count">${group.files.length}</span>
-                    </summary>
-                    <ul class="tree-files" role="group">
-                      ${group.files.map((doc) => renderTreeFile(doc)).join("")}
-                    </ul>
-                  </details>`
-                  )
-                  .join("")}
-              </div>
-            </details>`
-            )
-            .join("")}
-        </div>
-      </details>`
-    )
-    .join("");
-
-  bindLibraryActions();
-}
-
-function bindLibraryActions() {
-  libraryList.querySelectorAll(".delete-btn").forEach((btn) => {
-    btn.addEventListener("click", () => openDeleteDialog(btn.dataset.id));
-  });
-
-  libraryList.querySelectorAll(".download-btn").forEach((btn) => {
-    btn.addEventListener("click", () => handleDownload(btn.dataset.id));
-  });
-
-  libraryList.querySelectorAll(".rename-btn").forEach((btn) => {
-    btn.addEventListener("click", () => openRenameDialog(btn.dataset.id));
-  });
-
-  libraryList.querySelectorAll(".lock-btn").forEach((btn) => {
-    btn.addEventListener("click", () => openLockDialog(btn.dataset.id));
-  });
-
-  libraryList.querySelectorAll(".unlock-btn").forEach((btn) => {
-    btn.addEventListener("click", () => handleUnlockButton(btn.dataset.id));
-  });
 }
 
 function renderTrash() {
@@ -1694,14 +1534,18 @@ lockPasswordConfirm?.addEventListener("keydown", (event) => {
 
 setupDropZone();
 initImagePreview();
+initFileBrowser(fileBrowserRoot, {
+  onDelete: openDeleteDialog,
+  onDownload: handleDownload,
+  onRename: openRenameDialog,
+  onLock: openLockDialog,
+  onUnlock: handleUnlockButton,
+  isDocUnlocked,
+});
 applySearchOptionsToForm(loadSearchOptions());
 initTheme();
 
 themeToggleBtn?.addEventListener("click", () => toggleTheme());
-explorerToggleAllBtn?.addEventListener("click", () => {
-  explorerShowAll = !explorerShowAll;
-  renderLibrary();
-});
 advancedSearchPanel?.querySelectorAll("input").forEach((input) => {
   input.addEventListener("change", () => {
     saveSearchOptions(readSearchOptionsFromForm());

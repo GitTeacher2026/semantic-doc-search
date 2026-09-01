@@ -238,7 +238,11 @@
     <div id="status-banner" class="status hidden"></div>
 
     <nav class="app-nav" aria-label="تنقل التطبيق">
-      <button id="nav-library-btn" class="app-nav-btn active" type="button">المكتبة</button>
+      <button id="nav-library-btn" class="app-nav-btn active" type="button">الرفع والبحث</button>
+      <button id="nav-files-btn" class="app-nav-btn" type="button">
+        الملفات
+        <span id="files-count-badge" class="files-count-badge hidden">0</span>
+      </button>
       <button id="nav-trash-btn" class="app-nav-btn" type="button">
         سلة المهملات
         <span id="trash-count-badge" class="trash-count-badge hidden">0</span>
@@ -338,14 +342,10 @@
           <div id="pending-files" class="pending-files-grid hidden"></div>
           <button id="ingest-btn" class="btn primary" type="button" disabled>فهرسة وتصنيف</button>
 
-          <div class="explorer-toolbar">
-            <div class="explorer-toolbar-info">
-              <h2 class="section-gap explorer-title">مستكشف الملفات</h2>
-              <p id="explorer-storage-label" class="explorer-storage-label muted"></p>
-            </div>
-            <button id="explorer-toggle-all-btn" class="btn ghost small" type="button">عرض كل المصادر</button>
+          <div class="library-files-link">
+            <p id="library-files-summary" class="muted">لا توجد ملفات مفهرسة بعد.</p>
+            <button id="goto-files-btn" class="btn ghost small" type="button">فتح مستكشف الملفات</button>
           </div>
-          <div id="library-list" class="folder-tree" role="tree" aria-label="شجرة الملفات"></div>
         </section>
 
         <section class="panel">
@@ -389,6 +389,12 @@
           <div id="search-results" class="results"></div>
         </section>
       </main>
+    </div>
+
+    <div id="files-page" class="app-page hidden">
+      <section class="panel files-page-panel">
+        <div id="file-browser-root" class="file-browser-root" aria-label="مستكشف الملفات"></div>
+      </section>
     </div>
 
     <div id="trash-page" class="app-page hidden">
@@ -514,6 +520,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/main.js?v=20260830-save"></script>
+  <script type="module" src="js/main.js?v=20260901b"></script>
 </body>
 </html>
