@@ -10,12 +10,22 @@ import { formatGitHubApiError, isGitHubShaConflict } from "./github-errors.js";
 
 const CONTENTS_PUT_LIMIT_BYTES = 950_000;
 
+let activeStorePath = STORE_PATH;
+
+export function setGitHubStorePath(path) {
+  activeStorePath = path || STORE_PATH;
+}
+
+export function getGitHubStorePath() {
+  return activeStorePath;
+}
+
 function apiUrl() {
-  return `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${STORE_PATH}`;
+  return `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${activeStorePath}`;
 }
 
 function rawStoreUrl() {
-  return `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/${STORE_PATH}`;
+  return `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/${activeStorePath}`;
 }
 
 function gitApiUrl(path) {
@@ -156,7 +166,7 @@ async function createGitTree(baseTreeSha, blobSha) {
       base_tree: baseTreeSha,
       tree: [
         {
-          path: STORE_PATH,
+          path: activeStorePath,
           mode: "100644",
           type: "blob",
           sha: blobSha,

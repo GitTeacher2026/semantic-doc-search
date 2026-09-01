@@ -468,9 +468,14 @@ function guardProtectedMember(user, actor) {
   }
 }
 
-export async function listMembers() {
+export async function listMembers(actor) {
+  assertAdminActor(actor);
   const { db } = await loadUsersDbWithSha();
   return db.users.map(sanitizeMember);
+}
+
+export async function upgradeMemberToAdmin(memberId, actor) {
+  return setMemberRole(memberId, "admin", actor);
 }
 
 export async function deleteMember(memberId, actor) {

@@ -3,6 +3,7 @@ import {
   listMembers,
   setMemberRole,
   setMemberStatus,
+  upgradeMemberToAdmin,
 } from "./auth-service.js";
 
 function escapeHtml(value) {
@@ -110,11 +111,13 @@ export function initAdminMembers({ getActor, onStatus, isAdmin }) {
               protectedMember
                 ? `<span class="muted member-protected">محمي</span>`
                 : `
+            ${
+              member.role === "member"
+                ? `<button class="btn primary small member-action-btn" data-action="promote-admin" data-id="${escapeHtml(member.id)}" type="button">ترقية إلى مسؤول</button>`
+                : `<button class="btn ghost small member-action-btn" data-action="toggle-role" data-id="${escapeHtml(member.id)}" type="button">إزالة صلاحية المسؤول</button>`
+            }
             <button class="btn ghost small member-action-btn" data-action="toggle-status" data-id="${escapeHtml(member.id)}" type="button">
               ${suspended ? "تفعيل" : "تعليق"}
-            </button>
-            <button class="btn ghost small member-action-btn" data-action="toggle-role" data-id="${escapeHtml(member.id)}" type="button">
-              ${member.role === "admin" ? "إزالة صلاحية المسؤول" : "ترقية لمسؤول"}
             </button>
             <button class="btn danger small member-action-btn" data-action="delete" data-id="${escapeHtml(member.id)}" type="button">حذف</button>`
             }
@@ -132,7 +135,7 @@ export function initAdminMembers({ getActor, onStatus, isAdmin }) {
     if (!listEl) return;
     listEl.innerHTML = `<p class="muted">جارٍ تحميل الأعضاء…</p>`;
     try {
-      members = await listMembers();
+      members = await listMembers(getActor());
       renderMembers();
     } catch (error) {
       listEl.innerHTML = `<p class="auth-error">${escapeHtml(error.message)}</p>`;
@@ -156,6 +159,17 @@ export function initAdminMembers({ getActor, onStatus, isAdmin }) {
             : `تم تفعيل حساب @${member.username}.`,
           true
         );
+      } else if (action === "promote-admin") {
+        if (member.role === "admin") return;
+        if (
+          !window.confirm(
+            `ترقية @${member.username} إلى مسؤول؟\nسيحصل على صلاحيات إدارة الأعضاء وطلبات التسجيل. يجب أن يعيد تسجيل الدخول لتفعيل الصلاحيات الجديدة.`
+          )
+        ) {
+          return;
+        }
+        await upgradeMemberToAdmin(memberId, actor);
+        onStatus?.(`تمت ترقية @${member.username} إلى مسؤول.`, true);
       } else if (action === "toggle-role") {
         const nextRole = member.role === "admin" ? "member" : "admin";
         const label = nextRole === "admin" ? "ترقيته إلى مسؤول" : "إزالة صلاحية المسؤول منه";

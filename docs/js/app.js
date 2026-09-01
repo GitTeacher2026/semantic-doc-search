@@ -70,6 +70,7 @@ import {
   isUsingRemoteFileStorage,
   loadDocuments,
   saveDocuments,
+  setStorageUserId,
 } from "./storage.js";
 import {
   getAvailableStorageModes,
@@ -1996,6 +1997,7 @@ async function ingestFiles(items) {
           id: crypto.randomUUID(),
           filename: uploadName,
           category,
+          ownerId: currentUser?.id,
           fileGroup: fileGroup(uploadName),
           extension: fileExtension(uploadName),
           charCount: 0,
@@ -2041,6 +2043,7 @@ async function ingestFiles(items) {
         id: crypto.randomUUID(),
         filename,
         category,
+        ownerId: currentUser?.id,
         fileGroup: fileGroup(filename),
         extension: fileExtension(filename),
         charCount: text.length,
@@ -2273,6 +2276,7 @@ export async function startApp({ user, auth }) {
   currentUser = user;
   authApi = auth;
   sessionPassword = getVaultPassword();
+  setStorageUserId(user.id);
 
   adminMembersApi = initAdminMembers({
     getActor: () => currentUser,

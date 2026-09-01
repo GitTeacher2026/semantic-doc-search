@@ -1,5 +1,6 @@
 import { getMegaStorage } from "./mega-auth.js";
 import { blobToUint8Array } from "./binary-utils.js";
+import { sanitizeUserId } from "./user-storage-scope.js";
 
 const ROOT_FOLDER_NAME = "مخزن الوثائق";
 const INDEX_FILE_NAME = "docshelf-index.enc.json";
@@ -7,6 +8,20 @@ const INDEX_FILE_NAME = "docshelf-index.enc.json";
 let rootFolder = null;
 let indexFile = null;
 const folderCache = new Map();
+let megaUserScope = null;
+
+export function setMegaUserScope(userId) {
+  const next = userId ? sanitizeUserId(userId) : null;
+  if (megaUserScope === next) return;
+  megaUserScope = next;
+  rootFolder = null;
+  indexFile = null;
+  folderCache.clear();
+}
+
+export function getMegaUserScope() {
+  return megaUserScope;
+}
 
 export function sanitizeFolderName(name) {
   return (
@@ -35,7 +50,12 @@ async function getOrCreateChildFolder(parent, name) {
 export async function getRootFolder() {
   if (rootFolder) return rootFolder;
   const storage = getMegaStorage();
-  rootFolder = await getOrCreateChildFolder(storage.root, ROOT_FOLDER_NAME);
+  const appRoot = await getOrCreateChildFolder(storage.root, ROOT_FOLDER_NAME);
+  if (!megaUserScope) {
+    rootFolder = appRoot;
+    return rootFolder;
+  }
+  rootFolder = await getOrCreateChildFolder(appRoot, megaUserScope);
   return rootFolder;
 }
 

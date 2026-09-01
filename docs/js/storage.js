@@ -6,10 +6,12 @@ import {
 import {
   fetchEncryptedStore as fetchGitHubStore,
   isGitHubStorageConfigured,
+  setGitHubStorePath,
   uploadEncryptedStore as uploadGitHubStore,
 } from "./github-storage.js";
 import {
   fetchEncryptedStore as fetchMegaStore,
+  setMegaUserScope,
   uploadEncryptedStore as uploadMegaStore,
 } from "./mega-storage.js";
 import {
@@ -21,27 +23,57 @@ import { isMegaConnected } from "./mega-auth.js";
 import { isOneDriveConnected } from "./onedrive-auth.js";
 import { normalizeState, purgeExpiredTrash } from "./trash.js";
 import { getResolvedStorageMode, STORAGE_MODES } from "./storage-preference.js";
-
-const LOCAL_CACHE_KEY = "docshelf_store_v5";
+import {
+  getGitHubStorePathForUser,
+  getLegacyStorePath,
+  localCacheKeyForUser,
+  sanitizeUserId,
+  scopeStateToUser,
+  shouldTryLegacyStore,
+  stampOwnerOnState,
+} from "./user-storage-scope.js";
 
 let sessionKey = null;
 let currentSalt = null;
 let remoteHandle = null;
+let currentUserId = null;
+
+function requireStorageUserId() {
+  if (!currentUserId) {
+    throw new Error("لم يُحدَّد المستخدم الحالي للتخزين.");
+  }
+  return currentUserId;
+}
 
 function loadLocalDocuments() {
+  const userId = requireStorageUserId();
+  const cacheKey = localCacheKeyForUser(userId);
   try {
-    return normalizeState(JSON.parse(localStorage.getItem(LOCAL_CACHE_KEY) || "{}"));
+    return normalizeState(JSON.parse(localStorage.getItem(cacheKey) || "{}"));
   } catch {
     return normalizeState({});
   }
 }
 
 function saveLocalDocuments(state) {
-  localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(normalizeState(state)));
+  const userId = requireStorageUserId();
+  localStorage.setItem(localCacheKeyForUser(userId), JSON.stringify(normalizeState(state)));
 }
 
 function finalizeState(state) {
-  return purgeExpiredTrash(normalizeState(state));
+  const userId = requireStorageUserId();
+  const scoped = scopeStateToUser(purgeExpiredTrash(normalizeState(state)), userId);
+  return stampOwnerOnState(scoped, userId);
+}
+
+export function setStorageUserId(userId) {
+  currentUserId = sanitizeUserId(userId);
+  setGitHubStorePath(getGitHubStorePathForUser(currentUserId));
+  setMegaUserScope(currentUserId);
+}
+
+export function getStorageUserId() {
+  return currentUserId;
 }
 
 function isModeReady(mode) {
@@ -78,9 +110,27 @@ export function isUsingRemoteFileStorage() {
   return isUsingDriveStorage() || isUsingMegaStorage() || isUsingOneDriveStorage();
 }
 
+async function fetchGitHubStoreForUser() {
+  const userId = requireStorageUserId();
+  setGitHubStorePath(getGitHubStorePathForUser(userId));
+  let result = await fetchGitHubStore();
+
+  if (!result.envelope && shouldTryLegacyStore(userId)) {
+    setGitHubStorePath(getLegacyStorePath());
+    const legacy = await fetchGitHubStore();
+    if (legacy.envelope) {
+      setGitHubStorePath(getGitHubStorePathForUser(userId));
+      return legacy;
+    }
+    setGitHubStorePath(getGitHubStorePathForUser(userId));
+  }
+
+  return result;
+}
+
 async function fetchRemoteStoreForMode(mode) {
   if (mode === STORAGE_MODES.GITHUB && isGitHubStorageConfigured()) {
-    const { envelope, sha } = await fetchGitHubStore();
+    const { envelope, sha } = await fetchGitHubStoreForUser();
     return { envelope, handle: { type: STORAGE_MODES.GITHUB, sha } };
   }
   if (mode === STORAGE_MODES.DRIVE && isDriveConnected()) {
@@ -104,6 +154,7 @@ async function fetchRemoteStore() {
 
 async function uploadRemoteStoreForMode(mode, envelope, handle) {
   if (mode === STORAGE_MODES.GITHUB) {
+    setGitHubStorePath(getGitHubStorePathForUser(requireStorageUserId()));
     const sha = await uploadGitHubStore(envelope, handle?.sha ?? null);
     return { type: STORAGE_MODES.GITHUB, sha };
   }
@@ -149,6 +200,10 @@ async function buildEnvelope(password, state, envelopeCrypto) {
 }
 
 export async function loadDocumentsForMode(password, mode) {
+  if (!currentUserId) {
+    throw new Error("لم يُحدَّد المستخدم الحالي للتخزين.");
+  }
+
   if (mode === STORAGE_MODES.LOCAL || !isModeReady(mode)) {
     return { state: finalizeState(loadLocalDocuments()), handle: null, crypto: null };
   }
@@ -180,6 +235,10 @@ export async function saveDocumentsForMode(password, state, mode, handle, crypto
 }
 
 export async function loadDocuments(password) {
+  if (!currentUserId) {
+    throw new Error("لم يُحدَّد المستخدم الحالي للتخزين.");
+  }
+
   if (!isCloudSyncEnabled()) {
     return finalizeState(loadLocalDocuments());
   }
@@ -235,6 +294,8 @@ export function clearStorageSession() {
   sessionKey = null;
   currentSalt = null;
   remoteHandle = null;
+  currentUserId = null;
+  setMegaUserScope(null);
 }
 
 export function applyGitHubRemoteSession({ handle, crypto } = {}) {
