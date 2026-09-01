@@ -2373,6 +2373,6 @@ export async function startApp({ user, auth }) {
     showView();
   } catch (error) {
     setStatus(`تعذّر تحميل المستندات: ${error.message}`, true);
-    authApi?.logout?.();
+    showView();
   }
 }
