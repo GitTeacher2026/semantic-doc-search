@@ -1850,8 +1850,9 @@ html[data-theme="dark"] .pending-image-fields.is-incomplete {
 }
 
 .fb-shell {
-  display: grid;
-  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+  --fb-sidebar-width: 260px;
+  display: flex;
+  align-items: stretch;
   min-height: min(72vh, 720px);
 }
 
@@ -1859,10 +1860,51 @@ html[data-theme="dark"] .pending-image-fields.is-incomplete {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+  width: var(--fb-sidebar-width);
+  min-width: var(--fb-sidebar-width);
+  max-width: 55%;
+  flex-shrink: 0;
   padding: 1rem 0.75rem;
   border-inline-end: 1px solid var(--line);
   background: var(--surface-muted);
   overflow: auto;
+}
+
+.fb-resize-handle {
+  position: relative;
+  flex-shrink: 0;
+  width: 8px;
+  margin: 0 -3px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+}
+
+.fb-resize-handle::after {
+  content: "";
+  position: absolute;
+  inset: 0.75rem 3px;
+  border-radius: 4px;
+  background: var(--line);
+  opacity: 0.35;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.fb-resize-handle:hover::after,
+.fb-resize-handle:focus-visible::after,
+.fb-shell.is-resizing .fb-resize-handle::after {
+  opacity: 1;
+  background: var(--accent);
+}
+
+.fb-resize-handle:focus-visible {
+  outline: none;
+}
+
+body.fb-resizing,
+body.fb-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .fb-nav-section {
@@ -1899,7 +1941,7 @@ html[data-theme="dark"] .pending-image-fields.is-incomplete {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.2rem;
-  align-items: center;
+  align-items: start;
   border-radius: 10px;
 }
 
@@ -1958,8 +2000,8 @@ html[data-theme="dark"] .pending-image-fields.is-incomplete {
 
 .fb-nav-item {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
   gap: 0.55rem;
   width: 100%;
   padding: 0.55rem 0.65rem;
@@ -1986,12 +2028,14 @@ html[data-theme="dark"] .pending-image-fields.is-incomplete {
 .fb-nav-icon {
   font-size: 1rem;
   line-height: 1;
+  flex-shrink: 0;
 }
 
 .fb-nav-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
 }
 
 .fb-nav-count {
@@ -2003,6 +2047,7 @@ html[data-theme="dark"] .pending-image-fields.is-incomplete {
   text-align: center;
   background: var(--folder-count-bg, #eef2f6);
   color: var(--muted);
+  flex-shrink: 0;
 }
 
 .fb-nav-item.active .fb-nav-count {
@@ -2318,10 +2363,17 @@ html[data-theme="dark"] .pending-image-fields.is-incomplete {
 
 @media (max-width: 900px) {
   .fb-shell {
-    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .fb-resize-handle {
+    display: none;
   }
 
   .fb-sidebar {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
     border-inline-end: none;
     border-bottom: 1px solid var(--line);
     max-height: 220px;

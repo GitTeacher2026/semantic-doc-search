@@ -14,6 +14,10 @@ import {
 } from "./document-storage.js";
 
 const BROWSER_STATE_KEY = "docshelf_file_browser_v3";
+const SIDEBAR_WIDTH_KEY = "docshelf_fb_sidebar_width";
+const SIDEBAR_WIDTH_DEFAULT = 260;
+const SIDEBAR_WIDTH_MIN = 160;
+const SIDEBAR_WIDTH_MAX = 520;
 
 const DEFAULT_STATE = {
   storage: null,
@@ -394,6 +398,108 @@ function renderSidebar(navData) {
     </aside>`;
 }
 
+function renderShell(sidebarHtml, mainHtml) {
+  return `
+    <div class="fb-shell">
+      ${sidebarHtml}
+      <div
+        class="fb-resize-handle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="تغيير عرض لوحة المجلدات"
+        tabindex="0"
+      ></div>
+      <section class="fb-main">
+        ${mainHtml}
+      </section>
+    </div>`;
+}
+
+function clampSidebarWidth(width, shellWidth = 0) {
+  const max = shellWidth
+    ? Math.min(SIDEBAR_WIDTH_MAX, Math.round(shellWidth * 0.55))
+    : SIDEBAR_WIDTH_MAX;
+  return Math.min(max, Math.max(SIDEBAR_WIDTH_MIN, Math.round(width)));
+}
+
+function applySidebarWidth(shell, width) {
+  if (!shell) return;
+  shell.style.setProperty("--fb-sidebar-width", `${clampSidebarWidth(width, shell.clientWidth)}px`);
+}
+
+function bindSidebarResize(container) {
+  const shell = container.querySelector(".fb-shell");
+  const handle = container.querySelector(".fb-resize-handle");
+  const sidebar = container.querySelector(".fb-sidebar");
+  if (!shell || !handle || !sidebar) return;
+
+  const saved = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+  if (Number.isFinite(saved) && saved > 0) {
+    applySidebarWidth(shell, saved);
+  }
+
+  let startX = 0;
+  let startWidth = SIDEBAR_WIDTH_DEFAULT;
+
+  const finishResize = () => {
+    shell.classList.remove("is-resizing");
+    document.body.classList.remove("fb-resizing");
+    const width = sidebar.offsetWidth;
+    if (width) {
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width));
+    }
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", onPointerUp);
+    window.removeEventListener("pointercancel", onPointerUp);
+  };
+
+  const onPointerMove = (event) => {
+    const isRtl = getComputedStyle(shell).direction === "rtl";
+    const delta = event.clientX - startX;
+    const next = startWidth + (isRtl ? -delta : delta);
+    applySidebarWidth(shell, next);
+  };
+
+  const onPointerUp = () => {
+    finishResize();
+  };
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (window.matchMedia("(max-width: 900px)").matches) return;
+    event.preventDefault();
+    startX = event.clientX;
+    startWidth = sidebar.offsetWidth || SIDEBAR_WIDTH_DEFAULT;
+    shell.classList.add("is-resizing");
+    document.body.classList.add("fb-resizing");
+    handle.setPointerCapture(event.pointerId);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+  });
+
+  handle.addEventListener("dblclick", () => {
+    applySidebarWidth(shell, SIDEBAR_WIDTH_DEFAULT);
+    localStorage.removeItem(SIDEBAR_WIDTH_KEY);
+  });
+
+  handle.addEventListener("keydown", (event) => {
+    if (window.matchMedia("(max-width: 900px)").matches) return;
+    const step = event.shiftKey ? 40 : 16;
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      const isRtl = getComputedStyle(shell).direction === "rtl";
+      const grow = event.key === (isRtl ? "ArrowLeft" : "ArrowRight");
+      applySidebarWidth(shell, sidebar.offsetWidth + (grow ? step : -step));
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebar.offsetWidth));
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      applySidebarWidth(shell, SIDEBAR_WIDTH_DEFAULT);
+      localStorage.removeItem(SIDEBAR_WIDTH_KEY);
+    }
+  });
+}
+
 function renderToolbar(filteredCount, totalCount) {
   const crumbs = getBreadcrumbs();
   const sourceSummary = browserOptions.dualSources
@@ -441,34 +547,30 @@ function renderContent(documents) {
   const navData = collectNavData(documents);
 
   if (!documents.length && !folderRecords.length) {
-    return `
-      <div class="fb-shell">
-        ${renderSidebar(navData)}
-        <section class="fb-main">
+    return renderShell(
+      renderSidebar(navData),
+      `
           ${renderToolbar(0, 0)}
           <div class="fb-empty">
             <div class="fb-empty-icon" aria-hidden="true">📂</div>
             <h3>لا توجد ملفات بعد</h3>
             <p class="muted">أنشئ مجلداً من الشريط الجانبي أو ارفع ملفات من صفحة الرفع والفهرسة.</p>
-          </div>
-        </section>
-      </div>`;
+          </div>`
+    );
   }
 
   if (browserState.category && !canAccessFolder(browserState.category)) {
-    return `
-      <div class="fb-shell">
-        ${renderSidebar(navData)}
-        <section class="fb-main">
+    return renderShell(
+      renderSidebar(navData),
+      `
           ${renderToolbar(0, navData.total)}
           <div class="fb-empty">
             <div class="fb-empty-icon" aria-hidden="true">🔒</div>
             <h3>مجلد مقفل</h3>
             <p class="muted">أدخل كلمة مرور المجلد لعرض محتويات «${escapeHtml(browserState.category)}».</p>
             <button id="fb-unlock-folder-btn" class="btn primary" type="button" data-folder="${escapeHtml(browserState.category)}">فتح المجلد</button>
-          </div>
-        </section>
-      </div>`;
+          </div>`
+    );
   }
 
   if (!filtered.length) {
@@ -482,32 +584,28 @@ function renderContent(documents) {
       : browserState.category
         ? `لا توجد ملفات في «${escapeHtml(browserState.category)}» بعد. اسحب ملفات إلى هذا المجلد أو ارفعها من صفحة الرفع.`
         : "أنشئ مجلداً من الشريط الجانبي أو ارفع ملفات من صفحة الرفع والفهرسة.";
-    return `
-      <div class="fb-shell">
-        ${renderSidebar(navData)}
-        <section class="fb-main">
+    return renderShell(
+      renderSidebar(navData),
+      `
           ${renderToolbar(0, navData.total)}
           <div class="fb-empty">
             <div class="fb-empty-icon" aria-hidden="true">${browserState.query ? "🔍" : "📂"}</div>
             <h3>${emptyTitle}</h3>
             <p class="muted">${emptyHint}</p>
-          </div>
-        </section>
-      </div>`;
+          </div>`
+    );
   }
 
   const content = shouldRenderSplitSources()
     ? renderSplitSourceContent(filtered)
     : `<div class="fb-grid">${filtered.map((doc) => renderGridItem(doc)).join("")}</div>`;
 
-  return `
-    <div class="fb-shell">
-      ${renderSidebar(navData)}
-      <section class="fb-main">
+  return renderShell(
+    renderSidebar(navData),
+    `
         ${renderToolbar(filtered.length, navData.total)}
-        <div class="fb-content" data-drop-category="${escapeHtml(browserState.category || "")}">${content}</div>
-      </section>
-    </div>`;
+        <div class="fb-content" data-drop-category="${escapeHtml(browserState.category || "")}">${content}</div>`
+  );
 }
 
 function bindActions(container) {
@@ -670,6 +768,7 @@ export function renderFileBrowser(documents, options = {}) {
   bindFolderActions(rootElement, options.onChange);
   bindDragDrop(rootElement, options.onChange);
   bindNavigation(rootElement, options.onChange);
+  bindSidebarResize(rootElement);
 }
 
 export function getFileCountLabel(documents) {
