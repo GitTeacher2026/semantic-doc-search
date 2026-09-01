@@ -635,14 +635,72 @@
           <p class="pdf-studio-sidebar-title">الصفحات</p>
           <div id="pdf-studio-thumbs" class="pdf-studio-thumbs"></div>
         </aside>
+        <aside class="pdf-studio-edit-tools" aria-label="أدوات التحرير">
+          <p class="pdf-studio-sidebar-title">تحرير</p>
+          <div class="pdf-studio-tool-grid">
+            <button type="button" class="pdf-studio-tool is-active" data-tool="select" title="تحديد">↖</button>
+            <button type="button" class="pdf-studio-tool" data-tool="text" title="إضافة نص">T</button>
+            <button type="button" class="pdf-studio-tool" data-tool="highlight" title="تمييز">🖍</button>
+            <button type="button" class="pdf-studio-tool" data-tool="whiteout" title="محو / طمس">▢</button>
+            <button type="button" class="pdf-studio-tool" data-tool="pen" title="رسم حر">✎</button>
+            <button type="button" class="pdf-studio-tool" data-tool="rect" title="مستطيل">▭</button>
+            <button type="button" class="pdf-studio-tool" data-tool="image" title="إدراج صورة">🖼</button>
+            <button type="button" class="pdf-studio-tool" data-tool="signature" title="توقيع">✍</button>
+          </div>
+          <button id="pdf-studio-delete-annotation" class="btn ghost small pdf-studio-delete-ann" type="button">حذف التحديد</button>
+          <label class="pdf-studio-prop">
+            <span>حجم النص</span>
+            <input id="pdf-studio-text-size" type="number" min="10" max="48" value="16" />
+          </label>
+          <label class="pdf-studio-prop">
+            <span>لون القلم</span>
+            <input id="pdf-studio-pen-color" type="color" value="#dc2626" />
+          </label>
+        </aside>
         <main class="pdf-studio-stage">
-          <canvas id="pdf-studio-canvas" class="pdf-studio-canvas"></canvas>
+          <div class="pdf-studio-zoom-bar">
+            <button id="pdf-studio-zoom-out" class="btn ghost small" type="button" title="تصغير">−</button>
+            <span id="pdf-studio-zoom-label" class="pdf-studio-zoom-label">100%</span>
+            <button id="pdf-studio-zoom-in" class="btn ghost small" type="button" title="تكبير">+</button>
+            <button id="pdf-studio-zoom-fit" class="btn ghost small" type="button">ملاءمة العرض</button>
+          </div>
+          <div id="pdf-studio-page-wrap" class="pdf-studio-page-wrap">
+            <canvas id="pdf-studio-canvas" class="pdf-studio-canvas"></canvas>
+            <div id="pdf-studio-text-layer" class="pdf-studio-text-layer" aria-hidden="true"></div>
+            <canvas id="pdf-studio-overlay" class="pdf-studio-overlay"></canvas>
+          </div>
         </main>
       </div>
       <footer class="pdf-studio-footer">
-        <p class="muted pdf-studio-hint">محرر PDF — تدوير، حذف، دمج، OCR، وتنزيل (مشابه لـ Sejda)</p>
+        <p class="muted pdf-studio-hint">محرر PDF — تحرير، تمييز، توقيع، OCR، دمج، وتنزيل (مثل Sejda / Acrobat)</p>
         <p id="pdf-studio-status" class="pdf-studio-status hidden" role="status"></p>
       </footer>
+    </div>
+    <input id="pdf-studio-image-input" type="file" accept="image/*" hidden />
+  </div>
+
+  <div id="pdf-text-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="pdf-text-dialog-title">
+    <div class="modal-backdrop" id="pdf-text-dialog-backdrop"></div>
+    <div class="modal-card">
+      <h2 id="pdf-text-dialog-title">إضافة نص</h2>
+      <textarea id="pdf-text-dialog-input" rows="4" placeholder="اكتب النص هنا…" dir="auto"></textarea>
+      <div class="modal-actions">
+        <button id="pdf-text-dialog-cancel" class="btn ghost" type="button">إلغاء</button>
+        <button id="pdf-text-dialog-confirm" class="btn primary" type="button">إضافة</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pdf-signature-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="pdf-signature-dialog-title">
+    <div class="modal-backdrop" id="pdf-signature-dialog-backdrop"></div>
+    <div class="modal-card">
+      <h2 id="pdf-signature-dialog-title">ارسم توقيعك</h2>
+      <canvas id="pdf-signature-pad" class="pdf-signature-pad" width="420" height="160"></canvas>
+      <div class="modal-actions">
+        <button id="pdf-signature-clear" class="btn ghost" type="button">مسح</button>
+        <button id="pdf-signature-cancel" class="btn ghost" type="button">إلغاء</button>
+        <button id="pdf-signature-confirm" class="btn primary" type="button">إضافة التوقيع</button>
+      </div>
     </div>
   </div>
 
@@ -696,6 +754,6 @@
 
   <iframe id="credential-catcher" name="credential-catcher" title="" tabindex="-1" aria-hidden="true" hidden></iframe>
 
-  <script type="module" src="js/main.js?v=20260901x"></script>
+  <script type="module" src="js/main.js?v=20260901y"></script>
 </body>
 </html>

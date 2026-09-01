@@ -1134,17 +1134,16 @@ async function extractPptxText(arrayBuffer) {
 }
 
 async function extractPdfText(arrayBuffer) {
-  const pdfjs = await import("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs");
-  pdfjs.GlobalWorkerOptions.workerSrc =
-    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
-  // PDF.js may transfer/detach the buffer — always pass a copy.
+  const { getPdfJs } = await import("./pdf-utils.js");
+  const pdfjs = await getPdfJs();
   const data = arrayBuffer.slice(0);
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await pdfjs.getDocument({ data, useSystemFonts: true }).promise;
   const parts = [];
   for (let i = 1; i <= pdf.numPages; i += 1) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
     parts.push(content.items.map((item) => item.str).join(" "));
+    page.cleanup?.();
   }
   return parts.join("\n").trim();
 }

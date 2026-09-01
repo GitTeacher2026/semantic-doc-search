@@ -1989,7 +1989,7 @@ body.pdf-studio-open {
   z-index: 1;
   display: flex;
   flex-direction: column;
-  width: min(100%, 1280px);
+  width: min(100%, 1440px);
   height: 100%;
   margin: 0 auto;
   background: var(--surface);
@@ -2065,7 +2065,7 @@ body.pdf-studio-open {
 
 .pdf-studio-body {
   display: grid;
-  grid-template-columns: minmax(88px, 120px) minmax(0, 1fr);
+  grid-template-columns: minmax(88px, 112px) minmax(108px, 132px) minmax(0, 1fr);
   flex: 1;
   min-height: 0;
 }
@@ -2135,18 +2135,137 @@ body.pdf-studio-open {
 .pdf-studio-stage {
   overflow: auto;
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 1rem;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.75rem 1rem 1rem;
   background: color-mix(in srgb, var(--ink) 4%, var(--surface));
+  min-width: 0;
+}
+
+.pdf-studio-zoom-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.65rem;
+  width: 100%;
+  max-width: 920px;
+}
+
+.pdf-studio-zoom-label {
+  min-width: 3.5rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+}
+
+.pdf-studio-page-wrap {
+  position: relative;
+  margin: 0 auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  background: #fff;
 }
 
 .pdf-studio-canvas {
+  display: block;
   max-width: 100%;
   height: auto;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
-  border-radius: 4px;
   background: #fff;
+}
+
+.pdf-studio-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 1;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.pdf-studio-text-layer span,
+.pdf-studio-text-layer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  transform-origin: 0 0;
+}
+
+.pdf-studio-overlay {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.pdf-studio-overlay.is-drawing {
+  cursor: crosshair;
+}
+
+.pdf-studio-edit-tools {
+  border-inline-end: 1px solid var(--line);
+  background: var(--surface-muted);
+  padding: 0.65rem 0.5rem;
+  overflow: auto;
+}
+
+.pdf-studio-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.pdf-studio-tool {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  min-height: 36px;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.pdf-studio-tool.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--accent);
+}
+
+.pdf-studio-delete-ann {
+  width: 100%;
+  margin-top: 0.55rem;
+}
+
+.pdf-studio-prop {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.55rem;
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+}
+
+.pdf-studio-prop input[type="number"],
+.pdf-studio-prop input[type="color"] {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 0.25rem;
+}
+
+.pdf-signature-pad {
+  width: 100%;
+  max-width: 420px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: #fff;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.pdf-studio-thumb-edit {
+  position: absolute;
+  top: 4px;
+  inset-inline-end: 4px;
+  font-size: 0.65rem;
 }
 
 .pdf-studio-footer {
@@ -2197,13 +2316,14 @@ button.fb-card-icon:hover {
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .pdf-studio-body {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
   }
 
-  .pdf-studio-sidebar {
+  .pdf-studio-sidebar,
+  .pdf-studio-edit-tools {
     border-inline-end: 0;
     border-bottom: 1px solid var(--line);
     max-height: 110px;
@@ -2212,6 +2332,10 @@ button.fb-card-icon:hover {
   .pdf-studio-thumbs {
     flex-direction: row;
     overflow-x: auto;
+  }
+
+  .pdf-studio-tool-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .pdf-studio-thumb {
