@@ -15,6 +15,7 @@ import {
   getAvailableAuthProviders,
   loginWithProvider,
 } from "./auth-oauth.js";
+import { promptSavePassword } from "./credential-storage.js";
 import { initPasswordToggles } from "./password-toggle.js";
 
 const AUTH_KEY = "docshelf_auth";
@@ -296,6 +297,7 @@ export function initAuthPage({ onLoginSuccess }) {
     const password = document.getElementById("login-password").value;
     try {
       const user = await authenticateUser(username, password);
+      await promptSavePassword({ username, password });
       await completeLogin(user);
     } catch (error) {
       showAuthMessage(loginError, error.message);
@@ -336,11 +338,16 @@ export function initAuthPage({ onLoginSuccess }) {
     }
 
     try {
+      const newPassword = document.getElementById("reset-password").value;
       const result = await resetPasswordWithToken(
         resetTokenInput?.value,
-        document.getElementById("reset-password").value,
+        newPassword,
         document.getElementById("reset-password-confirm").value
       );
+      await promptSavePassword({
+        username: result.username,
+        password: newPassword,
+      });
       resetForm.reset();
       refreshCaptcha("reset");
       showAuthMessage(resetError, "");
@@ -372,14 +379,20 @@ export function initAuthPage({ onLoginSuccess }) {
     }
 
     try {
+      const signupEmail = document.getElementById("signup-email").value.trim().toLowerCase();
+      const signupPassword = document.getElementById("signup-password").value;
       const { notification } = await registerUser({
         username: document.getElementById("signup-username").value,
         firstName: document.getElementById("signup-first-name").value,
         lastName: document.getElementById("signup-last-name").value,
-        email: document.getElementById("signup-email").value,
-        password: document.getElementById("signup-password").value,
+        email: signupEmail,
+        password: signupPassword,
         confirmPassword: document.getElementById("signup-password-confirm").value,
         acceptTerms: document.getElementById("signup-terms").checked,
+      });
+      await promptSavePassword({
+        username: signupEmail,
+        password: signupPassword,
       });
       signupForm.reset();
       refreshCaptcha("signup");

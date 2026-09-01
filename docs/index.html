@@ -51,7 +51,7 @@
         </div>
         <h1>تسجيل الدخول</h1>
         <p class="auth-subtitle">MEMBER LOGIN — ادخل إلى مكتبتك الرقمية</p>
-        <form id="login-form" class="auth-form">
+        <form id="login-form" class="auth-form" method="post" action="./" autocomplete="on">
           <label for="login-username">اسم المستخدم أو البريد</label>
           <div class="auth-input-wrap">
             <span class="input-icon">✉️</span>
@@ -130,7 +130,7 @@
         </div>
         <h1>كلمة مرور جديدة</h1>
         <p class="auth-subtitle">أدخل كلمة المرور الجديدة وأكّدها</p>
-        <form id="reset-form" class="auth-form">
+        <form id="reset-form" class="auth-form" method="post" action="./" autocomplete="on">
           <input id="reset-token" name="token" type="hidden" />
           <label for="reset-password">كلمة المرور الجديدة</label>
           <div class="auth-input-wrap has-password-toggle">
@@ -173,7 +173,7 @@
         </div>
         <h1>إنشاء حساب</h1>
         <p class="auth-subtitle">يحتاج حسابك موافقة المسؤول عبر البريد</p>
-        <form id="signup-form" class="auth-form">
+        <form id="signup-form" class="auth-form" method="post" action="./" autocomplete="on">
           <label for="signup-username">اسم المستخدم</label>
           <div class="auth-input-wrap">
             <span class="input-icon">👤</span>
@@ -601,6 +601,8 @@
     </div>
   </div>
 
-  <script type="module" src="js/main.js?v=20260901t"></script>
+  <iframe id="credential-catcher" name="credential-catcher" title="" tabindex="-1" aria-hidden="true" hidden></iframe>
+
+  <script type="module" src="js/main.js?v=20260901u"></script>
 </body>
 </html>
