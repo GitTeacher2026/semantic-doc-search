@@ -123,6 +123,7 @@ import {
   TRASH_RETENTION_DAYS,
 } from "./trash.js";
 import {
+  clearFileBrowserSelection,
   getFileBrowserState,
   initFileBrowser,
   renderFileBrowser,
@@ -157,7 +158,7 @@ let pendingItems = [];
 let state = normalizeState({});
 let sessionPassword = "";
 let isHydrating = false;
-let pendingDeleteId = null;
+let pendingDeleteIds = [];
 let pendingRenameId = null;
 let pendingLockId = null;
 let pendingUnlockId = null;
@@ -2004,30 +2005,53 @@ async function confirmRename() {
 }
 
 function openDeleteDialog(docId) {
-  const doc = findDocumentById(docId);
-  if (!doc || !deleteDialog) return;
-  pendingDeleteId = docId;
-  deleteDialogTitle.textContent = `هل تريد نقل «${doc.filename}» إلى سلة المهملات؟`;
+  openBulkDeleteDialog([docId]);
+}
+
+function openBulkDeleteDialog(docIds) {
+  const ids = [...new Set((docIds || []).filter(Boolean))];
+  if (!ids.length || !deleteDialog) return;
+  pendingDeleteIds = ids;
+
+  if (ids.length === 1) {
+    const doc = findDocumentById(ids[0]);
+    if (!doc) return;
+    deleteDialogTitle.textContent = `هل تريد نقل «${doc.filename}» إلى سلة المهملات؟`;
+  } else {
+    deleteDialogTitle.textContent = `هل تريد نقل ${ids.length.toLocaleString("ar-EG")} ملفات إلى سلة المهملات؟`;
+  }
   deleteDialog.classList.remove("hidden");
 }
 
 function closeDeleteDialog() {
-  pendingDeleteId = null;
+  pendingDeleteIds = [];
   if (deleteDialog) deleteDialog.classList.add("hidden");
 }
 
 async function confirmDelete() {
-  if (!pendingDeleteId) return;
-  const docId = pendingDeleteId;
+  if (!pendingDeleteIds.length) return;
+  const ids = [...pendingDeleteIds];
   closeDeleteDialog();
-  state = moveToTrash(state, docId);
-  lockDocSession(docId);
+  for (const docId of ids) {
+    state = moveToTrash(state, docId);
+    lockDocSession(docId);
+  }
+  clearFileBrowserSelection();
   try {
-    setStatus("جارٍ نقل الملف إلى سلة المهملات…");
+    setStatus(
+      ids.length === 1
+        ? "جارٍ نقل الملف إلى سلة المهملات…"
+        : `جارٍ نقل ${ids.length.toLocaleString("ar-EG")} ملفات إلى سلة المهملات…`
+    );
     await persistState();
     renderLibrary();
     renderTrash();
-    setStatus("تم نقل الملف إلى سلة المهملات.", true);
+    setStatus(
+      ids.length === 1
+        ? "تم نقل الملف إلى سلة المهملات."
+        : `تم نقل ${ids.length.toLocaleString("ar-EG")} ملفات إلى سلة المهملات.`,
+      true
+    );
     setTimeout(() => setStatus("", false), 2000);
   } catch (error) {
     setStatus(`تعذّر الحذف: ${error.message}`, true);
@@ -2465,6 +2489,7 @@ initPdfStudio(document.getElementById("pdf-studio-modal"), {
 });
 initFileBrowser(fileBrowserRoot, {
   onDelete: openDeleteDialog,
+  onDeleteSelected: openBulkDeleteDialog,
   onDownload: handleDownload,
   onRename: openRenameDialog,
   onLock: openLockDialog,

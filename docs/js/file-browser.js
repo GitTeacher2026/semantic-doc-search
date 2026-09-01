@@ -35,6 +35,40 @@ let folderRecords = [];
 
 const DOC_DRAG_TYPE = "application/x-docshelf-doc-id";
 
+const selectedDocIds = new Set();
+
+export function getSelectedDocIds() {
+  return [...selectedDocIds];
+}
+
+export function clearFileBrowserSelection() {
+  selectedDocIds.clear();
+}
+
+function pruneSelectionToDocuments(documents) {
+  const valid = new Set(documents.map((doc) => doc.id));
+  for (const id of selectedDocIds) {
+    if (!valid.has(id)) selectedDocIds.delete(id);
+  }
+}
+
+function toggleDocSelection(docId, { selected } = {}) {
+  if (!docId) return;
+  if (selected === true) selectedDocIds.add(docId);
+  else if (selected === false) selectedDocIds.delete(docId);
+  else if (selectedDocIds.has(docId)) selectedDocIds.delete(docId);
+  else selectedDocIds.add(docId);
+}
+
+function setAllVisibleSelected(documents, selected) {
+  const visible = filterDocuments(documents);
+  if (selected) {
+    for (const doc of visible) selectedDocIds.add(doc.id);
+  } else {
+    for (const doc of visible) selectedDocIds.delete(doc.id);
+  }
+}
+
 function isFolderLocked(name) {
   const folder = folderRecords.find((item) => item.name === name);
   return Boolean(folder?.isLocked);
@@ -292,11 +326,16 @@ function renderGridItem(doc) {
   const lockedClass = doc.isLocked ? " is-locked" : "";
   const imageClass = isImageDocument(doc) ? " is-image" : "";
   const pdfClass = isPdfDocument(doc) ? " is-pdf" : "";
+  const selectedClass = selectedDocIds.has(doc.id) ? " is-selected" : "";
   const visual = isImageDocument(doc)
     ? renderImageThumb(doc)
     : `<button type="button" class="fb-card-icon${isPdfDocument(doc) ? " pdf-open-btn" : ""}" data-id="${doc.id}" ${isPdfDocument(doc) ? `aria-label="فتح ${escapeHtml(doc.filename)} في محرر PDF"` : 'aria-hidden="true"'}>${GROUP_ICONS[groupName] || GROUP_ICONS.other}</button>`;
   return `
-    <article class="fb-card fb-draggable${lockedClass}${imageClass}${pdfClass}" draggable="true" data-doc-id="${doc.id}" data-id="${doc.id}">
+    <article class="fb-card fb-draggable${lockedClass}${imageClass}${pdfClass}${selectedClass}" draggable="true" data-doc-id="${doc.id}" data-id="${doc.id}">
+      <label class="fb-card-select" title="تحديد الملف">
+        <input type="checkbox" class="fb-select-checkbox" data-id="${doc.id}"${selectedDocIds.has(doc.id) ? " checked" : ""} />
+        <span class="sr-only">تحديد ${escapeHtml(doc.filename)}</span>
+      </label>
       ${visual}
       <div class="fb-card-body">
         <h3 class="fb-card-title" title="${escapeHtml(doc.filename)}">${escapeHtml(doc.filename)}</h3>
@@ -476,8 +515,13 @@ function bindSidebarResize(container) {
   });
 }
 
-function renderToolbar(filteredCount, totalCount) {
+function renderToolbar(filteredCount, totalCount, documents) {
   const crumbs = getBreadcrumbs();
+  const visible = filterDocuments(documents);
+  const selectedInView = visible.filter((doc) => selectedDocIds.has(doc.id));
+  const allSelected = visible.length > 0 && selectedInView.length === visible.length;
+  const someSelected = selectedInView.length > 0 && !allSelected;
+  const selectionCount = selectedInView.length;
 
   return `
     <div class="fb-toolbar">
@@ -506,6 +550,20 @@ function renderToolbar(filteredCount, totalCount) {
         </label>
       </div>
     </div>
+    ${
+      filteredCount
+        ? `
+    <div class="fb-selection-bar" role="toolbar" aria-label="تحديد الملفات">
+      <label class="fb-select-all">
+        <input id="fb-select-all" type="checkbox"${allSelected ? " checked" : ""}${someSelected ? ' aria-checked="mixed"' : ""} />
+        <span>تحديد الكل</span>
+      </label>
+      <span class="fb-selection-count muted">${selectionCount ? `${selectionCount.toLocaleString("ar-EG")} محدد` : "لم يُحدَّد شيء"}</span>
+      <button id="fb-delete-selected" class="btn danger small" type="button"${selectionCount ? "" : " disabled"}>حذف المحدد</button>
+      <button id="fb-clear-selection" class="btn ghost small" type="button"${selectionCount ? "" : " disabled"}>إلغاء التحديد</button>
+    </div>`
+        : ""
+    }
     <p class="fb-summary muted">
       ${filteredCount.toLocaleString("ar-EG")} ملف
       من كل المصادر
@@ -516,13 +574,14 @@ function renderToolbar(filteredCount, totalCount) {
 
 function renderContent(documents) {
   const filtered = filterDocuments(documents);
+  pruneSelectionToDocuments(filtered);
   const navData = collectNavData(documents);
 
   if (!documents.length && !folderRecords.length) {
     return renderShell(
       renderSidebar(navData),
       `
-          ${renderToolbar(0, 0)}
+          ${renderToolbar(0, 0, documents)}
           <div class="fb-empty">
             <div class="fb-empty-icon" aria-hidden="true">📂</div>
             <h3>لا توجد ملفات بعد</h3>
@@ -535,7 +594,7 @@ function renderContent(documents) {
     return renderShell(
       renderSidebar(navData),
       `
-          ${renderToolbar(0, navData.total)}
+          ${renderToolbar(0, navData.total, documents)}
           <div class="fb-empty">
             <div class="fb-empty-icon" aria-hidden="true">🔒</div>
             <h3>مجلد مقفل</h3>
@@ -559,7 +618,7 @@ function renderContent(documents) {
     return renderShell(
       renderSidebar(navData),
       `
-          ${renderToolbar(0, navData.total)}
+          ${renderToolbar(0, navData.total, documents)}
           <div class="fb-empty">
             <div class="fb-empty-icon" aria-hidden="true">${browserState.query ? "🔍" : "📂"}</div>
             <h3>${emptyTitle}</h3>
@@ -573,12 +632,29 @@ function renderContent(documents) {
   return renderShell(
     renderSidebar(navData),
     `
-        ${renderToolbar(filtered.length, navData.total)}
+        ${renderToolbar(filtered.length, navData.total, documents)}
         <div class="fb-content" data-drop-category="${escapeHtml(browserState.category || "")}">${content}</div>`
   );
 }
 
 function bindActions(container) {
+  container.querySelectorAll(".fb-select-checkbox").forEach((input) => {
+    input.addEventListener("click", (event) => event.stopPropagation());
+    input.addEventListener("change", (event) => {
+      event.stopPropagation();
+      toggleDocSelection(input.dataset.id, { selected: input.checked });
+      browserOptions.onChange?.();
+    });
+  });
+
+  container.querySelectorAll(".fb-card").forEach((card) => {
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("button, a, input, label.fb-card-select")) return;
+      toggleDocSelection(card.dataset.docId);
+      browserOptions.onChange?.();
+    });
+  });
+
   container.querySelectorAll(".image-preview-btn").forEach((btn) => {
     btn.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -610,6 +686,29 @@ function bindActions(container) {
   });
   container.querySelectorAll(".unlock-btn").forEach((btn) => {
     btn.addEventListener("click", () => actionHandlers.onUnlock?.(btn.dataset.id));
+  });
+}
+
+function bindSelection(container, onChange) {
+  const selectAll = container.querySelector("#fb-select-all");
+  if (selectAll) {
+    selectAll.indeterminate = selectAll.getAttribute("aria-checked") === "mixed";
+  }
+
+  selectAll?.addEventListener("change", (event) => {
+    setAllVisibleSelected(browserOptions.documents || [], event.target.checked);
+    onChange?.();
+  });
+
+  container.querySelector("#fb-clear-selection")?.addEventListener("click", () => {
+    clearFileBrowserSelection();
+    onChange?.();
+  });
+
+  container.querySelector("#fb-delete-selected")?.addEventListener("click", () => {
+    const ids = getSelectedDocIds();
+    if (!ids.length) return;
+    actionHandlers.onDeleteSelected?.(ids);
   });
 }
 
@@ -741,10 +840,11 @@ export function initFileBrowser(element, handlers = {}) {
 
 export function renderFileBrowser(documents, options = {}) {
   if (!rootElement) return;
-  browserOptions = options;
+  browserOptions = { ...options, documents };
   folderRecords = options.folders || [];
   rootElement.innerHTML = renderContent(documents);
   bindActions(rootElement);
+  bindSelection(rootElement, options.onChange);
   bindFolderActions(rootElement, options.onChange);
   bindDragDrop(rootElement, options.onChange);
   bindNavigation(rootElement, options.onChange);

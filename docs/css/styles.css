@@ -2829,6 +2829,7 @@ body.fb-resizing * {
 }
 
 .fb-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
@@ -2843,6 +2844,62 @@ body.fb-resizing * {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
   transform: translateY(-1px);
+}
+
+.fb-card.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.fb-card-select {
+  position: absolute;
+  top: 0.55rem;
+  inset-inline-start: 0.55rem;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  cursor: pointer;
+}
+
+.fb-card-select input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.fb-selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  padding: 0.35rem 0 0.15rem;
+}
+
+.fb-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.fb-select-all input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.fb-selection-count {
+  font-size: 0.88rem;
 }
 
 .fb-card.is-locked {
