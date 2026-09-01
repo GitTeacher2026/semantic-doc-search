@@ -6,15 +6,14 @@ import {
 import { isImageFile } from "./ocr.js";
 import {
   STORAGE_BACKENDS,
-  documentMatchesActiveStorage,
-  getActiveStorageBackend,
+  documentHasStorageBackend,
   getDocumentStoragePath,
   getStorageBackendIcon,
   getStorageBackendLabel,
-  inferDocumentStorage,
+  listDocumentStorageBackends,
 } from "./document-storage.js";
 
-const BROWSER_STATE_KEY = "docshelf_file_browser_v1";
+const BROWSER_STATE_KEY = "docshelf_file_browser_v2";
 
 const DEFAULT_STATE = {
   storage: null,
@@ -23,7 +22,6 @@ const DEFAULT_STATE = {
   query: "",
   view: "grid",
   sort: "name",
-  showAll: true,
 };
 
 let browserState = loadBrowserState();
@@ -85,9 +83,7 @@ function normalizeQuery(value) {
 }
 
 function getStorageFilteredDocuments(documents) {
-  return documents.filter((doc) =>
-    documentMatchesActiveStorage(doc, { showAll: browserState.showAll })
-  );
+  return documents;
 }
 
 function getVisibleDocuments(documents) {
@@ -99,7 +95,7 @@ function filterDocuments(documents) {
   let list = getVisibleDocuments(documents);
 
   if (browserState.storage) {
-    list = list.filter((doc) => inferDocumentStorage(doc) === browserState.storage);
+    list = list.filter((doc) => documentHasStorageBackend(doc, browserState.storage));
   }
   if (browserState.category) {
     list = list.filter((doc) => (doc.category || "عام") === browserState.category);
@@ -148,14 +144,22 @@ function collectNavData(documents) {
   const groups = new Map();
 
   for (const doc of storageFiltered) {
-    const storage = inferDocumentStorage(doc);
+    const backends = listDocumentStorageBackends(doc);
     const category = doc.category || "عام";
     const group = doc.fileGroup || fileGroup(doc.filename);
 
-    storages.set(storage, (storages.get(storage) || 0) + 1);
+    for (const storage of backends) {
+      storages.set(storage, (storages.get(storage) || 0) + 1);
+    }
     categories.set(category, (categories.get(category) || 0) + 1);
     const groupKey = `${category}::${group}`;
     groups.set(groupKey, (groups.get(groupKey) || 0) + 1);
+  }
+
+  if (browserOptions.dualSources) {
+    for (const storage of [STORAGE_BACKENDS.GITHUB, STORAGE_BACKENDS.MEGA]) {
+      if (!storages.has(storage)) storages.set(storage, 0);
+    }
   }
 
   for (const folder of folderRecords) {
@@ -266,9 +270,17 @@ function renderDocActions(doc, { compact = false } = {}) {
     <button class="btn ghost small delete-btn" data-id="${doc.id}" type="button">حذف</button>`;
 }
 
+function renderStorageBadges(doc) {
+  return listDocumentStorageBackends(doc)
+    .map(
+      (storage) =>
+        `<span class="storage-badge storage-${storage}">${getStorageBackendIcon(storage)} ${escapeHtml(getStorageBackendLabel(storage))}</span>`
+    )
+    .join("");
+}
+
 function renderGridItem(doc) {
   const groupName = doc.fileGroup || fileGroup(doc.filename);
-  const storage = inferDocumentStorage(doc);
   const lockedClass = doc.isLocked ? " is-locked" : "";
   return `
     <article class="fb-card fb-draggable${lockedClass}" draggable="true" data-doc-id="${doc.id}" data-id="${doc.id}">
@@ -277,7 +289,7 @@ function renderGridItem(doc) {
         <h3 class="fb-card-title" title="${escapeHtml(doc.filename)}">${escapeHtml(doc.filename)}</h3>
         <p class="fb-card-meta muted">${escapeHtml(doc.category || "عام")} · ${formatDocSizeLabel(doc)}</p>
         <div class="fb-card-badges">
-          <span class="storage-badge storage-${storage}">${getStorageBackendIcon(storage)} ${escapeHtml(getStorageBackendLabel(storage))}</span>
+          ${renderStorageBadges(doc)}
           ${isImageDocument(doc) && !hasExtractedOcr(doc) ? '<span class="ocr-badge">بدون نص</span>' : ""}
           ${doc.isLocked ? '<span class="lock-badge">🔒 مقفل</span>' : ""}
         </div>
@@ -288,7 +300,6 @@ function renderGridItem(doc) {
 
 function renderListRow(doc) {
   const groupName = doc.fileGroup || fileGroup(doc.filename);
-  const storage = inferDocumentStorage(doc);
   const lockedClass = doc.isLocked ? " is-locked" : "";
   return `
     <article class="fb-list-row fb-draggable${lockedClass}" draggable="true" data-doc-id="${doc.id}" data-id="${doc.id}">
@@ -300,9 +311,7 @@ function renderListRow(doc) {
         </div>
       </div>
       <div class="fb-list-category muted">${escapeHtml(doc.category || "عام")}</div>
-      <div class="fb-list-storage">
-        <span class="storage-badge storage-${storage}">${getStorageBackendIcon(storage)} ${escapeHtml(getStorageBackendLabel(storage))}</span>
-      </div>
+      <div class="fb-list-storage">${renderStorageBadges(doc)}</div>
       <div class="fb-list-size muted">${formatDocSizeLabel(doc)}</div>
       <div class="fb-list-actions">${renderDocActions(doc)}</div>
     </article>`;
@@ -368,7 +377,9 @@ function renderSidebar(navData) {
 
 function renderToolbar(filteredCount, totalCount) {
   const crumbs = getBreadcrumbs();
-  const activeLabel = getStorageBackendLabel(getActiveStorageBackend());
+  const sourceSummary = browserOptions.dualSources
+    ? "من GitHub و MEGA"
+    : "من كل المصادر";
 
   return `
     <div class="fb-toolbar">
@@ -399,15 +410,12 @@ function renderToolbar(filteredCount, totalCount) {
           <button id="fb-view-grid" class="fb-view-btn${browserState.view === "grid" ? " active" : ""}" type="button" title="شبكة">▦</button>
           <button id="fb-view-list" class="fb-view-btn${browserState.view === "list" ? " active" : ""}" type="button" title="قائمة">☰</button>
         </div>
-        <button id="fb-toggle-sources" class="btn ghost small" type="button">
-          ${browserState.showAll ? "المصدر الحالي فقط" : "كل المصادر"}
-        </button>
         ${browserOptions.syncAvailable ? `<button id="fb-sync-github-mega" class="btn ghost small" type="button" title="نسخ الملفات بين GitHub و MEGA">مزامنة GitHub ⟷ MEGA</button>` : ""}
       </div>
     </div>
     <p class="fb-summary muted">
       ${filteredCount.toLocaleString("ar-EG")} ملف
-      ${browserState.showAll ? "من كل المصادر" : `من ${activeLabel}`}
+      ${sourceSummary}
       ${browserState.query ? `— نتائج «${escapeHtml(browserState.query)}»` : ""}
       · اسحب الملفات إلى المجلدات أو أفلتها من جهازك
     </p>`;
@@ -631,11 +639,6 @@ function bindNavigation(container, onChange) {
 
   container.querySelector("#fb-view-list")?.addEventListener("click", () => {
     setFileBrowserState({ view: "list" });
-    onChange?.();
-  });
-
-  container.querySelector("#fb-toggle-sources")?.addEventListener("click", () => {
-    setFileBrowserState({ showAll: !browserState.showAll });
     onChange?.();
   });
 }

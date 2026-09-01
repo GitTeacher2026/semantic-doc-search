@@ -278,7 +278,12 @@ async function hydrateDocuments(password) {
   isHydrating = true;
   setStatus("جارٍ تحميل المستندات…");
   try {
-    state = normalizeState(await loadDocuments(password));
+    if (canSyncGitHubMega()) {
+      const merged = await loadMergedGitHubMegaIndex(password);
+      state = normalizeState(merged.state);
+    } else {
+      state = normalizeState(await loadDocuments(password));
+    }
     state.folders = syncFoldersFromDocuments(state.documents, state.folders);
     migrateDocumentOcrFlags(state.documents);
     renderLibrary();
@@ -1235,6 +1240,7 @@ function renderFilesPage() {
   renderFileBrowser(state.documents, {
     folders: state.folders,
     syncAvailable: canSyncGitHubMega(),
+    dualSources: canSyncGitHubMega(),
     onChange: renderFilesPage,
   });
 }
