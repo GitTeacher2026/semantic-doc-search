@@ -1094,7 +1094,9 @@ async function extractPdfText(arrayBuffer) {
   const pdfjs = await import("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs");
   pdfjs.GlobalWorkerOptions.workerSrc =
     "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
-  const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+  // PDF.js may transfer/detach the buffer — always pass a copy.
+  const data = arrayBuffer.slice(0);
+  const pdf = await pdfjs.getDocument({ data }).promise;
   const parts = [];
   for (let i = 1; i <= pdf.numPages; i += 1) {
     const page = await pdf.getPage(i);
@@ -1916,10 +1918,10 @@ async function ingestFiles(items) {
   try {
     for (const item of items) {
       const file = item.file;
-      const arrayBuffer = await file.arrayBuffer();
+      const fileBytes = new Uint8Array(await file.arrayBuffer());
       const image = isImageFile(file.name);
       const backend = getActiveStorageBackend();
-      const blob = new Blob([arrayBuffer]);
+      const blob = new Blob([fileBytes]);
 
       if (image) {
         const uploadName = buildUploadFilename(item.meta?.displayName, file.name);
@@ -1948,7 +1950,7 @@ async function ingestFiles(items) {
         } else if (backend === STORAGE_BACKENDS.ONEDRIVE) {
           onedriveFileId = await uploadOneDriveDocumentFile(category, uploadName, blob);
         } else {
-          fileData = arrayBufferToBase64(arrayBuffer);
+          fileData = arrayBufferToBase64(fileBytes);
         }
 
         state.documents.push({
@@ -1973,7 +1975,7 @@ async function ingestFiles(items) {
         continue;
       }
 
-      const text = await extractText(file, arrayBuffer);
+      const text = await extractText(file, fileBytes.slice().buffer);
       if (!text) throw new Error(`لم يُعثر على نص في ${file.name}`);
 
       let filename = file.name;
@@ -2005,7 +2007,7 @@ async function ingestFiles(items) {
       } else if (backend === STORAGE_BACKENDS.ONEDRIVE) {
         onedriveFileId = await uploadOneDriveDocumentFile(category, filename, blob);
       } else {
-        fileData = arrayBufferToBase64(arrayBuffer);
+        fileData = arrayBufferToBase64(fileBytes);
       }
 
       state.documents.push({
