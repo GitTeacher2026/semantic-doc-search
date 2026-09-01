@@ -1,8 +1,10 @@
 const previewUrlCache = new Map();
 
+const MIN_SCALE = 0.25;
+const MAX_SCALE = 5;
+
 let lightboxReady = false;
 let scale = 1;
-let fitScale = 1;
 let translateX = 0;
 let translateY = 0;
 let isDragging = false;
@@ -70,46 +72,36 @@ export function syncPreviewUrls(files, isImage) {
   }
 }
 
-function getMinScale() {
-  return Math.max(0.15, fitScale * 0.25);
-}
-
-function getMaxScale() {
-  return Math.max(fitScale * 6, 3);
-}
-
 function clampScale(value) {
-  return Math.min(getMaxScale(), Math.max(getMinScale(), value));
+  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
 }
 
-function computeFitScale() {
-  if (!imgEl || !stageEl) return 1;
-  const width = imgEl.naturalWidth;
-  const height = imgEl.naturalHeight;
-  if (!width || !height) return 1;
-  const rect = stageEl.getBoundingClientRect();
-  if (!rect.width || !rect.height) return 1;
-  return Math.min(rect.width / width, rect.height / height);
+function getStageCenter() {
+  const rect = stageEl?.getBoundingClientRect();
+  if (!rect) return { x: 0, y: 0 };
+  return {
+    x: rect.left + rect.width / 2,
+    y: rect.top + rect.height / 2,
+  };
 }
 
 function updateZoomButtons() {
-  if (zoomOutBtn) zoomOutBtn.disabled = scale <= getMinScale() + 0.001;
-  if (zoomInBtn) zoomInBtn.disabled = scale >= getMaxScale() - 0.001;
+  if (zoomOutBtn) zoomOutBtn.disabled = scale <= MIN_SCALE + 0.001;
+  if (zoomInBtn) zoomInBtn.disabled = scale >= MAX_SCALE - 0.001;
 }
 
 function updateTransform() {
   if (!imgEl) return;
   imgEl.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
   if (zoomLevelEl) {
-    const pct = Math.round((scale / Math.max(fitScale, 0.001)) * 100);
-    zoomLevelEl.textContent = `${pct}%`;
+    zoomLevelEl.textContent = `${Math.round(scale * 100)}%`;
   }
-  stageEl?.classList.toggle("is-zoomed", scale > fitScale + 0.01);
+  stageEl?.classList.toggle("is-zoomed", scale > 1.01);
   updateZoomButtons();
 }
 
 function resetView() {
-  scale = fitScale;
+  scale = 1;
   translateX = 0;
   translateY = 0;
   updateTransform();
@@ -120,16 +112,18 @@ function setScale(nextScale, originX, originY) {
   scale = clampScale(nextScale);
   if (Math.abs(scale - prev) < 0.0001) return;
 
-  if (originX != null && originY != null && stageEl) {
-    const rect = stageEl.getBoundingClientRect();
-    const cx = originX - rect.left - rect.width / 2 - translateX;
-    const cy = originY - rect.top - rect.height / 2 - translateY;
-    const ratio = scale / prev;
-    translateX -= cx * (ratio - 1);
-    translateY -= cy * (ratio - 1);
-  }
+  const center = getStageCenter();
+  const ox = originX ?? center.x;
+  const oy = originY ?? center.y;
+  const focalX = ox - center.x;
+  const focalY = oy - center.y;
+  const ratio = scale / prev;
 
-  if (scale <= fitScale + 0.01) {
+  translateX = (translateX - focalX) * ratio + focalX;
+  translateY = (translateY - focalY) * ratio + focalY;
+
+  if (scale <= 1.01) {
+    scale = Math.max(MIN_SCALE, scale);
     translateX = 0;
     translateY = 0;
   }
@@ -138,7 +132,7 @@ function setScale(nextScale, originX, originY) {
 }
 
 function zoomBy(delta, originX, originY) {
-  setScale(scale + delta * Math.max(fitScale, 0.5), originX, originY);
+  setScale(scale + delta, originX, originY);
 }
 
 function fitImage() {
@@ -146,14 +140,7 @@ function fitImage() {
 }
 
 function applyImageLayout() {
-  if (!imgEl) return;
-  fitScale = computeFitScale();
-  imgEl.style.width = `${imgEl.naturalWidth}px`;
-  imgEl.style.height = `${imgEl.naturalHeight}px`;
-  scale = fitScale;
-  translateX = 0;
-  translateY = 0;
-  updateTransform();
+  resetView();
 }
 
 function updateCommentsPanel() {
@@ -204,7 +191,6 @@ function closeLightbox() {
   releaseActiveObjectUrl();
   previewContext = { docId: null, comment: "", onSaveComment: null };
   updateCommentsPanel();
-  fitScale = 1;
   scale = 1;
   translateX = 0;
   translateY = 0;
@@ -221,10 +207,7 @@ function openLightbox(url, filename = "", options = {}) {
   };
   updateCommentsPanel();
 
-  fitScale = 1;
-  scale = 1;
-  translateX = 0;
-  translateY = 0;
+  resetView();
   imgEl.onload = () => applyImageLayout();
   imgEl.src = url;
   imgEl.alt = filename;
@@ -246,7 +229,7 @@ export function openBlobImagePreview(blob, filename = "", options = {}) {
 }
 
 function onPointerDown(event) {
-  if (!stageEl || scale <= fitScale + 0.01) return;
+  if (!stageEl || scale <= 1.01) return;
   isDragging = true;
   dragStartX = event.clientX;
   dragStartY = event.clientY;
@@ -273,16 +256,17 @@ function onPointerUp(event) {
 function onWheel(event) {
   if (!modalEl || modalEl.classList.contains("hidden")) return;
   event.preventDefault();
-  const delta = event.deltaY < 0 ? 0.15 : -0.15;
+  const delta = event.deltaY < 0 ? 0.12 : -0.12;
   zoomBy(delta, event.clientX, event.clientY);
 }
 
 function onDoubleClick(event) {
-  if (scale > fitScale + 0.01) {
+  if (scale > 1.01) {
     fitImage();
     return;
   }
-  setScale(fitScale * 2.5, event.clientX, event.clientY);
+  const center = getStageCenter();
+  setScale(2.5, center.x, center.y);
 }
 
 function touchDistance(touches) {
@@ -316,8 +300,9 @@ function onKeyDown(event) {
     event.preventDefault();
     closeLightbox();
   }
-  if (event.key === "+" || event.key === "=") zoomBy(0.25);
-  if (event.key === "-") zoomBy(-0.25);
+  const center = getStageCenter();
+  if (event.key === "+" || event.key === "=") zoomBy(0.2, center.x, center.y);
+  if (event.key === "-") zoomBy(-0.2, center.x, center.y);
   if (event.key === "0") fitImage();
 }
 
@@ -339,8 +324,14 @@ function ensureLightbox() {
   if (!modalEl || !stageEl || !imgEl) return;
 
   document.getElementById("image-preview-close")?.addEventListener("click", closeLightbox);
-  zoomInBtn?.addEventListener("click", () => zoomBy(0.35));
-  zoomOutBtn?.addEventListener("click", () => zoomBy(-0.35));
+  zoomInBtn?.addEventListener("click", () => {
+    const center = getStageCenter();
+    zoomBy(0.25, center.x, center.y);
+  });
+  zoomOutBtn?.addEventListener("click", () => {
+    const center = getStageCenter();
+    zoomBy(-0.25, center.x, center.y);
+  });
   document.getElementById("image-preview-zoom-reset")?.addEventListener("click", fitImage);
   commentSaveBtn?.addEventListener("click", () => saveComment());
   modalEl.querySelector("[data-close]")?.addEventListener("click", closeLightbox);
