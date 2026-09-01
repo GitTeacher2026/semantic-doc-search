@@ -155,6 +155,77 @@
   pointer-events: none;
 }
 
+.auth-input-wrap.has-password-toggle input {
+  padding-left: 2.5rem;
+}
+
+.password-toggle-btn {
+  position: absolute;
+  top: 50%;
+  left: 0.55rem;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: rgba(245, 248, 255, 0.75);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.2rem 0.35rem;
+}
+
+.password-toggle-btn:hover {
+  color: #5eead4;
+}
+
+.auth-email-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: rgba(245, 248, 255, 0.65);
+}
+
+.auth-oauth-block {
+  margin-top: 1rem;
+}
+
+.auth-oauth-label {
+  text-align: center;
+  font-size: 0.82rem;
+  color: rgba(245, 248, 255, 0.6);
+  margin: 0 0 0.65rem;
+}
+
+.auth-oauth-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.auth-oauth-btn {
+  border: 1px solid rgba(64, 196, 196, 0.35);
+  background: rgba(8, 14, 24, 0.85);
+  color: #f5f8ff;
+  border-radius: 10px;
+  padding: 0.55rem 0.35rem;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-oauth-btn:hover {
+  border-color: #2dd4bf;
+  color: #5eead4;
+}
+
+.auth-oauth-btn.hidden {
+  display: none;
+}
+
+.github-device-code-wrap {
+  font-size: 1.1rem;
+  letter-spacing: 0.08em;
+}
+
 .auth-form input[type="text"],
 .auth-form input[type="email"],
 .auth-form input[type="password"],

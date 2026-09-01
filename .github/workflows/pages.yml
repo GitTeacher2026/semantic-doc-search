@@ -38,6 +38,7 @@ jobs:
           WEB3FORMS_ACCESS_KEY: ${{ secrets.WEB3FORMS_ACCESS_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
+          GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           node <<'NODE'
@@ -49,6 +50,7 @@ jobs:
           const web3formsKey = process.env.WEB3FORMS_ACCESS_KEY || "";
           const googleClientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
           const oneDriveClientId = (process.env.ONEDRIVE_CLIENT_ID || "").trim();
+          const githubOAuthClientId = (process.env.GITHUB_OAUTH_CLIENT_ID || "").trim();
           const [owner, repo] = String(process.env.GITHUB_REPOSITORY || "owner/repo").split("/");
           const siteUrl = `https://${owner.toLowerCase()}.github.io/${repo}/`;
           const config = `/** Generated during deploy — do not edit manually. */
@@ -64,6 +66,7 @@ jobs:
           export const WEB3FORMS_ACCESS_KEY = ${JSON.stringify(web3formsKey)};
           export const GOOGLE_CLIENT_ID = ${JSON.stringify(googleClientId)};
           export const ONEDRIVE_CLIENT_ID = ${JSON.stringify(oneDriveClientId)};
+          export const GITHUB_OAUTH_CLIENT_ID = ${JSON.stringify(githubOAuthClientId)};
           export const MEGA_EMAIL = ${JSON.stringify(megaEmail)};
           export const MEGA_PASSWORD = ${JSON.stringify(megaPassword)};
           `;

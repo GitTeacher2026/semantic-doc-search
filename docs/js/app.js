@@ -110,6 +110,7 @@ import {
 } from "./auth-service.js";
 import { initAdminMembers } from "./admin-members.js";
 import { getVaultPassword } from "./auth-page.js";
+import { initPasswordToggles } from "./password-toggle.js";
 import {
   daysUntilPurge,
   moveToTrash,
@@ -2246,6 +2247,7 @@ initFileBrowser(fileBrowserRoot, {
 });
 applySearchOptionsToForm(loadSearchOptions());
 initTheme();
+initPasswordToggles(document);
 
 themeToggleBtn?.addEventListener("click", () => toggleTheme());
 advancedSearchPanel?.querySelectorAll("input").forEach((input) => {

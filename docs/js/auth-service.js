@@ -8,6 +8,13 @@ import {
 } from "./config.js";
 import { hashPassword } from "./file-lock.js";
 import { loadUsersDbWithSha, normalizeUsersDb, saveUsersDb } from "./users-store.js";
+import {
+  isAllowedRegistrationEmail,
+  isSystemAdminAccount,
+  registrationEmailErrorMessage,
+} from "./email-policy.js";
+
+export { isSystemAdminAccount } from "./email-policy.js";
 
 const USER_SESSION_KEY = "docshelf_user";
 
@@ -39,6 +46,10 @@ export async function authenticateUser(username, password) {
 
   if (!user) {
     throw new Error("اسم المستخدم أو كلمة المرور غير صحيحة.");
+  }
+
+  if (!user.passwordHash) {
+    throw new Error("هذا الحساب مسجّل عبر Google أو Microsoft أو GitHub. استخدم نفس الطريقة لتسجيل الدخول.");
   }
 
   const passwordHash = await hashPassword(password);
@@ -80,6 +91,9 @@ function validateSignupInput(input) {
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new Error("أدخل بريداً إلكترونياً صالحاً.");
+  }
+  if (!isAllowedRegistrationEmail(email)) {
+    throw new Error(registrationEmailErrorMessage());
   }
   if (password.length < 8) {
     throw new Error("كلمة المرور يجب أن تكون 8 أحرف على الأقل.");
@@ -402,7 +416,8 @@ export async function processApprovalAction(action, token) {
     firstName: pending.firstName,
     lastName: pending.lastName,
     email: pending.email,
-    passwordHash: pending.passwordHash,
+    passwordHash: pending.passwordHash || null,
+    oauth: pending.oauth || null,
     role: "member",
     status: "approved",
     createdAt: pending.createdAt,
@@ -471,7 +486,138 @@ function guardProtectedMember(user, actor) {
 export async function listMembers(actor) {
   assertAdminActor(actor);
   const { db } = await loadUsersDbWithSha();
-  return db.users.map(sanitizeMember);
+  return db.users.filter((user) => !isSystemAdminAccount(user)).map(sanitizeMember);
+}
+
+export async function upgradeMemberToAdmin(memberId, actor) {
+  return setMemberRole(memberId, "admin", actor);
+}
+
+function deriveUsername(base, db) {
+  let candidate = String(base || "member")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase()
+    .slice(0, 24);
+  if (candidate.length < 3) {
+    candidate = `user${Date.now().toString(36).slice(-6)}`;
+  }
+  const taken = (name) =>
+    [...db.users, ...db.pending].some(
+      (item) => item.username?.toLowerCase() === name.toLowerCase()
+    );
+  let username = candidate;
+  let suffix = 1;
+  while (taken(username)) {
+    username = `${candidate.slice(0, 20)}${suffix}`;
+    suffix += 1;
+  }
+  return username;
+}
+
+function findUserByOAuth(db, provider, subject) {
+  return db.users.find(
+    (item) => item.oauth?.provider === provider && item.oauth?.subject === subject
+  );
+}
+
+function findUserByEmail(db, email) {
+  const normalized = String(email || "").trim().toLowerCase();
+  return db.users.find((item) => item.email?.toLowerCase() === normalized);
+}
+
+function findPendingByEmail(db, email) {
+  const normalized = String(email || "").trim().toLowerCase();
+  return db.pending.find((item) => item.email?.toLowerCase() === normalized);
+}
+
+function findPendingByOAuth(db, provider, subject) {
+  return db.pending.find(
+    (item) => item.oauth?.provider === provider && item.oauth?.subject === subject
+  );
+}
+
+function toSessionUser(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    email: user.email,
+    role: user.role || "member",
+  };
+}
+
+export async function authenticateOrRegisterWithOAuth(profile) {
+  const provider = profile?.provider;
+  const subject = String(profile?.subject || "");
+  const email = String(profile?.email || "").trim().toLowerCase();
+
+  if (!provider || !subject || !email) {
+    throw new Error("تعذّر قراءة بيانات الحساب من مزوّد تسجيل الدخول.");
+  }
+  if (!isAllowedRegistrationEmail(email)) {
+    throw new Error(registrationEmailErrorMessage());
+  }
+
+  const { db, sha } = await loadUsersDbWithSha();
+
+  let user =
+    findUserByOAuth(db, provider, subject) ||
+    findUserByEmail(db, email);
+
+  if (user) {
+    if (isSystemAdminAccount(user)) {
+      return { type: "login", user: toSessionUser(user) };
+    }
+    if (user.status === "suspended") {
+      throw new Error("تم تعليق حسابك. تواصل مع المسؤول.");
+    }
+    if (user.status !== "approved") {
+      throw new Error("حسابك بانتظار موافقة المسؤول. ستصلك رسالة عند التفعيل.");
+    }
+    if (!user.oauth) {
+      user.oauth = { provider, subject };
+      await saveUsersDb(db, sha);
+    }
+    return { type: "login", user: toSessionUser(user) };
+  }
+
+  const existingPending =
+    findPendingByOAuth(db, provider, subject) || findPendingByEmail(db, email);
+  if (existingPending) {
+    return {
+      type: "pending",
+      message:
+        "طلب تسجيلك قيد المراجعة. لا يمكنك تسجيل الدخول حتى يوافق المسؤول.",
+      pendingUser: existingPending,
+    };
+  }
+
+  const approvalToken = crypto.randomUUID().replace(/-/g, "");
+  const pendingUser = {
+    id: crypto.randomUUID(),
+    username: deriveUsername(profile.username || email.split("@")[0], db),
+    firstName: profile.firstName || "عضو",
+    lastName: profile.lastName || "جديد",
+    email,
+    oauth: { provider, subject },
+    approvalToken,
+    createdAt: new Date().toISOString(),
+  };
+
+  db.pending.push(pendingUser);
+  await saveUsersDb(db, sha);
+  const notification = await sendApprovalRequestEmail(pendingUser);
+
+  const pendingNotice =
+    "تم إنشاء طلب التسجيل بنجاح. طلبك بانتظار موافقة المسؤول — لا يمكنك تسجيل الدخول حتى يتم التفعيل.";
+  const message = notification.sent
+    ? notification.method === "github"
+      ? `${pendingNotice} تم إخطار المسؤول عبر GitHub.`
+      : pendingNotice
+    : `${pendingNotice} ${notification.note || "سيوافق المسؤول من داخل التطبيق."}`;
+
+  return { type: "pending", message, pendingUser, notification };
 }
 
 export async function upgradeMemberToAdmin(memberId, actor) {

@@ -1,5 +1,6 @@
 import { VAULT_PASSWORD } from "./config.js";
 import {
+  authenticateOrRegisterWithOAuth,
   authenticateUser,
   getStoredUser,
   isAdmin,
@@ -10,6 +11,11 @@ import {
   resetPasswordWithToken,
   setStoredUser,
 } from "./auth-service.js";
+import {
+  getAvailableAuthProviders,
+  loginWithProvider,
+} from "./auth-oauth.js";
+import { initPasswordToggles } from "./password-toggle.js";
 
 const AUTH_KEY = "docshelf_auth";
 
@@ -18,6 +24,8 @@ const captchaState = {
   forgot: { answer: 0, labelId: "forgot-captcha-label", inputId: "forgot-captcha" },
   reset: { answer: 0, labelId: "reset-captcha-label", inputId: "reset-captcha" },
 };
+
+let githubDeviceCancelled = false;
 
 export function getVaultPassword() {
   return VAULT_PASSWORD;
@@ -61,6 +69,34 @@ function refreshCaptcha(kind = "signup") {
 function validateCaptcha(kind, value) {
   const config = captchaState[kind];
   return Number(value) === config?.answer;
+}
+
+function updateOAuthVisibility() {
+  const providers = getAvailableAuthProviders();
+  const show = providers.length > 0;
+  document.getElementById("login-oauth")?.classList.toggle("hidden", !show);
+  document.getElementById("signup-oauth")?.classList.toggle("hidden", !show);
+  document.querySelectorAll("[data-oauth]").forEach((button) => {
+    button.classList.toggle("hidden", !providers.includes(button.dataset.oauth));
+  });
+}
+
+function showGitHubDeviceDialog({ verificationUri, userCode }) {
+  const dialog = document.getElementById("github-device-dialog");
+  const link = document.getElementById("github-device-link");
+  const code = document.getElementById("github-device-code");
+  const status = document.getElementById("github-device-status");
+  if (link) {
+    link.href = verificationUri;
+    link.textContent = verificationUri;
+  }
+  if (code) code.textContent = userCode;
+  if (status) status.textContent = "بانتظار الموافقة على GitHub…";
+  dialog?.classList.remove("hidden");
+}
+
+function hideGitHubDeviceDialog() {
+  document.getElementById("github-device-dialog")?.classList.add("hidden");
 }
 
 export function handleResetFromUrl() {
@@ -138,11 +174,77 @@ export function initAuthPage({ onLoginSuccess }) {
   const refreshForgotCaptchaBtn = document.getElementById("refresh-forgot-captcha");
   const refreshResetCaptchaBtn = document.getElementById("refresh-reset-captcha");
   const resetTokenInput = document.getElementById("reset-token");
+  const githubDeviceCancel = document.getElementById("github-device-cancel");
+  const githubDeviceBackdrop = document.getElementById("github-device-backdrop");
+
+  initPasswordToggles(document);
+  updateOAuthVisibility();
 
   function goToLogin() {
     clearAuthMessages();
     switchAuthPanel("login");
   }
+
+  async function completeLogin(user) {
+    setStoredUser(user);
+    sessionStorage.setItem(AUTH_KEY, "1");
+    showAuthMessage(loginError, "");
+    showAuthMessage(loginPendingNotice, "", false);
+    await onLoginSuccess(user);
+  }
+
+  async function handleOAuth(provider, errorEl) {
+    githubDeviceCancelled = false;
+    try {
+      showAuthMessage(errorEl, "");
+      const profile = await loginWithProvider(provider, {
+        onDeviceAuth: ({ verificationUri, userCode }) => {
+          if (provider === "github") {
+            showGitHubDeviceDialog({ verificationUri, userCode });
+          }
+        },
+      });
+
+      if (githubDeviceCancelled) return;
+
+      const result = await authenticateOrRegisterWithOAuth(profile);
+      if (result.type === "login") {
+        hideGitHubDeviceDialog();
+        await completeLogin(result.user);
+        return;
+      }
+
+      hideGitHubDeviceDialog();
+      const banner = document.getElementById("auth-action-banner");
+      if (banner) {
+        banner.classList.remove("hidden", "auth-error");
+        banner.classList.add("auth-success");
+        banner.textContent = result.message;
+      }
+      showAuthMessage(loginPendingNotice, result.message, false);
+      switchAuthPanel("login");
+    } catch (error) {
+      hideGitHubDeviceDialog();
+      showAuthMessage(errorEl, error.message);
+    }
+  }
+
+  document.querySelectorAll("[data-oauth]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const panel = button.closest("#login-panel, #signup-panel");
+      const errorEl = panel?.id === "signup-panel" ? signupError : loginError;
+      handleOAuth(button.dataset.oauth, errorEl);
+    });
+  });
+
+  githubDeviceCancel?.addEventListener("click", () => {
+    githubDeviceCancelled = true;
+    hideGitHubDeviceDialog();
+  });
+  githubDeviceBackdrop?.addEventListener("click", () => {
+    githubDeviceCancelled = true;
+    hideGitHubDeviceDialog();
+  });
 
   showSignupBtn?.addEventListener("click", (event) => {
     event.preventDefault();
@@ -194,11 +296,7 @@ export function initAuthPage({ onLoginSuccess }) {
     const password = document.getElementById("login-password").value;
     try {
       const user = await authenticateUser(username, password);
-      setStoredUser(user);
-      sessionStorage.setItem(AUTH_KEY, "1");
-      showAuthMessage(loginError, "");
-      showAuthMessage(loginPendingNotice, "", false);
-      await onLoginSuccess(user);
+      await completeLogin(user);
     } catch (error) {
       showAuthMessage(loginError, error.message);
     }

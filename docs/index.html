@@ -63,14 +63,23 @@
             <input id="login-username" name="username" type="text" placeholder="admin" autocomplete="username" required />
           </div>
           <label for="login-password">كلمة المرور</label>
-          <div class="auth-input-wrap">
+          <div class="auth-input-wrap has-password-toggle">
             <span class="input-icon">🔒</span>
             <input id="login-password" name="password" type="password" placeholder="••••••••" autocomplete="current-password" required />
+            <button type="button" class="password-toggle-btn" aria-label="إظهار كلمة المرور" aria-pressed="false">👁</button>
           </div>
           <p class="auth-forgot-row">
             <a href="#" id="show-forgot" class="auth-link">نسيت كلمة المرور؟</a>
           </p>
           <button type="submit" class="auth-btn">دخول</button>
+          <div id="login-oauth" class="auth-oauth-block hidden">
+            <p class="auth-oauth-label">أو تسجيل الدخول عبر</p>
+            <div class="auth-oauth-buttons">
+              <button type="button" class="auth-oauth-btn google" data-oauth="google">Google</button>
+              <button type="button" class="auth-oauth-btn microsoft" data-oauth="microsoft">Microsoft</button>
+              <button type="button" class="auth-oauth-btn github" data-oauth="github">GitHub</button>
+            </div>
+          </div>
           <p id="login-error" class="auth-error hidden"></p>
           <p id="login-pending-notice" class="auth-success hidden"></p>
         </form>
@@ -125,14 +134,16 @@
         <form id="reset-form" class="auth-form">
           <input id="reset-token" name="token" type="hidden" />
           <label for="reset-password">كلمة المرور الجديدة</label>
-          <div class="auth-input-wrap">
+          <div class="auth-input-wrap has-password-toggle">
             <span class="input-icon">🔒</span>
             <input id="reset-password" name="password" type="password" placeholder="8 أحرف على الأقل" autocomplete="new-password" required />
+            <button type="button" class="password-toggle-btn" aria-label="إظهار كلمة المرور" aria-pressed="false">👁</button>
           </div>
           <label for="reset-password-confirm">تأكيد كلمة المرور</label>
-          <div class="auth-input-wrap">
+          <div class="auth-input-wrap has-password-toggle">
             <span class="input-icon">🔒</span>
             <input id="reset-password-confirm" name="confirmPassword" type="password" placeholder="أعد إدخال كلمة المرور" autocomplete="new-password" required />
+            <button type="button" class="password-toggle-btn" aria-label="إظهار كلمة المرور" aria-pressed="false">👁</button>
           </div>
           <label id="reset-captcha-label" for="reset-captcha">التحقق</label>
           <div class="captcha-row">
@@ -180,17 +191,20 @@
           <label for="signup-email">البريد الإلكتروني</label>
           <div class="auth-input-wrap">
             <span class="input-icon">✉️</span>
-            <input id="signup-email" name="email" type="email" placeholder="you@example.com" autocomplete="email" required />
+            <input id="signup-email" name="email" type="email" placeholder="you@pm.me" autocomplete="email" required />
           </div>
+          <p class="auth-email-hint muted">يُقبل فقط بريد Proton: <strong>@pm.me</strong> أو <strong>@proton.me</strong></p>
           <label for="signup-password">كلمة المرور</label>
-          <div class="auth-input-wrap">
+          <div class="auth-input-wrap has-password-toggle">
             <span class="input-icon">🔒</span>
             <input id="signup-password" name="password" type="password" placeholder="8 أحرف على الأقل" autocomplete="new-password" required />
+            <button type="button" class="password-toggle-btn" aria-label="إظهار كلمة المرور" aria-pressed="false">👁</button>
           </div>
           <label for="signup-password-confirm">تأكيد كلمة المرور</label>
-          <div class="auth-input-wrap">
+          <div class="auth-input-wrap has-password-toggle">
             <span class="input-icon">🔒</span>
             <input id="signup-password-confirm" name="confirmPassword" type="password" placeholder="أعد إدخال كلمة المرور" autocomplete="new-password" required />
+            <button type="button" class="password-toggle-btn" aria-label="إظهار كلمة المرور" aria-pressed="false">👁</button>
           </div>
           <label id="captcha-label" for="signup-captcha">التحقق</label>
           <div class="captcha-row">
@@ -205,6 +219,14 @@
             <span>أوافق على شروط الاستخدام وسياسة الخصوصية</span>
           </label>
           <button type="submit" class="auth-btn">إرسال طلب التسجيل</button>
+          <div id="signup-oauth" class="auth-oauth-block hidden">
+            <p class="auth-oauth-label">أو التسجيل عبر</p>
+            <div class="auth-oauth-buttons">
+              <button type="button" class="auth-oauth-btn google" data-oauth="google">Google</button>
+              <button type="button" class="auth-oauth-btn microsoft" data-oauth="microsoft">Microsoft</button>
+              <button type="button" class="auth-oauth-btn github" data-oauth="github">GitHub</button>
+            </div>
+          </div>
           <p id="signup-error" class="auth-error hidden"></p>
           <p id="signup-success" class="auth-success hidden"></p>
         </form>
@@ -427,9 +449,15 @@
       <h2 id="lock-dialog-title">قفل الملف</h2>
       <p id="lock-dialog-sub" class="muted">أدخل كلمة مرور لحماية هذا الملف.</p>
       <label for="lock-password">كلمة مرور القفل</label>
-      <input id="lock-password" type="password" autocomplete="new-password" />
+      <div class="password-field-wrap has-password-toggle">
+        <input id="lock-password" type="password" autocomplete="new-password" />
+        <button type="button" class="password-toggle-btn" aria-label="إظهار كلمة المرور" aria-pressed="false">👁</button>
+      </div>
       <label for="lock-password-confirm">تأكيد كلمة المرور</label>
-      <input id="lock-password-confirm" type="password" autocomplete="new-password" />
+      <div class="password-field-wrap has-password-toggle">
+        <input id="lock-password-confirm" type="password" autocomplete="new-password" />
+        <button type="button" class="password-toggle-btn" aria-label="إظهار كلمة المرور" aria-pressed="false">👁</button>
+      </div>
       <p id="lock-dialog-error" class="error hidden"></p>
       <div class="modal-actions">
         <button id="lock-cancel-btn" class="btn ghost" type="button">إلغاء</button>
@@ -444,7 +472,10 @@
       <h2 id="unlock-dialog-title">فتح الملف المقفل</h2>
       <p id="unlock-dialog-sub" class="muted">أدخل كلمة مرور القفل للوصول إلى هذا الملف.</p>
       <label for="unlock-password">كلمة مرور القفل</label>
-      <input id="unlock-password" type="password" autocomplete="current-password" />
+      <div class="password-field-wrap has-password-toggle">
+        <input id="unlock-password" type="password" autocomplete="current-password" />
+        <button type="button" class="password-toggle-btn" aria-label="إظهار كلمة المرور" aria-pressed="false">👁</button>
+      </div>
       <p id="unlock-dialog-error" class="error hidden"></p>
       <div class="modal-actions">
         <button id="unlock-cancel-btn" class="btn ghost" type="button">إلغاء</button>
@@ -479,14 +510,17 @@
                   autocomplete="username"
                   placeholder="بريد Puter أو اسم المستخدم (اختياري)"
                 />
-                <label class="sr-only" for="puter-password">رمز API أو كلمة مرور</label>
-                <input
-                  id="puter-password"
-                  class="mega-login-input"
-                  type="password"
-                  autocomplete="current-password"
-                  placeholder="رمز API من puter.com/dashboard"
-                />
+                <div class="password-field-wrap has-password-toggle">
+                  <label class="sr-only" for="puter-password">رمز API أو كلمة مرور</label>
+                  <input
+                    id="puter-password"
+                    class="mega-login-input"
+                    type="password"
+                    autocomplete="current-password"
+                    placeholder="رمز API من puter.com/dashboard"
+                  />
+                  <button type="button" class="password-toggle-btn" aria-label="إظهار كلمة المرور" aria-pressed="false">👁</button>
+                </div>
                 <p class="muted puter-login-note">
                   الصق <strong>رمز API</strong> من
                   <a href="https://puter.com/dashboard#account" target="_blank" rel="noopener noreferrer">لوحة Puter</a>
@@ -529,6 +563,20 @@
     </div>
   </div>
 
-  <script type="module" src="js/main.js?v=20260901p"></script>
+  <div id="github-device-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="github-device-title">
+    <div class="modal-backdrop" id="github-device-backdrop"></div>
+    <div class="modal-card">
+      <h2 id="github-device-title">تسجيل الدخول عبر GitHub</h2>
+      <p class="muted">افتح الرابط أدناه وأدخل الرمز للموافقة على الاتصال.</p>
+      <p><a id="github-device-link" href="#" target="_blank" rel="noopener noreferrer" class="auth-link">github.com/login/device</a></p>
+      <p class="github-device-code-wrap">الرمز: <strong id="github-device-code">------</strong></p>
+      <p id="github-device-status" class="muted">بانتظار الموافقة…</p>
+      <div class="modal-actions">
+        <button id="github-device-cancel" class="btn ghost" type="button">إلغاء</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js?v=20260901q"></script>
 </body>
 </html>
