@@ -29,12 +29,6 @@ import {
   logoutPuter,
 } from "./ocr.js?v=20260901v";
 import {
-  getAvailableOcrEngines,
-  loadOcrOptions,
-  readOcrEngineFromForm,
-  saveOcrOptions,
-} from "./ocr-options.js";
-import {
   ensurePreviewUrl,
   initImagePreview,
   openImagePreview,
@@ -436,36 +430,12 @@ function handlePuterDisconnect() {
   setTimeout(() => setStatus("", false), 2000);
 }
 
-function updateOcrEnginePanel() {
-  const select = document.getElementById("ocr-engine");
+function updateOcrDialogPanel() {
   const hint = document.getElementById("ocr-engine-hint");
-  if (!select) return;
-
-  const saved = loadOcrOptions().engine;
-  const engines = getAvailableOcrEngines();
-  const previous = select.value;
-
-  select.replaceChildren(
-    ...engines.map((engine) => {
-      const option = document.createElement("option");
-      option.value = engine.id;
-      option.textContent = engine.label;
-      return option;
-    })
-  );
-
-  const nextValue = engines.some((item) => item.id === saved)
-    ? saved
-    : engines.some((item) => item.id === previous)
-      ? previous
-      : engines[0]?.id;
-  if (nextValue) select.value = nextValue;
-
-  const active = engines.find((item) => item.id === select.value) || engines[0];
-  if (hint && active?.hint) {
+  if (hint) {
     hint.textContent = isPuterPreconfigured()
       ? "Puter AI مُعد مسبقاً — اضغط «استخراج النص» للبدء."
-      : active.hint;
+      : "استخراج النص عبر Puter AI — يبدأ تلقائياً عند الضغط على «استخراج النص»";
   }
   updatePuterConnectPanel();
   refreshPuterConnectPanel();
@@ -1496,7 +1466,7 @@ async function extractOcrForDocument(doc) {
   const blob = await getDocumentBlob(doc);
   const result = await extractImageText(blob, (progress) => {
     setOcrDialogStatus(`${formatOcrProgress(progress)} — ${doc.filename}`);
-  }, { engine: readOcrEngineFromForm(ocrDialog || document) });
+  });
   const text = typeof result === "string" ? result : result.text;
   if (!text) throw new Error("لم يُعثر على نص في الصورة.");
   return text;
@@ -1517,7 +1487,7 @@ async function openOcrDialog(docId) {
       : `الملف: ${doc.filename}`;
   }
   setOcrDialogStatus("");
-  updateOcrEnginePanel();
+  updateOcrDialogPanel();
   ocrExtractBtn.disabled = false;
   ocrDialog?.classList.remove("hidden");
 
@@ -2347,11 +2317,6 @@ ocrExtractBtn?.addEventListener("click", () => confirmOcrExtract());
 ocrCancelBtn?.addEventListener("click", closeOcrDialog);
 ocrDialogBackdrop?.addEventListener("click", closeOcrDialog);
 
-document.getElementById("ocr-engine")?.addEventListener("change", () => {
-  saveOcrOptions({ engine: readOcrEngineFromForm() });
-  updateOcrEnginePanel();
-});
-
 puterConnectBtn?.addEventListener("click", () => {
   handlePuterConnect();
 });
@@ -2377,7 +2342,7 @@ export async function startApp({ user, auth }) {
     await ensureMegaAutoLogin();
     await hydrateDocuments(sessionPassword);
     applySearchOptionsToForm(loadSearchOptions());
-    updateOcrEnginePanel();
+    updateOcrDialogPanel();
     updateUploadAccess();
     showView();
   } catch (error) {

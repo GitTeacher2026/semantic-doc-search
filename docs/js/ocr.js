@@ -1,4 +1,4 @@
-import { OCR_ENGINES, getOcrEngineLabel, loadOcrOptions } from "./ocr-options.js";
+import { OCR_ENGINE, getOcrEngineLabel } from "./ocr-options.js";
 import { ensurePuterConnected, loadPuter } from "./puter-auth.js";
 
 const IMAGE_EXTENSIONS = new Set([
@@ -24,7 +24,7 @@ const STAGE_LABELS = {
 
 let activeProgressCallback = null;
 
-export { getAvailableOcrEngines, loadOcrOptions, saveOcrOptions, OCR_ENGINES } from "./ocr-options.js";
+export { getOcrEngineLabel, OCR_ENGINE } from "./ocr-options.js";
 export {
   ensurePuterConnected,
   getPuterEmail,
@@ -43,7 +43,7 @@ export function isImageFile(filename) {
 }
 
 export function formatOcrProgress({ stage, pct, engine, fallbackReason } = {}) {
-  const engineLabel = engine ? getOcrEngineLabel(engine).split("—").pop()?.trim() : "";
+  const engineLabel = engine ? getOcrEngineLabel() : "";
   const prefix = engineLabel ? `${engineLabel}: ` : "";
   const label = STAGE_LABELS[stage] || "جارٍ معالجة الصورة";
   if (fallbackReason && stage === "load") {
@@ -118,22 +118,22 @@ function normalizeOcrText(text) {
 }
 
 async function ocrWithPuter(blob) {
-  activeProgressCallback?.({ stage: "load", pct: 15, engine: OCR_ENGINES.PUTER });
+  activeProgressCallback?.({ stage: "load", pct: 15, engine: OCR_ENGINE });
   const puter = await ensurePuterConnected();
-  activeProgressCallback?.({ stage: "upload", pct: 35, engine: OCR_ENGINES.PUTER });
+  activeProgressCallback?.({ stage: "upload", pct: 35, engine: OCR_ENGINE });
 
   const providers = ["mistral", "aws-textract"];
   let lastError = null;
 
   for (const provider of providers) {
     try {
-      activeProgressCallback?.({ stage: "ocr", pct: 60, engine: OCR_ENGINES.PUTER });
+      activeProgressCallback?.({ stage: "ocr", pct: 60, engine: OCR_ENGINE });
       const text = await puter.ai.img2txt(blob, { provider });
       const normalized = String(text || "").trim();
       if (!normalized) {
         throw new Error("لم يُعثر Puter على نص في الصورة.");
       }
-      activeProgressCallback?.({ stage: "ocr", pct: 100, engine: OCR_ENGINES.PUTER });
+      activeProgressCallback?.({ stage: "ocr", pct: 100, engine: OCR_ENGINE });
       return normalized;
     } catch (error) {
       lastError = error;
@@ -143,13 +143,12 @@ async function ocrWithPuter(blob) {
   throw lastError || new Error("تعذّر استخراج النص عبر Puter AI.");
 }
 
-export async function extractImageText(file, onProgress, options = {}) {
+export async function extractImageText(file, onProgress) {
   activeProgressCallback = onProgress;
-  const primary = options.engine || loadOcrOptions().engine || OCR_ENGINES.PUTER;
 
   try {
     const source = file instanceof Blob ? file : new Blob([file]);
-    onProgress?.({ stage: "prepare", pct: 0, engine: primary });
+    onProgress?.({ stage: "prepare", pct: 0, engine: OCR_ENGINE });
 
     const prepared = await prepareImageBlob(source);
     const text = normalizeOcrText(
@@ -164,7 +163,7 @@ export async function extractImageText(file, onProgress, options = {}) {
       throw new Error("لم يُعثر على نص في الصورة.");
     }
 
-    return { text, engine: OCR_ENGINES.PUTER, fallbackFrom: null };
+    return { text, engine: OCR_ENGINE, fallbackFrom: null };
   } finally {
     activeProgressCallback = null;
   }

@@ -851,23 +851,6 @@ mark.query-hit, .query-hit {
   margin-bottom: 1rem;
 }
 
-.ocr-engine-label {
-  font-weight: 700;
-  color: var(--ink);
-  font-size: 0.92rem;
-}
-
-.ocr-engine-select {
-  width: 100%;
-  max-width: 360px;
-  padding: 0.55rem 0.75rem;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel);
-  color: var(--ink);
-  font: inherit;
-}
-
 .ocr-engine-hint {
   margin: 0;
   font-size: 0.84rem;
