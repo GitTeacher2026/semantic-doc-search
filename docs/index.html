@@ -579,7 +579,19 @@
       <div id="image-preview-stage" class="image-preview-stage">
         <img id="image-preview-img" alt="" draggable="false" />
       </div>
-      <p class="image-preview-hint muted">عجلة الفأرة أو الإيماءات للتكبير · اسحب للتحريك · نقرتان للتبديل</p>
+      <div id="image-preview-comments" class="image-preview-comments hidden">
+        <label for="image-preview-comment">تعليق على الصورة</label>
+        <textarea
+          id="image-preview-comment"
+          rows="3"
+          placeholder="أضف ملاحظة أو تعليقاً على هذه الصورة…"
+        ></textarea>
+        <div class="image-preview-comment-actions">
+          <button id="image-preview-save-comment" class="btn primary small" type="button">حفظ التعليق</button>
+          <p id="image-preview-comment-status" class="image-preview-comment-status muted hidden" role="status"></p>
+        </div>
+      </div>
+      <p class="image-preview-hint muted">عجلة الفأرة للتكبير/التصغير · اسحب للتحريك · نقرتان للتبديل · 0 لملاءمة الصورة</p>
     </div>
   </div>
 

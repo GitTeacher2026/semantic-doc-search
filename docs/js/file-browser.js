@@ -345,6 +345,7 @@ function renderGridItem(doc) {
         <div class="fb-card-badges">
           ${renderStorageBadges(doc)}
           ${isImageDocument(doc) && !hasExtractedOcr(doc) ? '<span class="ocr-badge">بدون نص</span>' : ""}
+          ${isImageDocument(doc) && doc.imageComment ? '<span class="comment-badge" title="يوجد تعليق">💬 تعليق</span>' : ""}
           ${doc.isLocked ? '<span class="lock-badge">🔒 مقفل</span>' : ""}
         </div>
       </div>

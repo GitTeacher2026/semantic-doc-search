@@ -194,6 +194,7 @@ export function renderSearchResults(hits, query, docMeta = new Map(), searchOpti
                 <span class="chip">${escapeHtml(group.category)}</span>
                 <span class="search-result-count">${group.snippets.length} مقطع</span>
                 ${isImage ? '<span class="chip search-image-chip">صورة</span>' : ""}
+                ${isImage && meta.imageComment ? '<span class="chip comment-badge">💬 تعليق</span>' : ""}
               </div>
             </div>
             <div class="search-result-actions">

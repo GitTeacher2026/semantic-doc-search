@@ -2,6 +2,7 @@ const previewUrlCache = new Map();
 
 let lightboxReady = false;
 let scale = 1;
+let fitScale = 1;
 let translateX = 0;
 let translateY = 0;
 let isDragging = false;
@@ -13,6 +14,11 @@ let pinchStartDistance = 0;
 let pinchStartScale = 1;
 
 let activeObjectUrl = "";
+let previewContext = {
+  docId: null,
+  comment: "",
+  onSaveComment: null,
+};
 
 function releaseActiveObjectUrl() {
   if (!activeObjectUrl) return;
@@ -25,9 +31,12 @@ let stageEl;
 let imgEl;
 let titleEl;
 let zoomLevelEl;
-
-const MIN_SCALE = 1;
-const MAX_SCALE = 5;
+let zoomOutBtn;
+let zoomInBtn;
+let commentsPanel;
+let commentInput;
+let commentSaveBtn;
+let commentStatus;
 
 export function ensurePreviewUrl(file) {
   if (!file || previewUrlCache.has(file)) {
@@ -61,21 +70,46 @@ export function syncPreviewUrls(files, isImage) {
   }
 }
 
+function getMinScale() {
+  return Math.max(0.15, fitScale * 0.25);
+}
+
+function getMaxScale() {
+  return Math.max(fitScale * 6, 3);
+}
+
 function clampScale(value) {
-  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
+  return Math.min(getMaxScale(), Math.max(getMinScale(), value));
+}
+
+function computeFitScale() {
+  if (!imgEl || !stageEl) return 1;
+  const width = imgEl.naturalWidth;
+  const height = imgEl.naturalHeight;
+  if (!width || !height) return 1;
+  const rect = stageEl.getBoundingClientRect();
+  if (!rect.width || !rect.height) return 1;
+  return Math.min(rect.width / width, rect.height / height);
+}
+
+function updateZoomButtons() {
+  if (zoomOutBtn) zoomOutBtn.disabled = scale <= getMinScale() + 0.001;
+  if (zoomInBtn) zoomInBtn.disabled = scale >= getMaxScale() - 0.001;
 }
 
 function updateTransform() {
   if (!imgEl) return;
   imgEl.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
   if (zoomLevelEl) {
-    zoomLevelEl.textContent = `${Math.round(scale * 100)}%`;
+    const pct = Math.round((scale / Math.max(fitScale, 0.001)) * 100);
+    zoomLevelEl.textContent = `${pct}%`;
   }
-  stageEl?.classList.toggle("is-zoomed", scale > 1.01);
+  stageEl?.classList.toggle("is-zoomed", scale > fitScale + 0.01);
+  updateZoomButtons();
 }
 
 function resetView() {
-  scale = 1;
+  scale = fitScale;
   translateX = 0;
   translateY = 0;
   updateTransform();
@@ -84,7 +118,7 @@ function resetView() {
 function setScale(nextScale, originX, originY) {
   const prev = scale;
   scale = clampScale(nextScale);
-  if (scale === prev) return;
+  if (Math.abs(scale - prev) < 0.0001) return;
 
   if (originX != null && originY != null && stageEl) {
     const rect = stageEl.getBoundingClientRect();
@@ -95,20 +129,67 @@ function setScale(nextScale, originX, originY) {
     translateY -= cy * (ratio - 1);
   }
 
-  if (scale <= 1.01) {
+  if (scale <= fitScale + 0.01) {
     translateX = 0;
     translateY = 0;
-    scale = 1;
   }
+
   updateTransform();
 }
 
 function zoomBy(delta, originX, originY) {
-  setScale(scale + delta, originX, originY);
+  setScale(scale + delta * Math.max(fitScale, 0.5), originX, originY);
 }
 
 function fitImage() {
   resetView();
+}
+
+function applyImageLayout() {
+  if (!imgEl) return;
+  fitScale = computeFitScale();
+  imgEl.style.width = `${imgEl.naturalWidth}px`;
+  imgEl.style.height = `${imgEl.naturalHeight}px`;
+  scale = fitScale;
+  translateX = 0;
+  translateY = 0;
+  updateTransform();
+}
+
+function updateCommentsPanel() {
+  if (!commentsPanel || !commentInput) return;
+  const show = Boolean(previewContext.docId);
+  commentsPanel.classList.toggle("hidden", !show);
+  if (!show) return;
+  commentInput.value = previewContext.comment || "";
+  if (commentStatus) {
+    commentStatus.textContent = "";
+    commentStatus.classList.add("hidden");
+  }
+}
+
+async function saveComment() {
+  if (!previewContext.docId || !commentInput) return;
+  const nextComment = commentInput.value.trim();
+  if (!previewContext.onSaveComment) return;
+
+  commentSaveBtn.disabled = true;
+  try {
+    await previewContext.onSaveComment(nextComment);
+    previewContext.comment = nextComment;
+    if (commentStatus) {
+      commentStatus.textContent = "تم حفظ التعليق.";
+      commentStatus.classList.remove("hidden", "error");
+    }
+  } catch (error) {
+    if (commentStatus) {
+      commentStatus.textContent = error.message || "تعذّر حفظ التعليق.";
+      commentStatus.classList.remove("hidden");
+      commentStatus.classList.add("error");
+    }
+  } finally {
+    commentSaveBtn.disabled = false;
+  }
 }
 
 function closeLightbox() {
@@ -116,37 +197,56 @@ function closeLightbox() {
   document.body.classList.remove("image-preview-open");
   if (imgEl) {
     imgEl.removeAttribute("src");
+    imgEl.removeAttribute("style");
     imgEl.alt = "";
+    imgEl.onload = null;
   }
   releaseActiveObjectUrl();
-  resetView();
+  previewContext = { docId: null, comment: "", onSaveComment: null };
+  updateCommentsPanel();
+  fitScale = 1;
+  scale = 1;
+  translateX = 0;
+  translateY = 0;
 }
 
-function openLightbox(url, filename = "") {
+function openLightbox(url, filename = "", options = {}) {
   ensureLightbox();
   if (!modalEl || !imgEl) return;
 
-  resetView();
+  previewContext = {
+    docId: options.docId || null,
+    comment: options.comment || "",
+    onSaveComment: options.onSaveComment || null,
+  };
+  updateCommentsPanel();
+
+  fitScale = 1;
+  scale = 1;
+  translateX = 0;
+  translateY = 0;
+  imgEl.onload = () => applyImageLayout();
   imgEl.src = url;
   imgEl.alt = filename;
   if (titleEl) titleEl.textContent = filename;
   modalEl.classList.remove("hidden");
   document.body.classList.add("image-preview-open");
+  updateZoomButtons();
 }
 
-export function openImagePreview(url, filename = "") {
-  openLightbox(url, filename);
+export function openImagePreview(url, filename = "", options = {}) {
+  openLightbox(url, filename, options);
 }
 
-export function openBlobImagePreview(blob, filename = "") {
+export function openBlobImagePreview(blob, filename = "", options = {}) {
   if (!blob) return;
   releaseActiveObjectUrl();
   activeObjectUrl = URL.createObjectURL(blob);
-  openLightbox(activeObjectUrl, filename);
+  openLightbox(activeObjectUrl, filename, options);
 }
 
 function onPointerDown(event) {
-  if (!stageEl || scale <= 1) return;
+  if (!stageEl || scale <= fitScale + 0.01) return;
   isDragging = true;
   dragStartX = event.clientX;
   dragStartY = event.clientY;
@@ -173,16 +273,16 @@ function onPointerUp(event) {
 function onWheel(event) {
   if (!modalEl || modalEl.classList.contains("hidden")) return;
   event.preventDefault();
-  const delta = event.deltaY < 0 ? 0.2 : -0.2;
+  const delta = event.deltaY < 0 ? 0.15 : -0.15;
   zoomBy(delta, event.clientX, event.clientY);
 }
 
 function onDoubleClick(event) {
-  if (scale > 1.01) {
+  if (scale > fitScale + 0.01) {
     fitImage();
     return;
   }
-  setScale(2.5, event.clientX, event.clientY);
+  setScale(fitScale * 2.5, event.clientX, event.clientY);
 }
 
 function touchDistance(touches) {
@@ -229,13 +329,20 @@ function ensureLightbox() {
   imgEl = document.getElementById("image-preview-img");
   titleEl = document.getElementById("image-preview-title");
   zoomLevelEl = document.getElementById("image-preview-zoom-level");
+  zoomOutBtn = document.getElementById("image-preview-zoom-out");
+  zoomInBtn = document.getElementById("image-preview-zoom-in");
+  commentsPanel = document.getElementById("image-preview-comments");
+  commentInput = document.getElementById("image-preview-comment");
+  commentSaveBtn = document.getElementById("image-preview-save-comment");
+  commentStatus = document.getElementById("image-preview-comment-status");
 
   if (!modalEl || !stageEl || !imgEl) return;
 
   document.getElementById("image-preview-close")?.addEventListener("click", closeLightbox);
-  document.getElementById("image-preview-zoom-in")?.addEventListener("click", () => zoomBy(0.35));
-  document.getElementById("image-preview-zoom-out")?.addEventListener("click", () => zoomBy(-0.35));
+  zoomInBtn?.addEventListener("click", () => zoomBy(0.35));
+  zoomOutBtn?.addEventListener("click", () => zoomBy(-0.35));
   document.getElementById("image-preview-zoom-reset")?.addEventListener("click", fitImage);
+  commentSaveBtn?.addEventListener("click", () => saveComment());
   modalEl.querySelector("[data-close]")?.addEventListener("click", closeLightbox);
 
   stageEl.addEventListener("pointerdown", onPointerDown);
@@ -247,6 +354,7 @@ function ensureLightbox() {
   stageEl.addEventListener("touchstart", onTouchStart, { passive: true });
   stageEl.addEventListener("touchmove", onTouchMove, { passive: false });
   stageEl.addEventListener("touchend", onTouchEnd);
+  modalEl.addEventListener("wheel", onWheel, { passive: false });
 
   document.addEventListener("keydown", onKeyDown);
   lightboxReady = true;

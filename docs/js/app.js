@@ -1239,7 +1239,15 @@ async function openDocumentImagePreview(docId) {
   try {
     setStatus("جارٍ تحميل الصورة…");
     const blob = await getDocumentBlob(doc);
-    openBlobImagePreview(blob, doc.filename);
+    openBlobImagePreview(blob, doc.filename, {
+      docId: doc.id,
+      comment: doc.imageComment || "",
+      onSaveComment: async (comment) => {
+        doc.imageComment = comment;
+        await persistState();
+        renderLibrary();
+      },
+    });
     setStatus("", false);
   } catch (error) {
     setStatus(error.message, true);
@@ -2259,6 +2267,7 @@ function runSearch() {
           fileGroup: doc.fileGroup,
           extension: doc.extension,
           isImage: isImageFile(doc.filename),
+          imageComment: doc.imageComment || "",
         },
       ])
     );
