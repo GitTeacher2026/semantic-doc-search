@@ -42,6 +42,7 @@ import {
   syncPreviewUrls,
 } from "./image-preview.js";
 import { initPdfStudio, openPdfStudio } from "./pdf-studio.js";
+import { extractIndexableText, extractPdfTextLayer } from "./pdf-ingest.js";
 import {
   EXT_GROUPS,
   GROUP_ICONS,
@@ -150,7 +151,6 @@ import {
 
 const CHUNK_SIZE = 800;
 const CHUNK_OVERLAP = 120;
-const IMAGE_NO_OCR_PREVIEW = "صورة — لم يُستخرج نص بعد";
 
 let currentAppPage = "library";
 let pendingItems = [];
@@ -1134,27 +1134,16 @@ async function extractPptxText(arrayBuffer) {
 }
 
 async function extractPdfText(arrayBuffer) {
-  const { getPdfJs } = await import("./pdf-utils.js");
-  const pdfjs = await getPdfJs();
-  const data = arrayBuffer.slice(0);
-  const pdf = await pdfjs.getDocument({ data, useSystemFonts: true }).promise;
-  const parts = [];
-  for (let i = 1; i <= pdf.numPages; i += 1) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    parts.push(content.items.map((item) => item.str).join(" "));
-    page.cleanup?.();
-  }
-  return parts.join("\n").trim();
+  return extractPdfTextLayer(arrayBuffer);
 }
 
 async function extractText(file, arrayBuffer) {
   const name = String(file?.name || "");
   const buffer = arrayBuffer || (await file.arrayBuffer());
-  if (isImageFile(name)) {
-    throw new Error("استخراج نص الصور يتم من صفحة الملفات بعد الفهرسة.");
+  if (isImageFile(name) || fileEndsWith(name, ".pdf")) {
+    const result = await extractIndexableText(file, buffer);
+    return result.text;
   }
-  if (fileEndsWith(name, ".pdf")) return extractPdfText(buffer);
   if (fileEndsWith(name, ".docx")) return extractDocxText(buffer);
   if (fileEndsWith(name, ".xlsx") || fileEndsWith(name, ".xls")) return extractExcelText(buffer);
   if (fileEndsWith(name, ".pptx")) return extractPptxText(buffer);
@@ -2216,59 +2205,52 @@ async function ingestFiles(items) {
       const file = item.file;
       const fileBytes = new Uint8Array(await file.arrayBuffer());
       const image = isImageFile(file.name);
+      const isPdf = fileEndsWith(file.name, ".pdf");
       const blob = new Blob([fileBytes]);
 
-      if (image) {
-        const uploadName = buildUploadFilename(item.meta?.displayName, file.name);
-        const category = resolvePendingCategory(item.meta);
-        if (!uploadName) {
-          throw new Error("أدخل اسماً صالحاً لكل صورة قبل الفهرسة.");
-        }
-        if (!category) {
-          throw new Error(`اختر مجلداً أو أنشئ مجلداً جديداً للصورة «${uploadName}».`);
-        }
-        await requireFolderAccess(category);
-        state.folders = ensureFolderRecord(state.folders, category);
-        if (hasDuplicateFilename(uploadName)) {
-          throw new Error(`يوجد ملف بنفس الاسم «${uploadName}». غيّر الاسم أو احذف النسخة القديمة.`);
-        }
+      let text = "";
+      let ocrExtracted = false;
 
-        const remoteTargets = await attachRemoteFileTargets(category, uploadName, blob);
-
-        state.documents.push({
-          id: crypto.randomUUID(),
-          filename: uploadName,
-          category,
-          ownerId: currentUser?.id,
-          fileGroup: fileGroup(uploadName),
-          extension: fileExtension(uploadName),
-          charCount: 0,
-          preview: IMAGE_NO_OCR_PREVIEW,
-          ...remoteTargets,
-          chunks: [],
-          ocrExtracted: false,
-          isLocked: false,
-          lockHash: null,
-        });
-        state.folders = ensureFolderRecord(state.folders, category);
-        continue;
+      if (image || isPdf) {
+        const result = await extractIndexableText(file, fileBytes, (message) => setStatus(message));
+        text = result.text;
+        ocrExtracted = result.ocrUsed;
+      } else {
+        text = await extractText(file, fileBytes.slice().buffer);
       }
 
-      const text = await extractText(file, fileBytes.slice().buffer);
-      if (!text) throw new Error(`لم يُعثر على نص في ${file.name}`);
+      if (!text?.trim()) {
+        throw new Error(`لم يُعثر على نص في ${file.name}`);
+      }
+      text = text.trim();
 
       let filename = file.name;
       let category = assignCategory(text, file.name, state.documents);
-      const chosenCategory = resolvePendingCategory(item.meta);
-      if (chosenCategory) {
-        await requireFolderAccess(chosenCategory);
+
+      if (image) {
+        const uploadName = buildUploadFilename(item.meta?.displayName, file.name);
+        if (!uploadName) {
+          throw new Error("أدخل اسماً صالحاً لكل صورة قبل الفهرسة.");
+        }
+        filename = uploadName;
+        const chosenCategory = resolvePendingCategory(item.meta);
+        if (!chosenCategory) {
+          throw new Error(`اختر مجلداً أو أنشئ مجلداً جديداً للصورة «${uploadName}».`);
+        }
         category = chosenCategory;
-        state.folders = ensureFolderRecord(state.folders, category);
+      } else {
+        const chosenCategory = resolvePendingCategory(item.meta);
+        if (chosenCategory) {
+          category = chosenCategory;
+        }
+        const chosenName = buildUploadFilename(item.meta?.displayName, file.name);
+        if (chosenName && sanitizeFilenameInput(item.meta?.displayName)) {
+          filename = chosenName;
+        }
       }
-      const chosenName = buildUploadFilename(item.meta?.displayName, file.name);
-      if (chosenName && sanitizeFilenameInput(item.meta?.displayName)) {
-        filename = chosenName;
-      }
+
+      await requireFolderAccess(category);
+      state.folders = ensureFolderRecord(state.folders, category);
       if (hasDuplicateFilename(filename)) {
         throw new Error(`يوجد ملف بنفس الاسم «${filename}». غيّر الاسم أو احذف النسخة القديمة.`);
       }
@@ -2287,6 +2269,7 @@ async function ingestFiles(items) {
         preview: text.replace(/\s+/g, " ").slice(0, 280),
         ...remoteTargets,
         chunks,
+        ocrExtracted,
         isLocked: false,
         lockHash: null,
       });

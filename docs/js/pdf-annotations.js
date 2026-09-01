@@ -176,7 +176,7 @@ export function bindAnnotationInteractions({
   getViewportMeta,
   store,
   onChange,
-  onRequestText,
+  onRequestInlineText,
   onRequestImage,
   onRequestSignature,
 }) {
@@ -210,20 +210,7 @@ export function bindAnnotationInteractions({
     }
 
     if (store.activeTool === EDIT_TOOLS.TEXT) {
-      onRequestText?.(point, (text) => {
-        if (!text?.trim()) return;
-        addAnnotation(store, pageIndex, {
-          type: "text",
-          x: point.x,
-          y: point.y,
-          width: 240,
-          height: (store.textSize || 16) * 3,
-          text: text.trim(),
-          fontSize: store.textSize || 16,
-          color: store.textColor,
-        });
-        onChange?.();
-      });
+      onRequestInlineText?.(point);
       return;
     }
 

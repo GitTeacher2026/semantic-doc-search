@@ -2176,28 +2176,97 @@ body.pdf-studio-open {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  opacity: 1;
   line-height: 1;
+  z-index: 3;
   pointer-events: none;
 }
 
-.pdf-studio-text-layer span,
-.pdf-studio-text-layer br {
+.pdf-studio-text-layer.is-selectable {
+  z-index: 5;
+}
+
+.pdf-studio-text-layer.is-selectable span {
   color: transparent;
-  position: absolute;
-  white-space: pre;
-  transform-origin: 0 0;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+  pointer-events: auto;
+}
+
+.pdf-studio-text-layer.is-selectable ::selection {
+  background: rgba(20, 184, 166, 0.35);
+  color: transparent;
 }
 
 .pdf-studio-overlay {
   position: absolute;
   inset: 0;
-  cursor: crosshair;
+  z-index: 2;
   touch-action: none;
+  pointer-events: none;
 }
 
-.pdf-studio-overlay.is-drawing {
+.pdf-studio-overlay.is-interactive {
+  z-index: 5;
+  pointer-events: auto;
   cursor: crosshair;
+}
+
+.pdf-studio-annotation-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.pdf-studio-annotation-layer:not(.hidden) {
+  pointer-events: auto;
+}
+
+.pdf-ann-hit {
+  position: absolute;
+  border: 2px solid transparent;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.pdf-ann-hit.is-selected {
+  border-color: var(--accent);
+  background: rgba(20, 184, 166, 0.12);
+}
+
+.pdf-inline-text-editor {
+  position: absolute;
+  z-index: 6;
+  min-width: 160px;
+  min-height: 1.5em;
+  max-width: min(320px, 90%);
+  padding: 0.25rem 0.4rem;
+  border: 2px solid var(--accent);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.97);
+  color: var(--ink);
+  font-family: "Noto Sans Arabic", sans-serif;
+  font-size: 16px;
+  line-height: 1.4;
+  outline: none;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.pdf-studio-submodal {
+  z-index: 1300;
+}
+
+#pdf-text-dialog textarea {
+  width: 100%;
+  min-height: 5rem;
+  margin-top: 0.5rem;
+  padding: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: "Noto Sans Arabic", sans-serif;
+  resize: vertical;
 }
 
 .pdf-studio-edit-tools {

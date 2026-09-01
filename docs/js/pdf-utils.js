@@ -3,14 +3,24 @@ let pdfLibModule = null;
 let arabicFontBytes = null;
 
 const PDFJS_VERSION = "4.10.38";
-const PDFJS_BASE = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build`;
-const PDFJS_URL = `${PDFJS_BASE}/pdf.min.mjs`;
-const PDFJS_WORKER = `${PDFJS_BASE}/pdf.worker.min.mjs`;
+const PDFJS_BASE = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}`;
+const PDFJS_URL = `${PDFJS_BASE}/build/pdf.min.mjs`;
+const PDFJS_WORKER = `${PDFJS_BASE}/build/pdf.worker.min.mjs`;
 const PDFLIB_URL = "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm";
 const ARABIC_FONT_URL =
   "https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@v2024.10.18/hinted/ttf/NotoSansArabic/NotoSansArabic-Regular.ttf";
 
 export const DEFAULT_RENDER_SCALE = 1.5;
+
+export function getPdfDocumentOptions(data) {
+  return {
+    data: toArrayBuffer(data),
+    useSystemFonts: true,
+    standardFontDataUrl: `${PDFJS_BASE}/standard_fonts/`,
+    cMapUrl: `${PDFJS_BASE}/cmaps/`,
+    cMapPacked: true,
+  };
+}
 
 export async function getPdfJs() {
   if (!pdfjsLib) {
@@ -44,8 +54,7 @@ export function toArrayBuffer(bytes) {
 
 export async function loadPdfDocument(bytes) {
   const pdfjs = await getPdfJs();
-  const data = toArrayBuffer(bytes);
-  return pdfjs.getDocument({ data, useSystemFonts: true }).promise;
+  return pdfjs.getDocument(getPdfDocumentOptions(bytes)).promise;
 }
 
 /**
@@ -100,16 +109,37 @@ export async function renderTextLayer(pdfDoc, pageNumber, container, viewport) {
   container.style.height = `${Math.floor(viewport.height)}px`;
 
   const pdfjs = await getPdfJs();
-  if (!pdfjs.TextLayer) return;
-
   const page = await pdfDoc.getPage(pageNumber);
   const textContent = await page.getTextContent();
-  const textLayer = new pdfjs.TextLayer({
-    textContentSource: textContent,
-    container,
-    viewport,
-  });
-  await textLayer.render();
+
+  const textItems = textContent.items.filter((item) => item.str?.trim());
+  if (!textItems.length) {
+    page.cleanup?.();
+    return;
+  }
+
+  const Util = pdfjs.Util;
+  for (const item of textItems) {
+    const transform = Util.transform(viewport.transform, item.transform);
+    const angle = Math.atan2(transform[1], transform[0]);
+    const fontHeight = Math.hypot(transform[2], transform[3]);
+    const left = transform[4];
+    const top = transform[5] - fontHeight;
+
+    const span = document.createElement("span");
+    span.textContent = item.str;
+    span.style.position = "absolute";
+    span.style.left = `${left}px`;
+    span.style.top = `${top}px`;
+    span.style.fontSize = `${fontHeight}px`;
+    span.style.fontFamily = item.fontName?.includes("Arabic") ? '"Noto Sans Arabic", sans-serif' : "sans-serif";
+    span.style.transform = `rotate(${angle}rad)`;
+    span.style.transformOrigin = "0 0";
+    span.style.whiteSpace = "pre";
+    span.setAttribute("role", "presentation");
+    container.appendChild(span);
+  }
+
   page.cleanup?.();
 }
 

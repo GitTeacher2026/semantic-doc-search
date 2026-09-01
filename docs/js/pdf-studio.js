@@ -9,11 +9,14 @@ import {
   renderTextLayer,
 } from "./pdf-utils.js";
 import {
+  addAnnotation,
   bindAnnotationInteractions,
   createAnnotationStore,
   deleteSelectedAnnotation,
   EDIT_TOOLS,
   exportAnnotationsByPage,
+  findAnnotation,
+  getPageAnnotations,
   renderAnnotationsOverlay,
   setActiveTool,
 } from "./pdf-annotations.js";
@@ -89,6 +92,48 @@ function renderOverlay() {
   renderAnnotationsOverlay(ctx, annotationStore, getCurrentOriginalIndex());
 }
 
+function renderAnnotationLayer() {
+  const layer = modalEl.querySelector("#pdf-studio-annotation-layer");
+  if (!layer || !studioState) return;
+  const pageIndex = getCurrentOriginalIndex();
+  const isSelect = annotationStore.activeTool === EDIT_TOOLS.SELECT;
+  const list = getPageAnnotations(annotationStore, pageIndex);
+
+  if (!isSelect || !list.length) {
+    layer.classList.add("hidden");
+    layer.innerHTML = "";
+    return;
+  }
+
+  layer.classList.remove("hidden");
+  layer.innerHTML = list
+    .map(
+      (ann) => `
+    <button
+      type="button"
+      class="pdf-ann-hit${ann.id === annotationStore.selectedId ? " is-selected" : ""}"
+      style="left:${ann.x}px;top:${ann.y}px;width:${ann.width}px;height:${ann.height}px;"
+      data-id="${ann.id}"
+      title="${ann.type === "text" ? "انقر مرتين للتعديل" : "تحديد التعليق"}"
+    ></button>`
+    )
+    .join("");
+
+  layer.querySelectorAll(".pdf-ann-hit").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      annotationStore.selectedId = btn.dataset.id;
+      renderAnnotationLayer();
+      renderOverlay();
+    });
+    btn.addEventListener("dblclick", (event) => {
+      event.stopPropagation();
+      const ann = findAnnotation(annotationStore, pageIndex, btn.dataset.id);
+      if (ann?.type === "text") editTextAnnotation(ann, pageIndex);
+    });
+  });
+}
+
 async function renderCurrentPage() {
   if (!studioState?.pdfDoc) return;
   const taskId = ++renderTaskId;
@@ -127,6 +172,7 @@ async function renderCurrentPage() {
   if (taskId !== renderTaskId) return;
 
   renderOverlay();
+  renderAnnotationLayer();
 
   const pageLabel = modalEl.querySelector("#pdf-studio-page-label");
   if (pageLabel) {
@@ -237,8 +283,86 @@ function setEditTool(tool) {
   modalEl.querySelectorAll(".pdf-studio-tool").forEach((btn) => {
     btn.classList.toggle("is-active", btn.dataset.tool === tool);
   });
+  const textLayer = modalEl.querySelector("#pdf-studio-text-layer");
   const overlay = modalEl.querySelector("#pdf-studio-overlay");
-  overlay?.classList.toggle("is-drawing", tool !== EDIT_TOOLS.SELECT);
+  const isSelect = tool === EDIT_TOOLS.SELECT;
+  textLayer?.classList.toggle("is-selectable", isSelect);
+  overlay?.classList.toggle("is-interactive", !isSelect);
+  renderAnnotationLayer();
+  renderOverlay();
+}
+
+function placeInlineTextEditor(point, { initialText = "", onSave } = {}) {
+  const wrap = modalEl.querySelector("#pdf-studio-page-wrap");
+  wrap?.querySelector(".pdf-inline-text-editor")?.remove();
+
+  const editor = document.createElement("div");
+  editor.className = "pdf-inline-text-editor";
+  editor.contentEditable = "true";
+  editor.setAttribute("role", "textbox");
+  editor.setAttribute("aria-label", "نص جديد");
+  editor.style.left = `${Math.max(0, point.x)}px`;
+  editor.style.top = `${Math.max(0, point.y)}px`;
+  editor.style.fontSize = `${annotationStore.textSize || 16}px`;
+  if (initialText) editor.textContent = initialText;
+  wrap?.appendChild(editor);
+  editor.focus();
+
+  const commit = () => {
+    const text = editor.textContent?.trim() || "";
+    editor.remove();
+    if (text) onSave?.(text);
+  };
+
+  editor.addEventListener("blur", () => {
+    window.setTimeout(commit, 0);
+  });
+  editor.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      editor.remove();
+      return;
+    }
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      commit();
+    }
+  });
+}
+
+function editTextAnnotation(ann, pageIndex) {
+  placeInlineTextEditor({ x: ann.x, y: ann.y }, {
+    initialText: ann.text,
+    onSave: (text) => {
+      ann.text = text;
+      ann.height = Math.max(ann.height, (ann.fontSize || 16) * 2.5);
+      studioState.dirty = true;
+      renderOverlay();
+      renderAnnotationLayer();
+    },
+  });
+}
+
+function addTextAnnotationAt(point) {
+  const pageIndex = getCurrentOriginalIndex();
+  placeInlineTextEditor(point, {
+    onSave: (text) => {
+      addAnnotation(annotationStore, pageIndex, {
+        type: "text",
+        x: point.x,
+        y: point.y,
+        width: 260,
+        height: Math.max(40, (annotationStore.textSize || 16) * 2.5),
+        text,
+        fontSize: annotationStore.textSize || 16,
+        color: annotationStore.textColor,
+      });
+      studioState.dirty = true;
+      renderOverlay();
+      renderAnnotationLayer();
+      setStatus("تمت إضافة النص — اضغط «حفظ في المكتبة» لتثبيته في PDF.", false);
+    },
+  });
 }
 
 function openTextDialog() {
@@ -490,6 +614,7 @@ function bindEvents() {
     if (deleteSelectedAnnotation(annotationStore, getCurrentOriginalIndex())) {
       studioState.dirty = true;
       renderOverlay();
+      renderAnnotationLayer();
       setStatus("تم حذف التحديد.");
     }
   });
@@ -548,10 +673,9 @@ function bindEvents() {
     onChange: () => {
       studioState.dirty = true;
       renderOverlay();
+      renderAnnotationLayer();
     },
-    onRequestText: (_point, callback) => {
-      openTextDialog().then((text) => callback(text));
-    },
+    onRequestInlineText: (point) => addTextAnnotationAt(point),
     onRequestImage: (callback) => {
       requestImageFile().then((result) => {
         if (result) callback(result.dataUrl, result.width, result.height);

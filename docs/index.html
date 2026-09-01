@@ -666,8 +666,9 @@
           </div>
           <div id="pdf-studio-page-wrap" class="pdf-studio-page-wrap">
             <canvas id="pdf-studio-canvas" class="pdf-studio-canvas"></canvas>
-            <div id="pdf-studio-text-layer" class="pdf-studio-text-layer" aria-hidden="true"></div>
             <canvas id="pdf-studio-overlay" class="pdf-studio-overlay"></canvas>
+            <div id="pdf-studio-annotation-layer" class="pdf-studio-annotation-layer hidden"></div>
+            <div id="pdf-studio-text-layer" class="pdf-studio-text-layer is-selectable"></div>
           </div>
         </main>
       </div>
@@ -679,7 +680,7 @@
     <input id="pdf-studio-image-input" type="file" accept="image/*" hidden />
   </div>
 
-  <div id="pdf-text-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="pdf-text-dialog-title">
+  <div id="pdf-text-dialog" class="modal pdf-studio-submodal hidden" role="dialog" aria-modal="true" aria-labelledby="pdf-text-dialog-title">
     <div class="modal-backdrop" id="pdf-text-dialog-backdrop"></div>
     <div class="modal-card">
       <h2 id="pdf-text-dialog-title">إضافة نص</h2>
@@ -691,7 +692,7 @@
     </div>
   </div>
 
-  <div id="pdf-signature-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="pdf-signature-dialog-title">
+  <div id="pdf-signature-dialog" class="modal pdf-studio-submodal hidden" role="dialog" aria-modal="true" aria-labelledby="pdf-signature-dialog-title">
     <div class="modal-backdrop" id="pdf-signature-dialog-backdrop"></div>
     <div class="modal-card">
       <h2 id="pdf-signature-dialog-title">ارسم توقيعك</h2>
@@ -754,6 +755,6 @@
 
   <iframe id="credential-catcher" name="credential-catcher" title="" tabindex="-1" aria-hidden="true" hidden></iframe>
 
-  <script type="module" src="js/main.js?v=20260901y"></script>
+  <script type="module" src="js/main.js?v=20260901z"></script>
 </body>
 </html>
