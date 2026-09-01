@@ -41,6 +41,7 @@ import {
   revokeAllPreviewUrls,
   syncPreviewUrls,
 } from "./image-preview.js";
+import { initPdfStudio, openPdfStudio } from "./pdf-studio.js";
 import {
   EXT_GROUPS,
   GROUP_ICONS,
@@ -1563,6 +1564,11 @@ function guessImageMime(filename) {
   return map[ext] || "image/jpeg";
 }
 
+function guessDocumentMime(filename) {
+  if (fileEndsWith(filename, ".pdf")) return "application/pdf";
+  return guessImageMime(filename);
+}
+
 async function getDocumentBlob(doc) {
   let bytes;
   if (doc.fileData) {
@@ -1574,9 +1580,9 @@ async function getDocumentBlob(doc) {
   } else if (doc.onedriveFileId) {
     bytes = new Uint8Array(await downloadOneDriveFile(doc.onedriveFileId));
   } else {
-    throw new Error("تعذّر الوصول إلى ملف الصورة. أعد رفع الصورة.");
+    throw new Error("تعذّر الوصول إلى الملف. أعد رفعه.");
   }
-  return new Blob([bytes], { type: guessImageMime(doc.filename) });
+  return new Blob([bytes], { type: guessDocumentMime(doc.filename) });
 }
 
 async function extractOcrForDocument(doc) {
@@ -1664,6 +1670,52 @@ async function confirmOcrExtract() {
     setStatus(`تعذّر استخراج النص: ${error.message}`, true);
     ocrExtractBtn.disabled = false;
   }
+}
+
+async function openPdfStudioForDoc(docId) {
+  const doc = findDocumentById(docId);
+  if (!doc || doc.fileGroup !== "pdf") return;
+  if (doc.isLocked && !isDocUnlocked(doc)) {
+    openUnlockDialog(docId, "pdf-edit");
+    return;
+  }
+
+  try {
+    setStatus("جارٍ فتح محرر PDF…");
+    const blob = await getDocumentBlob(doc);
+    await openPdfStudio({
+      docId: doc.id,
+      filename: doc.filename,
+      blob,
+      libraryDocuments: state.documents,
+    });
+    setStatus("", false);
+  } catch (error) {
+    setStatus(`تعذّر فتح محرر PDF: ${error.message}`, true);
+  }
+}
+
+async function savePdfStudioDocument(docId, bytes, { ocrText } = {}) {
+  const doc = findDocumentById(docId);
+  if (!doc) throw new Error("المستند غير موجود.");
+
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  if (isMegaConnected()) {
+    doc.megaFileId = await uploadMegaDocumentFile(doc.category || "عام", doc.filename, blob);
+  }
+
+  if (ocrText) {
+    const others = state.documents.filter((item) => item.id !== docId);
+    doc.category = assignCategory(ocrText, doc.filename, others);
+    doc.charCount = ocrText.length;
+    doc.preview = ocrText.replace(/\s+/g, " ").slice(0, 280);
+    doc.chunks = chunkText(ocrText).map((content) => ({ content }));
+    doc.ocrExtracted = true;
+    state.folders = ensureFolderRecord(state.folders, doc.category);
+  }
+
+  await persistState();
+  renderLibrary();
 }
 
 async function downloadDocument(doc) {
@@ -2078,7 +2130,9 @@ function openUnlockDialog(docId, action = "unlock") {
       ? "هذا الملف مقفل. أدخل كلمة مرور القفل للتنزيل."
       : action === "preview"
         ? "هذا الملف مقفل. أدخل كلمة مرور القفل لمعاينة الصورة."
-        : "أدخل كلمة مرور القفل لعرض المحتوى والبحث فيه.";
+        : action === "pdf-edit"
+          ? "هذا الملف مقفل. أدخل كلمة مرور القفل لفتح محرر PDF."
+          : "أدخل كلمة مرور القفل لعرض المحتوى والبحث فيه.";
   unlockPassword.value = "";
   unlockDialogError.classList.add("hidden");
   unlockDialog.classList.remove("hidden");
@@ -2138,6 +2192,8 @@ async function confirmUnlock() {
     openOcrDialog(docId);
   } else if (action === "preview") {
     await openDocumentImagePreview(docId);
+  } else if (action === "pdf-edit") {
+    await openPdfStudioForDoc(docId);
   } else if (action === "move" && pendingMoveTargetCategory) {
     await executeMoveDocumentToCategory(doc, pendingMoveTargetCategory);
     pendingMoveTargetCategory = null;
@@ -2417,6 +2473,14 @@ function handleFolderRelock(folderName) {
 
 setupDropZone();
 initImagePreview();
+initPdfStudio(document.getElementById("pdf-studio-modal"), {
+  getBlob: async (docId) => {
+    const doc = findDocumentById(docId);
+    if (!doc) throw new Error("الملف غير موجود.");
+    return getDocumentBlob(doc);
+  },
+  onSave: savePdfStudioDocument,
+});
 initFileBrowser(fileBrowserRoot, {
   onDelete: openDeleteDialog,
   onDownload: handleDownload,
@@ -2424,6 +2488,7 @@ initFileBrowser(fileBrowserRoot, {
   onLock: openLockDialog,
   onUnlock: handleUnlockButton,
   onOcr: openOcrDialog,
+  onPdfEdit: openPdfStudioForDoc,
   onImagePreview: openDocumentImagePreview,
   onFolderRename: openFolderRenameDialog,
   onFolderCreate: openFolderCreateDialog,

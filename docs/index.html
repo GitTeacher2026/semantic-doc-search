@@ -602,6 +602,50 @@
     </div>
   </div>
 
+  <div id="pdf-studio-modal" class="pdf-studio-modal hidden" role="dialog" aria-modal="true" aria-labelledby="pdf-studio-title">
+    <div class="pdf-studio-backdrop" aria-hidden="true"></div>
+    <div class="pdf-studio-shell">
+      <header class="pdf-studio-header">
+        <div class="pdf-studio-header-main">
+          <h2 id="pdf-studio-title" class="pdf-studio-title">محرر PDF</h2>
+          <p id="pdf-studio-page-label" class="pdf-studio-page-label muted">صفحة 1 من 1</p>
+        </div>
+        <div class="pdf-studio-toolbar">
+          <button id="pdf-studio-prev" class="btn ghost small" type="button" title="الصفحة السابقة">◀</button>
+          <button id="pdf-studio-next" class="btn ghost small" type="button" title="الصفحة التالية">▶</button>
+          <button id="pdf-studio-rotate" class="btn ghost small" type="button" title="تدوير 90°">↻</button>
+          <button id="pdf-studio-delete-page" class="btn ghost small" type="button" title="حذف الصفحة">🗑 صفحة</button>
+          <button id="pdf-studio-ocr-page" class="btn ghost small" type="button" title="OCR للصفحة الحالية">📝 OCR</button>
+          <button id="pdf-studio-ocr-all" class="btn ghost small" type="button" title="OCR لكل الصفحات">📝 OCR الكل</button>
+          <button id="pdf-studio-extract" class="btn ghost small" type="button" title="تنزيل الصفحة الحالية">⬇ صفحة</button>
+          <label class="btn ghost small pdf-studio-merge-btn">
+            ➕ دمج ملف
+            <input id="pdf-studio-merge-file" type="file" accept=".pdf,application/pdf" hidden />
+          </label>
+          <select id="pdf-studio-merge-library" class="pdf-studio-merge-select" aria-label="دمج PDF من المكتبة">
+            <option value="">دمج من المكتبة…</option>
+          </select>
+          <button id="pdf-studio-download" class="btn ghost small" type="button">تنزيل</button>
+          <button id="pdf-studio-save" class="btn primary small" type="button">حفظ في المكتبة</button>
+        </div>
+        <button id="pdf-studio-close" class="pdf-studio-close" type="button" aria-label="إغلاق">✕</button>
+      </header>
+      <div class="pdf-studio-body">
+        <aside class="pdf-studio-sidebar" aria-label="صفحات PDF">
+          <p class="pdf-studio-sidebar-title">الصفحات</p>
+          <div id="pdf-studio-thumbs" class="pdf-studio-thumbs"></div>
+        </aside>
+        <main class="pdf-studio-stage">
+          <canvas id="pdf-studio-canvas" class="pdf-studio-canvas"></canvas>
+        </main>
+      </div>
+      <footer class="pdf-studio-footer">
+        <p class="muted pdf-studio-hint">محرر PDF — تدوير، حذف، دمج، OCR، وتنزيل (مشابه لـ Sejda)</p>
+        <p id="pdf-studio-status" class="pdf-studio-status hidden" role="status"></p>
+      </footer>
+    </div>
+  </div>
+
   <div id="image-preview-modal" class="image-preview-modal hidden" role="dialog" aria-modal="true" aria-labelledby="image-preview-title">
     <div class="image-preview-backdrop" data-close aria-hidden="true"></div>
     <div class="image-preview-shell">
@@ -652,6 +696,6 @@
 
   <iframe id="credential-catcher" name="credential-catcher" title="" tabindex="-1" aria-hidden="true" hidden></iframe>
 
-  <script type="module" src="js/main.js?v=20260901w"></script>
+  <script type="module" src="js/main.js?v=20260901x"></script>
 </body>
 </html>

@@ -220,6 +220,10 @@ function isImageDocument(doc) {
   return isImageFile(doc?.filename) || doc?.fileGroup === "image";
 }
 
+function isPdfDocument(doc) {
+  return doc?.fileGroup === "pdf" || /\.pdf$/i.test(doc?.filename || "");
+}
+
 function hasExtractedOcr(doc) {
   return doc?.ocrExtracted === true;
 }
@@ -247,10 +251,14 @@ function renderDocActions(doc) {
   const lockBtn = locked
     ? `<button class="btn ghost small unlock-btn" data-id="${doc.id}" type="button" title="${unlocked ? "إعادة القفل" : "فتح"}">${unlocked ? "🔒" : "🔓"}</button>`
     : `<button class="btn ghost small lock-btn" data-id="${doc.id}" type="button" title="قفل">🔒</button>`;
+  const pdfBtn = isPdfDocument(doc)
+    ? `<button class="btn ghost small pdf-edit-btn" data-id="${doc.id}" type="button" title="محرر PDF">📄</button>`
+    : "";
 
   return `
     <div class="fb-card-actions">
       ${renderOcrAction(doc, { compact: true })}
+      ${pdfBtn}
       <button class="btn ghost small download-btn" data-id="${doc.id}" type="button" title="تنزيل">⬇</button>
       <button class="btn ghost small rename-btn" data-id="${doc.id}" type="button" title="إعادة تسمية">✏️</button>
       ${lockBtn}
@@ -283,11 +291,12 @@ function renderGridItem(doc) {
   const groupName = doc.fileGroup || fileGroup(doc.filename);
   const lockedClass = doc.isLocked ? " is-locked" : "";
   const imageClass = isImageDocument(doc) ? " is-image" : "";
+  const pdfClass = isPdfDocument(doc) ? " is-pdf" : "";
   const visual = isImageDocument(doc)
     ? renderImageThumb(doc)
-    : `<div class="fb-card-icon" aria-hidden="true">${GROUP_ICONS[groupName] || GROUP_ICONS.other}</div>`;
+    : `<button type="button" class="fb-card-icon${isPdfDocument(doc) ? " pdf-open-btn" : ""}" data-id="${doc.id}" ${isPdfDocument(doc) ? `aria-label="فتح ${escapeHtml(doc.filename)} في محرر PDF"` : 'aria-hidden="true"'}>${GROUP_ICONS[groupName] || GROUP_ICONS.other}</button>`;
   return `
-    <article class="fb-card fb-draggable${lockedClass}${imageClass}" draggable="true" data-doc-id="${doc.id}" data-id="${doc.id}">
+    <article class="fb-card fb-draggable${lockedClass}${imageClass}${pdfClass}" draggable="true" data-doc-id="${doc.id}" data-id="${doc.id}">
       ${visual}
       <div class="fb-card-body">
         <h3 class="fb-card-title" title="${escapeHtml(doc.filename)}">${escapeHtml(doc.filename)}</h3>
@@ -580,6 +589,12 @@ function bindActions(container) {
 
   container.querySelectorAll(".ocr-btn").forEach((btn) => {
     btn.addEventListener("click", () => actionHandlers.onOcr?.(btn.dataset.id));
+  });
+  container.querySelectorAll(".pdf-edit-btn, .pdf-open-btn").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      actionHandlers.onPdfEdit?.(btn.dataset.id);
+    });
   });
   container.querySelectorAll(".delete-btn").forEach((btn) => {
     btn.addEventListener("click", () => actionHandlers.onDelete?.(btn.dataset.id));

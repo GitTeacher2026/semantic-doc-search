@@ -1954,6 +1954,269 @@ html[data-theme="dark"] .pending-image-fields.is-incomplete {
   border-color: #7c5e10;
 }
 
+html[data-theme="dark"] .pending-image-fields.is-incomplete {
+  background: #2a2410;
+  border-color: #7c5e10;
+}
+
+/* ── PDF Studio (Sejda-like editor) ── */
+
+body.pdf-studio-open {
+  overflow: hidden;
+}
+
+.pdf-studio-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+}
+
+.pdf-studio-modal.hidden {
+  display: none;
+}
+
+.pdf-studio-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 14, 22, 0.72);
+}
+
+.pdf-studio-shell {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 1280px);
+  height: 100%;
+  margin: 0 auto;
+  background: var(--surface);
+  border-inline: 1px solid var(--line);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+
+.pdf-studio-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+.pdf-studio-header-main {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.pdf-studio-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdf-studio-page-label {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+}
+
+.pdf-studio-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  flex: 2 1 420px;
+}
+
+.pdf-studio-merge-btn {
+  cursor: pointer;
+}
+
+.pdf-studio-merge-select {
+  max-width: 200px;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.82rem;
+}
+
+.pdf-studio-close {
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 0.25rem 0.45rem;
+  border-radius: 8px;
+}
+
+.pdf-studio-close:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.pdf-studio-body {
+  display: grid;
+  grid-template-columns: minmax(88px, 120px) minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+
+.pdf-studio-sidebar {
+  border-inline-end: 1px solid var(--line);
+  background: var(--surface-muted);
+  padding: 0.65rem 0.5rem;
+  overflow: auto;
+}
+
+.pdf-studio-sidebar-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+  text-align: center;
+}
+
+.pdf-studio-thumbs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.pdf-studio-thumb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 72px;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  padding: 0.35rem;
+}
+
+.pdf-studio-thumb.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.pdf-studio-thumb-num {
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.pdf-studio-thumb-rot,
+.pdf-studio-thumb-ocr {
+  position: absolute;
+  font-size: 0.65rem;
+  line-height: 1;
+}
+
+.pdf-studio-thumb-rot {
+  top: 4px;
+  inset-inline-start: 4px;
+  color: var(--ink-muted);
+}
+
+.pdf-studio-thumb-ocr {
+  bottom: 4px;
+  inset-inline-end: 4px;
+}
+
+.pdf-studio-stage {
+  overflow: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 1rem;
+  background: color-mix(in srgb, var(--ink) 4%, var(--surface));
+}
+
+.pdf-studio-canvas {
+  max-width: 100%;
+  height: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  border-radius: 4px;
+  background: #fff;
+}
+
+.pdf-studio-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 1rem;
+  border-top: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+.pdf-studio-hint {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.pdf-studio-status {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.pdf-studio-status.is-error {
+  color: var(--danger, #c0392b);
+}
+
+.pdf-studio-status.hidden {
+  display: none;
+}
+
+.fb-card.is-pdf .fb-card-icon {
+  cursor: pointer;
+}
+
+.fb-card.is-pdf .fb-card-icon:hover {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+@media (max-width: 760px) {
+  .pdf-studio-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .pdf-studio-sidebar {
+    border-inline-end: 0;
+    border-bottom: 1px solid var(--line);
+    max-height: 110px;
+  }
+
+  .pdf-studio-thumbs {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .pdf-studio-thumb {
+    min-width: 56px;
+    min-height: 56px;
+  }
+}
+
+html[data-theme="dark"] .pdf-studio-stage {
+  background: #111827;
+}
+
+html[data-theme="dark"] .pdf-studio-canvas {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
 /* ── File browser (Drive / Windows 11 style) ── */
 
 .files-page-panel {
