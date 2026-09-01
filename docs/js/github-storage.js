@@ -5,6 +5,7 @@ import {
   GITHUB_TOKEN,
   STORE_PATH,
 } from "./config.js";
+import { bytesToBase64 } from "./crypto.js";
 import { formatGitHubApiError, isGitHubShaConflict } from "./github-errors.js";
 
 function apiUrl() {
