@@ -1586,7 +1586,7 @@ async function ingestFiles(files) {
   } catch (error) {
     state.documents = state.documents.slice(0, documentsBefore);
     const hint = /bad credentials|DOCSHELF_GITHUB_TOKEN/i.test(error.message || "")
-      ? " (نجح استخراج النص من الصورة، لكن فشل الحفظ في GitHub.)"
+      ? " (تحقق من إعداد DOCSHELF_GITHUB_TOKEN في GitHub Actions.)"
       : "";
     setStatus(`خطأ: ${error.message}${hint}`, true);
   } finally {
