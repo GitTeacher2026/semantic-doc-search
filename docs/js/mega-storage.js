@@ -67,6 +67,41 @@ async function findChildFile(parent, name) {
   );
 }
 
+function listChildFiles(parent, name) {
+  const children = parent.children || [];
+  return children.filter((item) => item.name === name && !item.directory);
+}
+
+async function deleteAllNamedFiles(parent, name) {
+  const storage = getMegaStorage();
+  const matches = listChildFiles(parent, name);
+  for (const item of matches) {
+    try {
+      await item.delete(true);
+    } catch {
+      /* file may already be gone */
+    }
+  }
+  for (const file of Object.values(storage.files || {})) {
+    if (file.name !== name || file.directory) continue;
+    try {
+      await file.delete(true);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+export async function deleteMegaFile(nodeId) {
+  if (!nodeId) return;
+  const storage = getMegaStorage();
+  const file =
+    storage.files?.[nodeId] ||
+    Object.values(storage.files || {}).find((item) => item.nodeId === nodeId);
+  if (!file) return;
+  await file.delete(true);
+}
+
 function extractMegaNodeId(uploaded) {
   return uploaded?.nodeId || uploaded?.node?.nodeId || uploaded?.downloadId || null;
 }
@@ -143,12 +178,13 @@ export async function renameMegaFile(nodeId, newName) {
 
 export async function fetchEncryptedStore() {
   const root = await getRootFolder();
-  const existing = await findChildFile(root, INDEX_FILE_NAME);
-  if (!existing) {
+  const matches = listChildFiles(root, INDEX_FILE_NAME);
+  if (!matches.length) {
     indexFile = null;
     return { envelope: null, fileId: null };
   }
 
+  const existing = matches[matches.length - 1];
   indexFile = existing;
   const buffer = await existing.downloadBuffer();
   const text = new TextDecoder().decode(buffer);
@@ -159,18 +195,12 @@ export async function uploadEncryptedStore(envelope, fileId = indexFile?.nodeId)
   const root = await getRootFolder();
   const bytes = new TextEncoder().encode(JSON.stringify(envelope));
 
+  await deleteAllNamedFiles(root, INDEX_FILE_NAME);
   if (fileId) {
-    const storage = getMegaStorage();
-    const existing =
-      storage.files?.[fileId] ||
-      Object.values(storage.files || {}).find((item) => item.nodeId === fileId);
-    if (existing) {
-      await existing.delete(true);
-    }
-  } else {
-    const found = await findChildFile(root, INDEX_FILE_NAME);
-    if (found) {
-      await found.delete(true);
+    try {
+      await deleteMegaFile(fileId);
+    } catch {
+      /* ignore stale handle */
     }
   }
 
@@ -184,5 +214,5 @@ export async function uploadEncryptedStore(envelope, fileId = indexFile?.nodeId)
     )
     .complete;
   indexFile = uploaded;
-  return uploaded.nodeId;
+  return extractMegaNodeId(uploaded) || uploaded?.nodeId || null;
 }

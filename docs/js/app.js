@@ -44,6 +44,11 @@ import {
 import { initPdfStudio, openPdfStudio } from "./pdf-studio.js";
 import { extractIndexableText, extractPdfTextLayer } from "./pdf-ingest.js";
 import {
+  applyNativePdfIndex,
+  extractNativePdfIndexText,
+  migratePdfIndexes,
+} from "./pdf-index.js";
+import {
   EXT_GROUPS,
   GROUP_ICONS,
   fileEndsWith,
@@ -91,6 +96,7 @@ import { downloadDriveFile, renameDriveFile, uploadDocumentFile as uploadDriveDo
 import { isMegaConnected, ensureMegaAutoLogin, getMegaEmail, getLastMegaAuthError, loginToMega, logoutMega, needsMegaAuthRecovery, markMegaAuthFailed } from "./mega-auth.js";
 import {
   downloadMegaFile,
+  deleteMegaFile,
   renameMegaFile,
   moveMegaFileToCategory,
   uploadDocumentFile as uploadMegaDocumentFile,
@@ -293,6 +299,13 @@ async function hydrateDocuments(password) {
     state = normalizeState(await loadDocuments(password));
     state.folders = syncFoldersFromDocuments(state.documents, state.folders);
     migrateDocumentOcrFlags(state.documents);
+    const pdfIndexChanged = await migratePdfIndexes(
+      [...state.documents, ...(state.trash || [])],
+      getDocumentBlob
+    );
+    if (pdfIndexChanged) {
+      await persistState();
+    }
     renderLibrary();
     renderTrash();
     updateUploadAccess();
@@ -302,6 +315,23 @@ async function hydrateDocuments(password) {
     throw error;
   } finally {
     isHydrating = false;
+  }
+}
+
+async function purgeDocumentStorage(doc) {
+  if (!doc) return;
+  if (doc.megaFileId) {
+    try {
+      await deleteMegaFile(doc.megaFileId);
+    } catch (error) {
+      console.warn("MEGA delete failed:", error);
+    }
+  }
+}
+
+async function purgeDocumentsStorage(documents = []) {
+  for (const doc of documents) {
+    await purgeDocumentStorage(doc);
   }
 }
 
@@ -1442,6 +1472,7 @@ purgeAllTrashBtn?.addEventListener("click", async () => {
   state = purgeAllTrash(state);
   try {
     setStatus("جارٍ إفراغ سلة المهملات…");
+    await purgeDocumentsStorage(trash);
     await persistState();
     renderTrash();
     setStatus("تم إفراغ سلة المهملات.", true);
@@ -1511,6 +1542,7 @@ function renderTrash() {
       const doc = state.trash.find((item) => item.id === btn.dataset.id);
       if (!doc) return;
       if (!window.confirm(`حذف «${doc.filename}» نهائياً؟ لا يمكن التراجع.`)) return;
+      await purgeDocumentStorage(doc);
       state = permanentlyDelete(state, btn.dataset.id);
       try {
         setStatus("جارٍ الحذف النهائي…");
@@ -1703,6 +1735,13 @@ async function savePdfStudioDocument(docId, bytes, { ocrText } = {}) {
     doc.chunks = chunkText(ocrText).map((content) => ({ content }));
     doc.ocrExtracted = true;
     state.folders = ensureFolderRecord(state.folders, doc.category);
+  } else {
+    const nativeText = await extractNativePdfIndexText(await blob.arrayBuffer());
+    if (applyNativePdfIndex(doc, nativeText)) {
+      const others = state.documents.filter((item) => item.id !== docId);
+      doc.category = assignCategory(nativeText, doc.filename, others);
+      state.folders = ensureFolderRecord(state.folders, doc.category);
+    }
   }
 
   await persistState();

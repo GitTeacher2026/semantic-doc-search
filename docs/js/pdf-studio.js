@@ -168,21 +168,11 @@ async function renderCurrentPage() {
     pdfWidth: baseViewport.width,
     pdfHeight: baseViewport.height,
   };
+  studioState.lastViewport = meta.viewport;
+  studioState.lastPageNumber = originalIndex + 1;
 
   syncOverlaySize(meta.cssWidth, meta.cssHeight);
-
-  const isSelect = annotationStore.activeTool === EDIT_TOOLS.SELECT;
-  const pageHasText =
-    isSelect &&
-    studioState.hasNativeText &&
-    (await pageHasNativeText(studioState.pdfDoc, originalIndex + 1));
-  if (pageHasText) {
-    await renderTextLayer(studioState.pdfDoc, originalIndex + 1, textLayer, meta.viewport);
-    textLayer?.classList.add("is-selectable");
-  } else if (textLayer) {
-    textLayer.innerHTML = "";
-    textLayer.classList.remove("is-selectable");
-  }
+  await syncTextLayerForCurrentPage();
   if (taskId !== renderTaskId) return;
 
   renderOverlay();
@@ -193,8 +183,38 @@ async function renderCurrentPage() {
     pageLabel.textContent = `صفحة ${studioState.currentVisibleIndex + 1} من ${visible.length}`;
   }
   updateZoomLabel();
-  renderThumbnails();
+  updateThumbActiveState();
   updateToolbarState();
+}
+
+async function syncTextLayerForCurrentPage() {
+  const textLayer = modalEl.querySelector("#pdf-studio-text-layer");
+  if (!textLayer || !studioState?.pdfDoc || !studioState.lastViewport) return;
+
+  const isSelect = annotationStore.activeTool === EDIT_TOOLS.SELECT;
+  const pageNumber = studioState.lastPageNumber || getCurrentOriginalIndex() + 1;
+  const pageHasText =
+    isSelect && studioState.hasNativeText && (await pageHasNativeText(studioState.pdfDoc, pageNumber));
+
+  if (pageHasText) {
+    await renderTextLayer(studioState.pdfDoc, pageNumber, textLayer, studioState.lastViewport);
+    textLayer.classList.add("is-selectable");
+    return;
+  }
+
+  textLayer.innerHTML = "";
+  textLayer.classList.remove("is-selectable");
+}
+
+function updateThumbActiveState() {
+  const container = modalEl.querySelector("#pdf-studio-thumbs");
+  if (!container || !studioState) return;
+  container.querySelectorAll(".pdf-studio-thumb").forEach((btn) => {
+    btn.classList.toggle(
+      "is-active",
+      Number(btn.dataset.visibleIndex) === studioState.currentVisibleIndex
+    );
+  });
 }
 
 function renderThumbnails() {
@@ -229,6 +249,7 @@ function renderThumbnails() {
       renderCurrentPage();
     });
   });
+  updateThumbActiveState();
 }
 
 function updateToolbarState() {
@@ -305,9 +326,7 @@ function setEditTool(tool) {
   overlay?.classList.toggle("is-interactive", !isSelect);
   renderAnnotationLayer();
   renderOverlay();
-  if (studioState?.pdfDoc) {
-    renderCurrentPage();
-  }
+  syncTextLayerForCurrentPage();
 }
 
 function placeInlineTextEditor(point, { initialText = "", onSave } = {}) {

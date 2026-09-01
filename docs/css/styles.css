@@ -2182,7 +2182,7 @@ body.pdf-studio-open {
 }
 
 .pdf-studio-text-layer.is-selectable {
-  z-index: 5;
+  z-index: 6;
 }
 
 .pdf-studio-text-layer.is-selectable span {
@@ -2208,7 +2208,7 @@ body.pdf-studio-open {
 }
 
 .pdf-studio-overlay.is-interactive {
-  z-index: 5;
+  z-index: 4;
   pointer-events: auto;
   cursor: crosshair;
 }
