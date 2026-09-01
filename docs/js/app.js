@@ -19,8 +19,9 @@ import {
   STORAGE_BACKENDS,
 } from "./document-storage.js";
 import { initTheme, toggleTheme } from "./theme.js";
+import { bytesToBase64 } from "./crypto.js";
 import { bindSearchResults, renderSearchResults } from "./search-results.js?v=20260830b";
-import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js?v=20260831i";
+import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js?v=20260831j";
 import {
   getAvailableOcrEngines,
   loadOcrOptions,
@@ -739,7 +740,7 @@ async function extractText(file, arrayBuffer, { onOcrProgress } = {}) {
     throw new Error(`${name}: صيغ .doc و .ppt القديمة غير مدعومة في المتصفح. استخدم docx/pptx.`);
   }
   if (EXT_GROUPS.text.some((ext) => fileEndsWith(name, ext))) {
-    return new TextDecoder("utf-8").decode(buffer).trim();
+    return decodeUtf8Text(buffer);
   }
   throw new Error(`نوع الملف غير مدعوم: ${name}`);
 }
@@ -1142,14 +1143,15 @@ function renderTrash() {
   });
 }
 
+function decodeUtf8Text(buffer) {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  let text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  return text.trim();
+}
+
 function arrayBufferToBase64(buffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
+  return bytesToBase64(buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer));
 }
 
 function findDocumentById(id) {

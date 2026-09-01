@@ -1,4 +1,4 @@
-const MEGA_MODULE_URL = "https://esm.sh/megajs@1.3.5";
+const MEGA_MODULE_URL = "https://esm.sh/megajs@1.3.5/dist/main.browser-es.mjs";
 
 const EMAIL_KEY = "docshelf_mega_email";
 

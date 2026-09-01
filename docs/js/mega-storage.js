@@ -1,4 +1,5 @@
 import { getMegaStorage } from "./mega-auth.js";
+import { blobToUint8Array } from "./binary-utils.js";
 
 const ROOT_FOLDER_NAME = "مخزن الوثائق";
 const INDEX_FILE_NAME = "docshelf-index.enc.json";
@@ -55,13 +56,14 @@ export async function uploadDocumentFile(category, filename, blob) {
     await existing.delete(true);
   }
 
+  const bytes = await blobToUint8Array(blob);
   const uploaded = await categoryFolder
     .upload(
       {
         name: safeName,
-        size: blob.size,
+        size: bytes.byteLength,
       },
-      blob
+      bytes
     )
     .complete;
   return uploaded.nodeId;
@@ -111,8 +113,7 @@ export async function fetchEncryptedStore() {
 
 export async function uploadEncryptedStore(envelope, fileId = indexFile?.nodeId) {
   const root = await getRootFolder();
-  const payload = JSON.stringify(envelope);
-  const blob = new Blob([payload], { type: "application/json" });
+  const bytes = new TextEncoder().encode(JSON.stringify(envelope));
 
   if (fileId) {
     const storage = getMegaStorage();
@@ -133,9 +134,9 @@ export async function uploadEncryptedStore(envelope, fileId = indexFile?.nodeId)
     .upload(
       {
         name: INDEX_FILE_NAME,
-        size: blob.size,
+        size: bytes.byteLength,
       },
-      blob
+      bytes
     )
     .complete;
   indexFile = uploaded;

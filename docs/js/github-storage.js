@@ -53,7 +53,7 @@ export async function fetchEncryptedStore() {
 }
 
 async function putEncryptedStore(envelope, sha) {
-  const content = btoa(unescape(encodeURIComponent(JSON.stringify(envelope))));
+  const content = bytesToBase64(new TextEncoder().encode(JSON.stringify(envelope)));
   const body = {
     message: "Update encrypted document store",
     content,
