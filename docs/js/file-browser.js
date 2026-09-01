@@ -317,12 +317,28 @@ function renderSplitSourceContent(filtered) {
     </div>`;
 }
 
+function renderImageThumb(doc) {
+  return `
+    <button
+      type="button"
+      class="fb-card-thumb image-preview-btn"
+      data-id="${doc.id}"
+      aria-label="معاينة ${escapeHtml(doc.filename)}"
+    >
+      <span class="fb-card-thumb-placeholder" aria-hidden="true">🖼️</span>
+    </button>`;
+}
+
 function renderGridItem(doc) {
   const groupName = doc.fileGroup || fileGroup(doc.filename);
   const lockedClass = doc.isLocked ? " is-locked" : "";
+  const imageClass = isImageDocument(doc) ? " is-image" : "";
+  const visual = isImageDocument(doc)
+    ? renderImageThumb(doc)
+    : `<div class="fb-card-icon" aria-hidden="true">${GROUP_ICONS[groupName] || GROUP_ICONS.other}</div>`;
   return `
-    <article class="fb-card fb-draggable${lockedClass}" draggable="true" data-doc-id="${doc.id}" data-id="${doc.id}">
-      <div class="fb-card-icon" aria-hidden="true">${GROUP_ICONS[groupName] || GROUP_ICONS.other}</div>
+    <article class="fb-card fb-draggable${lockedClass}${imageClass}" draggable="true" data-doc-id="${doc.id}" data-id="${doc.id}">
+      ${visual}
       <div class="fb-card-body">
         <h3 class="fb-card-title" title="${escapeHtml(doc.filename)}">${escapeHtml(doc.filename)}</h3>
         <p class="fb-card-meta muted">${escapeHtml(doc.category || "عام")} · ${formatDocSizeLabel(doc)}</p>
@@ -609,6 +625,14 @@ function renderContent(documents) {
 }
 
 function bindActions(container) {
+  container.querySelectorAll(".image-preview-btn").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      actionHandlers.onImagePreview?.(btn.dataset.id);
+    });
+    btn.addEventListener("pointerdown", (event) => event.stopPropagation());
+  });
+
   container.querySelectorAll(".ocr-btn").forEach((btn) => {
     btn.addEventListener("click", () => actionHandlers.onOcr?.(btn.dataset.id));
   });

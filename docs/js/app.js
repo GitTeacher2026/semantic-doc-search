@@ -31,6 +31,7 @@ import {
 import {
   ensurePreviewUrl,
   initImagePreview,
+  openBlobImagePreview,
   openImagePreview,
   revokeAllPreviewUrls,
   syncPreviewUrls,
@@ -165,6 +166,8 @@ let pendingRenameId = null;
 let pendingLockId = null;
 let pendingUnlockId = null;
 let pendingUnlockAction = null;
+const fileBrowserThumbUrls = new Map();
+const searchThumbUrls = new Map();
 let pendingOcrId = null;
 let pendingFolderRenameName = null;
 let pendingFolderLockName = null;
@@ -1177,6 +1180,70 @@ function renderFilesPage() {
     dualSources: canSyncGitHubMega(),
     onChange: renderFilesPage,
   });
+  hydrateFileBrowserThumbnails();
+}
+
+function clearThumbUrlCache(cache) {
+  for (const url of cache.values()) {
+    URL.revokeObjectURL(url);
+  }
+  cache.clear();
+}
+
+async function hydrateThumbButtons(root, cache, { lockedClass = "is-locked" } = {}) {
+  if (!root) return;
+  const thumbs = root.querySelectorAll(
+    ".fb-card-thumb.image-preview-btn, .search-result-thumb.image-preview-btn"
+  );
+  for (const thumb of thumbs) {
+    if (thumb.querySelector("img")) continue;
+    const docId = thumb.dataset.id;
+    const doc = findDocumentById(docId);
+    if (!doc || !isImageFile(doc.filename)) continue;
+    if (doc.isLocked && !isDocUnlocked(doc)) {
+      thumb.classList.add(lockedClass);
+      continue;
+    }
+    try {
+      const blob = await getDocumentBlob(doc);
+      const url = URL.createObjectURL(blob);
+      const previous = cache.get(docId);
+      if (previous) URL.revokeObjectURL(previous);
+      cache.set(docId, url);
+      thumb.innerHTML = `<img src="${url}" alt="" loading="lazy" draggable="false" />`;
+      thumb.classList.add("is-loaded");
+    } catch {
+      thumb.classList.add("is-error");
+    }
+  }
+}
+
+function hydrateFileBrowserThumbnails() {
+  clearThumbUrlCache(fileBrowserThumbUrls);
+  hydrateThumbButtons(fileBrowserRoot, fileBrowserThumbUrls, { lockedClass: "is-locked" });
+}
+
+function hydrateSearchResultThumbnails() {
+  clearThumbUrlCache(searchThumbUrls);
+  hydrateThumbButtons(searchResults, searchThumbUrls, { lockedClass: "is-locked" });
+}
+
+async function openDocumentImagePreview(docId) {
+  const doc = findDocumentById(docId);
+  if (!doc || !isImageFile(doc.filename)) return;
+  if (doc.isLocked && !isDocUnlocked(doc)) {
+    openUnlockDialog(docId, "preview");
+    return;
+  }
+
+  try {
+    setStatus("جارٍ تحميل الصورة…");
+    const blob = await getDocumentBlob(doc);
+    openBlobImagePreview(blob, doc.filename);
+    setStatus("", false);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
 }
 
 async function executeMoveDocumentToCategory(doc, category) {
@@ -1951,7 +2018,9 @@ function openUnlockDialog(docId, action = "unlock") {
   unlockDialogSub.textContent =
     action === "download"
       ? "هذا الملف مقفل. أدخل كلمة مرور القفل للتنزيل."
-      : "أدخل كلمة مرور القفل لعرض المحتوى والبحث فيه.";
+      : action === "preview"
+        ? "هذا الملف مقفل. أدخل كلمة مرور القفل لمعاينة الصورة."
+        : "أدخل كلمة مرور القفل لعرض المحتوى والبحث فيه.";
   unlockPassword.value = "";
   unlockDialogError.classList.add("hidden");
   unlockDialog.classList.remove("hidden");
@@ -2009,6 +2078,8 @@ async function confirmUnlock() {
     downloadDocument(doc);
   } else if (action === "ocr") {
     openOcrDialog(docId);
+  } else if (action === "preview") {
+    await openDocumentImagePreview(docId);
   } else if (action === "move" && pendingMoveTargetCategory) {
     await executeMoveDocumentToCategory(doc, pendingMoveTargetCategory);
     pendingMoveTargetCategory = null;
@@ -2182,7 +2253,14 @@ function runSearch() {
       limit: k,
     });
     const docMeta = new Map(
-      searchable.map((doc) => [doc.id, { fileGroup: doc.fileGroup, extension: doc.extension }])
+      searchable.map((doc) => [
+        doc.id,
+        {
+          fileGroup: doc.fileGroup,
+          extension: doc.extension,
+          isImage: isImageFile(doc.filename),
+        },
+      ])
     );
 
     setSearchResults(
@@ -2191,7 +2269,11 @@ function runSearch() {
         labels: describeActiveSearchOptions(searchOptions),
       })
     );
-    bindSearchResults(searchResults, { onDownload: handleDownload });
+    bindSearchResults(searchResults, {
+      onDownload: handleDownload,
+      onImagePreview: openDocumentImagePreview,
+    });
+    hydrateSearchResultThumbnails();
   } catch (error) {
     console.error(error);
     setSearchResults(`<p class="muted search-empty">تعذّر عرض النتائج: ${escapeHtml(error.message)}</p>`);
@@ -2289,6 +2371,7 @@ initFileBrowser(fileBrowserRoot, {
   onLock: openLockDialog,
   onUnlock: handleUnlockButton,
   onOcr: openOcrDialog,
+  onImagePreview: openDocumentImagePreview,
   onFolderRename: openFolderRenameDialog,
   onFolderCreate: openFolderCreateDialog,
   onFolderDelete: handleFolderDelete,

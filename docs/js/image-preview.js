@@ -12,6 +12,14 @@ let dragOriginY = 0;
 let pinchStartDistance = 0;
 let pinchStartScale = 1;
 
+let activeObjectUrl = "";
+
+function releaseActiveObjectUrl() {
+  if (!activeObjectUrl) return;
+  URL.revokeObjectURL(activeObjectUrl);
+  activeObjectUrl = "";
+}
+
 let modalEl;
 let stageEl;
 let imgEl;
@@ -110,6 +118,7 @@ function closeLightbox() {
     imgEl.removeAttribute("src");
     imgEl.alt = "";
   }
+  releaseActiveObjectUrl();
   resetView();
 }
 
@@ -127,6 +136,13 @@ function openLightbox(url, filename = "") {
 
 export function openImagePreview(url, filename = "") {
   openLightbox(url, filename);
+}
+
+export function openBlobImagePreview(blob, filename = "") {
+  if (!blob) return;
+  releaseActiveObjectUrl();
+  activeObjectUrl = URL.createObjectURL(blob);
+  openLightbox(activeObjectUrl, filename);
 }
 
 function onPointerDown(event) {

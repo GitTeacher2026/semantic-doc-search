@@ -168,11 +168,24 @@ export function renderSearchResults(hits, query, docMeta = new Map(), searchOpti
       const rank = rankLabel(index);
       const meta = docMeta.get(group.docId) || {};
       const icon = GROUP_ICONS[meta.fileGroup || fileGroup(group.filename)] || GROUP_ICONS.other;
+      const isImage = meta.isImage === true;
       const pct = group.pct ?? 0;
 
       return `
-        <article class="search-result-card ${rank.className}" style="--relevance:${pct}%">
+        <article class="search-result-card ${rank.className}${isImage ? " has-image" : ""}" style="--relevance:${pct}%">
           <div class="search-result-rank" aria-hidden="true">${rank.label}</div>
+          ${
+            isImage
+              ? `<button
+                  type="button"
+                  class="search-result-thumb image-preview-btn"
+                  data-id="${escapeHtml(group.docId)}"
+                  aria-label="معاينة ${escapeHtml(group.filename)}"
+                >
+                  <span class="search-result-thumb-placeholder" aria-hidden="true">🖼️</span>
+                </button>`
+              : ""
+          }
           <header class="search-result-head">
             <div class="search-result-icon" aria-hidden="true">${icon}</div>
             <div class="search-result-meta">
@@ -180,9 +193,17 @@ export function renderSearchResults(hits, query, docMeta = new Map(), searchOpti
               <div class="search-result-tags">
                 <span class="chip">${escapeHtml(group.category)}</span>
                 <span class="search-result-count">${group.snippets.length} مقطع</span>
+                ${isImage ? '<span class="chip search-image-chip">صورة</span>' : ""}
               </div>
             </div>
-            <button class="btn ghost small search-download-btn" data-id="${escapeHtml(group.docId)}" type="button">تنزيل</button>
+            <div class="search-result-actions">
+              ${
+                isImage
+                  ? `<button class="btn ghost small search-image-preview-btn image-preview-btn" data-id="${escapeHtml(group.docId)}" type="button">🖼️ معاينة</button>`
+                  : ""
+              }
+              <button class="btn ghost small search-download-btn" data-id="${escapeHtml(group.docId)}" type="button">تنزيل</button>
+            </div>
           </header>
           <div class="search-relevance" role="presentation" aria-hidden="true">
             <div class="search-relevance-track">
@@ -210,11 +231,18 @@ export function renderSearchResults(hits, query, docMeta = new Map(), searchOpti
     </div>`;
 }
 
-export function bindSearchResults(root, { onDownload }) {
+export function bindSearchResults(root, { onDownload, onImagePreview } = {}) {
   if (!root) return;
 
   root.querySelectorAll(".search-download-btn").forEach((btn) => {
-    btn.addEventListener("click", () => onDownload(btn.dataset.id));
+    btn.addEventListener("click", () => onDownload?.(btn.dataset.id));
+  });
+
+  root.querySelectorAll(".image-preview-btn").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onImagePreview?.(btn.dataset.id);
+    });
   });
 
   root.querySelectorAll(".search-expand-btn").forEach((btn) => {
