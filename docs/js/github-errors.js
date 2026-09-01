@@ -3,8 +3,10 @@ export function isGitHubShaConflict(error) {
   const text = String(error?.message || "").toLowerCase();
   return (
     status === 409 ||
+    status === 422 && text.includes("does not match") ||
     text.includes("does not match") ||
-    text.includes("sha") ||
+    text.includes("update is not a fast forward") ||
+    text.includes("reference does not exist") ||
     text.includes("conflict")
   );
 }
@@ -26,7 +28,7 @@ export function formatGitHubApiError(message, status) {
     return "رفض GitHub الطلب: تأكد أن التوكن يملك صلاحية الكتابة على المستودع (repo).";
   }
 
-  if (lower.includes("too large") || lower.includes("size")) {
+  if (lower.includes("too large") || lower.includes("size") || lower.includes("larger than")) {
     return "الملف كبير جداً لحفظه في GitHub. جرّب ملفاً أصغر أو قلّل عدد المرفقات.";
   }
 

@@ -236,3 +236,16 @@ export function clearStorageSession() {
   currentSalt = null;
   remoteHandle = null;
 }
+
+export function applyGitHubRemoteSession({ handle, crypto } = {}) {
+  if (handle) remoteHandle = handle;
+  if (crypto?.salt) currentSalt = crypto.salt;
+  if (crypto?.key) sessionKey = crypto.key;
+}
+
+export function getGitHubRemoteSession() {
+  return {
+    handle: remoteHandle,
+    crypto: currentSalt && sessionKey ? { salt: currentSalt, key: sessionKey } : null,
+  };
+}

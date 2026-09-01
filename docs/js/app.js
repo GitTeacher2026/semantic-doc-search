@@ -60,6 +60,7 @@ import {
   verifyLockPassword,
 } from "./file-lock.js";
 import {
+  applyGitHubRemoteSession,
   clearStorageSession,
   isCloudSyncEnabled,
   isUsingDriveStorage,
@@ -167,6 +168,7 @@ let pendingMoveTargetCategory = null;
 let authApi = null;
 let currentUser = null;
 let adminMembersApi = null;
+let dualIndexHandles = null;
 
 const appView = document.getElementById("app-view");
 const logoutBtn = document.getElementById("logout-btn");
@@ -272,7 +274,10 @@ async function hydrateDocuments(password) {
     if (canSyncGitHubMega()) {
       const merged = await loadMergedGitHubMegaIndex(password);
       state = normalizeState(merged.state);
+      dualIndexHandles = { github: merged.github, mega: merged.mega };
+      applyGitHubRemoteSession(merged.github);
     } else {
+      dualIndexHandles = null;
       state = normalizeState(await loadDocuments(password));
     }
     state.folders = syncFoldersFromDocuments(state.documents, state.folders);
@@ -293,6 +298,14 @@ async function persistState() {
   if (!sessionPassword) return;
   state = normalizeState(state);
   state.folders = syncFoldersFromDocuments(state.documents, state.folders);
+
+  if (canSyncGitHubMega() && dualIndexHandles) {
+    const saved = await saveMergedGitHubMegaIndex(sessionPassword, state, dualIndexHandles);
+    dualIndexHandles = { github: saved.github, mega: saved.mega };
+    applyGitHubRemoteSession(saved.github);
+    return;
+  }
+
   await saveDocuments(sessionPassword, state);
 }
 
@@ -1184,6 +1197,8 @@ async function handleSyncGitHubMega() {
     const merged = await loadMergedGitHubMegaIndex(sessionPassword);
     state = normalizeState(merged.state);
     state.folders = syncFoldersFromDocuments(state.documents, state.folders);
+    dualIndexHandles = { github: merged.github, mega: merged.mega };
+    applyGitHubRemoteSession(merged.github);
 
     setStatus("جارٍ المزامنة بين GitHub و MEGA…");
     const result = await syncDocumentsGitHubMega(state.documents, {
@@ -1195,7 +1210,9 @@ async function handleSyncGitHubMega() {
     state.folders = syncFoldersFromDocuments(state.documents, state.folders);
 
     setStatus("جارٍ حفظ الفهارس في GitHub و MEGA…");
-    await saveMergedGitHubMegaIndex(sessionPassword, state, merged);
+    const saved = await saveMergedGitHubMegaIndex(sessionPassword, state, dualIndexHandles);
+    dualIndexHandles = { github: saved.github, mega: saved.mega };
+    applyGitHubRemoteSession(saved.github);
     renderLibrary();
     setStatus(describeSyncSummary(result), true);
     setTimeout(() => setStatus("", false), 3500);
@@ -2127,6 +2144,7 @@ logoutBtn.addEventListener("click", () => {
   sessionPassword = "";
   state = normalizeState({});
   currentUser = null;
+  dualIndexHandles = null;
   clearStorageSession();
   clearUnlockSession();
   authApi?.logout?.();

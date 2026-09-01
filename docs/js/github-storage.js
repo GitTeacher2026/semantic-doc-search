@@ -8,12 +8,18 @@ import {
 import { bytesToBase64 } from "./crypto.js";
 import { formatGitHubApiError, isGitHubShaConflict } from "./github-errors.js";
 
+const CONTENTS_PUT_LIMIT_BYTES = 950_000;
+
 function apiUrl() {
   return `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${STORE_PATH}`;
 }
 
 function rawStoreUrl() {
   return `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/${STORE_PATH}`;
+}
+
+function gitApiUrl(path) {
+  return `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}${path}`;
 }
 
 export function isGitHubStorageConfigured() {
@@ -89,7 +95,143 @@ export async function fetchEncryptedStore() {
   return { envelope, sha: payload.sha };
 }
 
-async function putEncryptedStore(envelope, sha) {
+async function parseGitHubError(res) {
+  const err = await res.json().catch(() => ({}));
+  const error = new Error(formatGitHubApiError(err.message, res.status));
+  error.status = res.status;
+  return error;
+}
+
+async function getBranchHeadSha() {
+  const res = await fetch(gitApiUrl(`/git/ref/heads/${GITHUB_BRANCH}`), {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw await parseGitHubError(res);
+  }
+  const payload = await res.json();
+  return payload.object.sha;
+}
+
+async function getCommitTreeSha(commitSha) {
+  const res = await fetch(gitApiUrl(`/git/commits/${commitSha}`), {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw await parseGitHubError(res);
+  }
+  const payload = await res.json();
+  return payload.tree.sha;
+}
+
+async function createGitBlob(base64Content) {
+  const res = await fetch(gitApiUrl("/git/blobs"), {
+    method: "POST",
+    headers: {
+      ...authHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      content: base64Content,
+      encoding: "base64",
+    }),
+  });
+  if (!res.ok) {
+    throw await parseGitHubError(res);
+  }
+  const payload = await res.json();
+  return payload.sha;
+}
+
+async function createGitTree(baseTreeSha, blobSha) {
+  const res = await fetch(gitApiUrl("/git/trees"), {
+    method: "POST",
+    headers: {
+      ...authHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      base_tree: baseTreeSha,
+      tree: [
+        {
+          path: STORE_PATH,
+          mode: "100644",
+          type: "blob",
+          sha: blobSha,
+        },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    throw await parseGitHubError(res);
+  }
+  const payload = await res.json();
+  return payload.sha;
+}
+
+async function createGitCommit(treeSha, parentSha) {
+  const res = await fetch(gitApiUrl("/git/commits"), {
+    method: "POST",
+    headers: {
+      ...authHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      message: "Update encrypted document store",
+      tree: treeSha,
+      parents: [parentSha],
+    }),
+  });
+  if (!res.ok) {
+    throw await parseGitHubError(res);
+  }
+  const payload = await res.json();
+  return payload.sha;
+}
+
+async function updateBranchHead(commitSha) {
+  const res = await fetch(gitApiUrl(`/git/refs/heads/${GITHUB_BRANCH}`), {
+    method: "PATCH",
+    headers: {
+      ...authHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ sha: commitSha, force: false }),
+  });
+  if (!res.ok) {
+    throw await parseGitHubError(res);
+  }
+}
+
+async function putEncryptedStoreViaGit(envelope) {
+  const base64Content = bytesToBase64(new TextEncoder().encode(JSON.stringify(envelope)));
+  const blobSha = await createGitBlob(base64Content);
+  let parentSha = await getBranchHeadSha();
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      const baseTreeSha = await getCommitTreeSha(parentSha);
+      const treeSha = await createGitTree(baseTreeSha, blobSha);
+      const commitSha = await createGitCommit(treeSha, parentSha);
+      await updateBranchHead(commitSha);
+      const latest = await fetchEncryptedStore();
+      return latest.sha;
+    } catch (error) {
+      lastError = error;
+      if (!isGitHubShaConflict(error) || attempt >= 4) {
+        throw error;
+      }
+      parentSha = await getBranchHeadSha();
+    }
+  }
+
+  throw lastError || new Error("تعذّر حفظ المستندات على GitHub.");
+}
+
+async function putEncryptedStoreContents(envelope, sha) {
   const content = bytesToBase64(new TextEncoder().encode(JSON.stringify(envelope)));
   const body = {
     message: "Update encrypted document store",
@@ -108,26 +250,39 @@ async function putEncryptedStore(envelope, sha) {
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    const error = new Error(formatGitHubApiError(err.message, res.status));
-    error.status = res.status;
-    throw error;
+    throw await parseGitHubError(res);
   }
 
   const result = await res.json();
   return result.content.sha;
 }
 
+async function putEncryptedStore(envelope, sha) {
+  const encoded = bytesToBase64(new TextEncoder().encode(JSON.stringify(envelope)));
+  if (encoded.length > CONTENTS_PUT_LIMIT_BYTES) {
+    return putEncryptedStoreViaGit(envelope);
+  }
+  return putEncryptedStoreContents(envelope, sha);
+}
+
 export async function uploadEncryptedStore(envelope, sha) {
+  const encoded = bytesToBase64(new TextEncoder().encode(JSON.stringify(envelope)));
+  if (encoded.length > CONTENTS_PUT_LIMIT_BYTES) {
+    return putEncryptedStoreViaGit(envelope);
+  }
+
   let currentSha = sha;
   let lastError = null;
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
-      return await putEncryptedStore(envelope, currentSha);
+      return await putEncryptedStoreContents(envelope, currentSha);
     } catch (error) {
       lastError = error;
-      if (!isGitHubShaConflict(error) || attempt >= 2) {
+      if (!isGitHubShaConflict(error) || attempt >= 4) {
+        if (encoded.length > CONTENTS_PUT_LIMIT_BYTES / 2) {
+          return putEncryptedStoreViaGit(envelope);
+        }
         throw error;
       }
       const latest = await fetchEncryptedStore();
