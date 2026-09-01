@@ -1956,6 +1956,7 @@ function closeUnlockDialog() {
   pendingFolderUnlockName = null;
   pendingFolderUnlockCallback = null;
   pendingFolderUnlockCancel = null;
+  pendingMoveTargetCategory = null;
   if (unlockDialog) unlockDialog.classList.add("hidden");
 }
 
