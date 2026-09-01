@@ -14,13 +14,13 @@ export function getAvailableOcrEngines() {
     {
       id: OCR_ENGINES.AUTO,
       label: "تلقائي — Puter AI",
-      hint: "استخراج سريع للنص عبر Puter.js — بدون مفتاح API",
+      hint: "سجّل الدخول أدناه — رمز API أو حساب Puter",
       available: true,
     },
     {
       id: OCR_ENGINES.PUTER,
       label: "سريع — Puter AI",
-      hint: "AWS/Mistral OCR عبر Puter.js",
+      hint: "AWS/Mistral OCR — يتطلب اتصال Puter",
       available: true,
     },
   ];

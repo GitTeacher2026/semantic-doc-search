@@ -21,7 +21,16 @@ import {
 import { initTheme, toggleTheme } from "./theme.js";
 import { bytesToBase64 } from "./crypto.js";
 import { bindSearchResults, renderSearchResults } from "./search-results.js?v=20260830b";
-import { extractImageText, formatOcrProgress, isImageFile } from "./ocr.js?v=20260831j";
+import {
+  extractImageText,
+  formatOcrProgress,
+  getPuterEmail,
+  getPuterUserLabel,
+  isImageFile,
+  isPuterConnected,
+  loginToPuter,
+  logoutPuter,
+} from "./ocr.js?v=20260901a";
 import {
   getAvailableOcrEngines,
   loadOcrOptions,
@@ -157,6 +166,13 @@ const cloudDisconnectBtn = document.getElementById("cloud-disconnect-btn");
 const megaLoginFields = document.getElementById("mega-login-fields");
 const megaEmailInput = document.getElementById("mega-email");
 const megaPasswordInput = document.getElementById("mega-password");
+const puterConnectPanel = document.getElementById("puter-connect-panel");
+const puterConnectTitle = document.getElementById("puter-connect-title");
+const puterConnectHint = document.getElementById("puter-connect-hint");
+const puterConnectBtn = document.getElementById("puter-connect-btn");
+const puterDisconnectBtn = document.getElementById("puter-disconnect-btn");
+const puterEmailInput = document.getElementById("puter-email");
+const puterPasswordInput = document.getElementById("puter-password");
 const pendingFilesEl = document.getElementById("pending-files");
 const ingestBtn = document.getElementById("ingest-btn");
 const libraryList = document.getElementById("library-list");
@@ -390,6 +406,59 @@ function handleCloudDisconnect() {
   setTimeout(() => setStatus("", false), 2000);
 }
 
+function updatePuterConnectPanel() {
+  if (!puterConnectPanel) return;
+
+  const connected = isPuterConnected();
+  puterConnectTitle.textContent = "Puter AI";
+  puterConnectHint.textContent = connected
+    ? `متصل — ${getPuterEmail() ? `آخر بريد: ${getPuterEmail()}` : "جاهز لاستخراج النص من الصور"}`
+    : "أدخل رمز API من لوحة Puter، أو اترك كلمة المرور فارغة لفتح نافذة تسجيل Puter.";
+  puterConnectBtn.textContent = connected ? "إعادة الاتصال" : "الاتصال بـ Puter";
+  puterDisconnectBtn?.classList.toggle("hidden", !connected);
+
+  if (puterEmailInput && !puterEmailInput.value) {
+    puterEmailInput.value = getPuterEmail();
+  }
+}
+
+async function refreshPuterConnectPanel() {
+  updatePuterConnectPanel();
+  if (!isPuterConnected()) return;
+  try {
+    const label = await getPuterUserLabel();
+    if (label) {
+      puterConnectHint.textContent = `متصل كـ ${label}`;
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+async function handlePuterConnect() {
+  try {
+    setStatus("جارٍ الاتصال بـ Puter AI…");
+    await loginToPuter({
+      email: puterEmailInput?.value,
+      password: puterPasswordInput?.value,
+    });
+    if (puterPasswordInput) puterPasswordInput.value = "";
+    await refreshPuterConnectPanel();
+    setStatus("تم الاتصال بـ Puter AI.", true);
+    setTimeout(() => setStatus("", false), 2000);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+function handlePuterDisconnect() {
+  logoutPuter();
+  if (puterPasswordInput) puterPasswordInput.value = "";
+  updatePuterConnectPanel();
+  setStatus("تم قطع اتصال Puter.", true);
+  setTimeout(() => setStatus("", false), 2000);
+}
+
 function updateOcrEnginePanel() {
   const select = document.getElementById("ocr-engine");
   const hint = document.getElementById("ocr-engine-hint");
@@ -419,6 +488,8 @@ function updateOcrEnginePanel() {
   if (hint && active?.hint) {
     hint.textContent = active.hint;
   }
+  updatePuterConnectPanel();
+  refreshPuterConnectPanel();
 }
 
 function updateUploadAccess() {
@@ -1656,6 +1727,14 @@ cloudConnectBtn?.addEventListener("click", () => {
 
 cloudDisconnectBtn?.addEventListener("click", () => {
   handleCloudDisconnect();
+});
+
+puterConnectBtn?.addEventListener("click", () => {
+  handlePuterConnect();
+});
+
+puterDisconnectBtn?.addEventListener("click", () => {
+  handlePuterDisconnect();
 });
 
 export async function startApp({ user, auth }) {

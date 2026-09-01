@@ -959,6 +959,20 @@ mark.query-hit, .query-hit {
   gap: 0.5rem;
 }
 
+.puter-connect-panel {
+  margin-top: 0.75rem;
+}
+
+.puter-login-note {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.puter-login-note a {
+  color: var(--accent);
+}
+
 .mega-login-fields {
   display: grid;
   gap: 0.5rem;

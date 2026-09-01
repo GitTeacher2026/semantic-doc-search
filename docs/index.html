@@ -281,6 +281,42 @@
               <option value="auto">تلقائي — Puter AI</option>
             </select>
             <p id="ocr-engine-hint" class="ocr-engine-hint muted">استخراج سريع عبر Puter AI — بدون مفتاح API</p>
+            <div id="puter-connect-panel" class="drive-connect-panel puter-connect-panel">
+              <div class="drive-connect-info">
+                <span class="drive-connect-icon" aria-hidden="true">🤖</span>
+                <div>
+                  <strong id="puter-connect-title">Puter AI</strong>
+                  <p id="puter-connect-hint" class="muted">سجّل الدخول لاستخراج النص من الصور.</p>
+                  <div id="puter-login-fields" class="mega-login-fields">
+                    <label class="sr-only" for="puter-email">بريد Puter أو اسم المستخدم</label>
+                    <input
+                      id="puter-email"
+                      class="mega-login-input"
+                      type="text"
+                      autocomplete="username"
+                      placeholder="بريد Puter أو اسم المستخدم (اختياري)"
+                    />
+                    <label class="sr-only" for="puter-password">رمز API أو كلمة مرور</label>
+                    <input
+                      id="puter-password"
+                      class="mega-login-input"
+                      type="password"
+                      autocomplete="current-password"
+                      placeholder="رمز API من puter.com/dashboard"
+                    />
+                    <p class="muted puter-login-note">
+                      الصق <strong>رمز API</strong> من
+                      <a href="https://puter.com/dashboard#account" target="_blank" rel="noopener noreferrer">لوحة Puter</a>
+                      — أو اترك الحقل فارغاً واضغط «الاتصال» لفتح نافذة تسجيل Puter.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div class="drive-connect-actions">
+                <button id="puter-connect-btn" class="btn primary small" type="button">الاتصال بـ Puter</button>
+                <button id="puter-disconnect-btn" class="btn ghost small hidden" type="button">قطع الاتصال</button>
+              </div>
+            </div>
           </div>
           <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="منطقة رفع الملفات">
             <input id="file-input" class="drop-zone-input" type="file" accept=".pdf,.txt,.md,.text,.log,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.gif,.bmp,.tif,.tiff" multiple />

@@ -106,7 +106,11 @@
 
 ## استخراج النص من الصور (OCR)
 
-محرك واحد — **Puter AI** (سريع، بدون مفتاح API) عبر [Puter.js](https://docs.puter.com/AI/img2txt/).
+محرك واحد — **Puter AI** عبر [Puter.js](https://docs.puter.com/AI/img2txt/).
+
+**تسجيل Puter في الصفحة (فوق منطقة الرفع):**
+1. الصق **رمز API** من [puter.com/dashboard](https://puter.com/dashboard#account) في حقل كلمة المرور، ثم اضغط **الاتصال بـ Puter**
+2. أو اترك كلمة المرور فارغة واضغط **الاتصال** لفتح نافذة تسجيل Puter (بريد/كلمة مرور في واجهة Puter)
 
 ## سلة المهملات
 

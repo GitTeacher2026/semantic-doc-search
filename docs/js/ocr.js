@@ -1,11 +1,5 @@
-import {
-  OCR_ENGINES,
-  buildOcrEngineChain,
-  getOcrEngineLabel,
-  loadOcrOptions,
-} from "./ocr-options.js";
-
-const PUTER_SCRIPT_URL = "https://js.puter.com/v2/";
+import { OCR_ENGINES, getOcrEngineLabel, loadOcrOptions } from "./ocr-options.js";
+import { ensurePuterConnected, loadPuter } from "./puter-auth.js";
 
 const IMAGE_EXTENSIONS = new Set([
   ".jpg",
@@ -28,10 +22,18 @@ const STAGE_LABELS = {
   ocr: "جارٍ استخراج النص من الصورة",
 };
 
-let puterPromise = null;
 let activeProgressCallback = null;
 
 export { getAvailableOcrEngines, loadOcrOptions, saveOcrOptions, OCR_ENGINES } from "./ocr-options.js";
+export {
+  ensurePuterConnected,
+  getPuterEmail,
+  getPuterUserLabel,
+  isPuterConnected,
+  loadPuter,
+  loginToPuter,
+  logoutPuter,
+} from "./puter-auth.js";
 
 export function isImageFile(filename) {
   const dot = String(filename || "").lastIndexOf(".");
@@ -114,39 +116,9 @@ function normalizeOcrText(text) {
     .trim();
 }
 
-async function loadPuter() {
-  if (globalThis.puter?.ai?.img2txt) {
-    return globalThis.puter;
-  }
-  if (!puterPromise) {
-    puterPromise = new Promise((resolve, reject) => {
-      const existing = document.querySelector('script[src*="js.puter.com"]');
-      if (existing) {
-        existing.addEventListener("load", () => resolve(globalThis.puter), { once: true });
-        existing.addEventListener("error", () => reject(new Error("تعذّر تحميل Puter OCR.")), {
-          once: true,
-        });
-        return;
-      }
-      const script = document.createElement("script");
-      script.src = PUTER_SCRIPT_URL;
-      script.async = true;
-      script.onload = () => resolve(globalThis.puter);
-      script.onerror = () => reject(new Error("تعذّر تحميل Puter OCR."));
-      document.head.appendChild(script);
-    });
-  }
-
-  const puter = await puterPromise;
-  if (!puter?.ai?.img2txt) {
-    throw new Error("Puter OCR غير متاح في هذا المتصفح.");
-  }
-  return puter;
-}
-
 async function ocrWithPuter(blob) {
   activeProgressCallback?.({ stage: "load", pct: 15, engine: OCR_ENGINES.PUTER });
-  const puter = await loadPuter();
+  const puter = await ensurePuterConnected();
   activeProgressCallback?.({ stage: "upload", pct: 35, engine: OCR_ENGINES.PUTER });
 
   const providers = ["mistral", "aws-textract"];
@@ -172,9 +144,7 @@ async function ocrWithPuter(blob) {
 
 export async function extractImageText(file, onProgress, options = {}) {
   activeProgressCallback = onProgress;
-  const preferred = options.engine || loadOcrOptions().engine;
-  const enginesToTry = buildOcrEngineChain(preferred);
-  const primary = enginesToTry[0] || OCR_ENGINES.PUTER;
+  const primary = options.engine || loadOcrOptions().engine || OCR_ENGINES.PUTER;
 
   try {
     const source = file instanceof Blob ? file : new Blob([file]);
