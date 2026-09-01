@@ -171,6 +171,19 @@ select {
   margin-bottom: 1rem;
 }
 
+.hero-brand {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+}
+
+.hero-brand-mark {
+  width: 3rem;
+  height: 3rem;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
 .tagline { color: var(--muted); max-width: 40rem; margin: 0.35rem 0 0; }
 
 .grid {
@@ -785,9 +798,15 @@ mark.query-hit, .query-hit {
 }
 
 .drop-zone-icon {
-  font-size: 3rem;
-  line-height: 1;
+  display: grid;
+  place-items: center;
   margin-bottom: 0.5rem;
+}
+
+.cloud-transfer-icon--drop {
+  width: 3rem;
+  height: 3rem;
+  color: var(--accent);
 }
 
 .drop-zone-title {

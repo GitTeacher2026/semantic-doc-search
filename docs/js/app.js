@@ -145,6 +145,15 @@ import {
   syncDocumentsGitHubMega,
 } from "./storage-sync.js";
 import { isGitHubStorageConfigured } from "./github-storage.js";
+import {
+  getUploadDestination,
+  getUploadDestinationHint,
+  getUploadDestinationLabel,
+  getUploadDestinationOptions,
+  hasUploadDestinationChoice,
+  isUploadDestinationReady,
+  setUploadDestination,
+} from "./upload-destination.js";
 
 const CHUNK_SIZE = 800;
 const CHUNK_OVERLAP = 120;
@@ -185,6 +194,9 @@ const pendingUsersList = document.getElementById("pending-users-list");
 const resendEmailBtn = document.getElementById("resend-email-btn");
 const dropZone = document.getElementById("drop-zone");
 const fileInput = document.getElementById("file-input");
+const uploadDestinationPicker = document.getElementById("upload-destination-picker");
+const uploadDestinationOptions = document.getElementById("upload-destination-options");
+const uploadDestinationHint = document.getElementById("upload-destination-hint");
 const puterConnectPanel = document.getElementById("puter-connect-panel");
 const puterConnectTitle = document.getElementById("puter-connect-title");
 const puterConnectHint = document.getElementById("puter-connect-hint");
@@ -316,19 +328,20 @@ function isAuthed() {
 }
 
 function canUploadFiles() {
-  if (isUsingGitHubStorage()) return true;
-  if (isMegaConnected()) return true;
+  const dest = getUploadDestination();
+  if (dest === STORAGE_MODES.GITHUB) return isUsingGitHubStorage();
+  if (dest === STORAGE_MODES.MEGA) return isMegaConnected();
   return getResolvedStorageMode() === STORAGE_MODES.LOCAL;
 }
 
 async function attachRemoteFileTargets(category, filename, blob, fileBytes) {
+  const dest = getUploadDestination();
   let fileData = null;
   let megaFileId = null;
 
-  if (isUsingGitHubStorage()) {
+  if (dest === STORAGE_MODES.GITHUB && isUsingGitHubStorage()) {
     fileData = arrayBufferToBase64(fileBytes);
-  }
-  if (isMegaConnected()) {
+  } else if (dest === STORAGE_MODES.MEGA && isMegaConnected()) {
     megaFileId = await uploadMegaDocumentFile(category, filename, blob);
   }
 
@@ -337,9 +350,12 @@ async function attachRemoteFileTargets(category, filename, blob, fileBytes) {
     megaFileId,
     driveFileId: null,
     onedriveFileId: null,
-    ...(fileData && megaFileId
-      ? {}
-      : { storageBackend: fileData ? STORAGE_BACKENDS.GITHUB : megaFileId ? STORAGE_BACKENDS.MEGA : STORAGE_BACKENDS.LOCAL }),
+    storageBackend:
+      dest === STORAGE_MODES.GITHUB
+        ? STORAGE_BACKENDS.GITHUB
+        : dest === STORAGE_MODES.MEGA
+          ? STORAGE_BACKENDS.MEGA
+          : STORAGE_BACKENDS.LOCAL,
   };
 }
 
@@ -443,10 +459,63 @@ function updateOcrEnginePanel() {
 }
 
 function updateUploadAccess() {
+  renderUploadDestinationPicker();
   const allowed = canUploadFiles();
   dropZone?.classList.toggle("is-disabled", !allowed);
   if (fileInput) fileInput.disabled = !allowed;
+  if (uploadDestinationHint && !allowed && hasUploadDestinationChoice()) {
+    const dest = getUploadDestination();
+    if (dest === STORAGE_MODES.MEGA && !isMegaConnected()) {
+      uploadDestinationHint.textContent = "جارٍ الاتصال بـ MEGA… إن استمر التعطيل، حدّث الصفحة.";
+    }
+  }
   updateIngestButtonState();
+}
+
+function renderUploadDestinationPicker() {
+  if (!uploadDestinationPicker || !uploadDestinationOptions) return;
+
+  const options = getUploadDestinationOptions();
+  const showPicker = options.length > 0;
+  uploadDestinationPicker.classList.toggle("hidden", !showPicker);
+  if (!showPicker) return;
+
+  const selected = getUploadDestination();
+  uploadDestinationOptions.innerHTML = options
+    .map(
+      (option) => `
+      <label class="storage-mode-option">
+        <input type="radio" name="upload-dest" value="${option.id}" ${option.id === selected ? "checked" : ""} />
+        <span>${option.label}</span>
+      </label>`
+    )
+    .join("");
+
+  uploadDestinationOptions.querySelectorAll('input[name="upload-dest"]').forEach((input) => {
+    input.addEventListener("change", () => {
+      if (!input.checked) return;
+      setUploadDestination(input.value);
+      updateUploadDestinationHint();
+      updateUploadAccess();
+    });
+  });
+
+  updateUploadDestinationHint();
+}
+
+function updateUploadDestinationHint() {
+  if (!uploadDestinationHint) return;
+  const dest = getUploadDestination();
+  const label = getUploadDestinationLabel(dest);
+  const hint = getUploadDestinationHint(dest);
+  if (!isUploadDestinationReady(dest)) {
+    uploadDestinationHint.textContent =
+      dest === STORAGE_MODES.MEGA
+        ? `وجهة ${label}: جارٍ الاتصال بـ MEGA…`
+        : `وجهة ${label}: غير جاهزة حالياً.`;
+    return;
+  }
+  uploadDestinationHint.textContent = `الرفع إلى ${label}. ${hint}`;
 }
 
 function getExistingCategories() {
@@ -2059,13 +2128,7 @@ async function ingestFiles(items) {
     await persistState();
     renderLibrary();
     setStatus(
-      canSyncGitHubMega()
-        ? "اكتملت الفهرسة وحُفظت في GitHub و MEGA."
-        : isUsingGitHubStorage()
-          ? "اكتملت الفهرسة وحُفظت في GitHub."
-          : isMegaConnected()
-            ? "اكتملت الفهرسة وحُفظت في MEGA."
-            : "اكتملت الفهرسة.",
+      `اكتملت الفهرسة وحُفظت في ${getUploadDestinationLabel()}.`,
       true
     );
     setTimeout(() => setStatus("", false), 2500);

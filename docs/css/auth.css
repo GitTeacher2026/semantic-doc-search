@@ -69,10 +69,26 @@
   letter-spacing: 0.04em;
 }
 
+.auth-hero-icon {
+  display: grid;
+  place-items: center;
+  margin-bottom: 0.75rem;
+}
+
 .auth-brand-mark {
   width: 2.4rem;
   height: 2.4rem;
   color: #d4af37;
+}
+
+.cloud-transfer-icon {
+  display: block;
+}
+
+.cloud-transfer-icon--hero {
+  width: 88px;
+  height: 88px;
+  color: #f5f8ff;
 }
 
 .auth-brand-text {
