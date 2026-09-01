@@ -2186,7 +2186,8 @@ body.pdf-studio-open {
 }
 
 .pdf-studio-text-layer.is-selectable span {
-  color: transparent;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent;
   user-select: text;
   -webkit-user-select: text;
   cursor: text;

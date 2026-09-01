@@ -152,6 +152,7 @@ import {
 
 const CHUNK_SIZE = 800;
 const CHUNK_OVERLAP = 120;
+const PDF_NO_TEXT_PREVIEW = "PDF — بدون نص للبحث";
 
 let currentAppPage = "library";
 let pendingItems = [];
@@ -1141,10 +1142,11 @@ async function extractPdfText(arrayBuffer) {
 async function extractText(file, arrayBuffer) {
   const name = String(file?.name || "");
   const buffer = arrayBuffer || (await file.arrayBuffer());
-  if (isImageFile(name) || fileEndsWith(name, ".pdf")) {
+  if (isImageFile(name)) {
     const result = await extractIndexableText(file, buffer);
     return result.text;
   }
+  if (fileEndsWith(name, ".pdf")) return extractPdfText(buffer);
   if (fileEndsWith(name, ".docx")) return extractDocxText(buffer);
   if (fileEndsWith(name, ".xlsx") || fileEndsWith(name, ".xls")) return extractExcelText(buffer);
   if (fileEndsWith(name, ".pptx")) return extractPptxText(buffer);
@@ -2235,21 +2237,24 @@ async function ingestFiles(items) {
       let text = "";
       let ocrExtracted = false;
 
-      if (image || isPdf) {
+      if (image) {
         const result = await extractIndexableText(file, fileBytes, (message) => setStatus(message));
-        text = result.text;
+        text = result.text?.trim() || "";
         ocrExtracted = result.ocrUsed;
+        if (!text) throw new Error(`لم يُعثر على نص في ${file.name}`);
+      } else if (isPdf) {
+        const result = await extractIndexableText(file, fileBytes, (message) => setStatus(message));
+        text = result.text?.trim() || "";
+        ocrExtracted = false;
       } else {
-        text = await extractText(file, fileBytes.slice().buffer);
+        text = (await extractText(file, fileBytes.slice().buffer))?.trim() || "";
+        if (!text) throw new Error(`لم يُعثر على نص في ${file.name}`);
       }
-
-      if (!text?.trim()) {
-        throw new Error(`لم يُعثر على نص في ${file.name}`);
-      }
-      text = text.trim();
 
       let filename = file.name;
-      let category = assignCategory(text, file.name, state.documents);
+      let category = text
+        ? assignCategory(text, file.name, state.documents)
+        : assignCategory(file.name, file.name, state.documents);
 
       if (image) {
         const uploadName = buildUploadFilename(item.meta?.displayName, file.name);
@@ -2279,7 +2284,7 @@ async function ingestFiles(items) {
         throw new Error(`يوجد ملف بنفس الاسم «${filename}». غيّر الاسم أو احذف النسخة القديمة.`);
       }
 
-      const chunks = chunkText(text).map((content) => ({ content }));
+      const chunks = text ? chunkText(text).map((content) => ({ content })) : [];
       const remoteTargets = await attachRemoteFileTargets(category, filename, blob);
 
       state.documents.push({
@@ -2290,7 +2295,7 @@ async function ingestFiles(items) {
         fileGroup: fileGroup(filename),
         extension: fileExtension(filename),
         charCount: text.length,
-        preview: text.replace(/\s+/g, " ").slice(0, 280),
+        preview: text ? text.replace(/\s+/g, " ").slice(0, 280) : isPdf ? PDF_NO_TEXT_PREVIEW : "",
         ...remoteTargets,
         chunks,
         ocrExtracted,

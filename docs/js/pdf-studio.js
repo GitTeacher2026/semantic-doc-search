@@ -4,6 +4,8 @@ import {
   extractPagesPdf,
   getActivePageIndices,
   loadPdfDocument,
+  pageHasNativeText,
+  pdfHasNativeText,
   renderPageToBlob,
   renderPageToCanvas,
   renderTextLayer,
@@ -168,7 +170,19 @@ async function renderCurrentPage() {
   };
 
   syncOverlaySize(meta.cssWidth, meta.cssHeight);
-  await renderTextLayer(studioState.pdfDoc, originalIndex + 1, textLayer, meta.viewport);
+
+  const isSelect = annotationStore.activeTool === EDIT_TOOLS.SELECT;
+  const pageHasText =
+    isSelect &&
+    studioState.hasNativeText &&
+    (await pageHasNativeText(studioState.pdfDoc, originalIndex + 1));
+  if (pageHasText) {
+    await renderTextLayer(studioState.pdfDoc, originalIndex + 1, textLayer, meta.viewport);
+    textLayer?.classList.add("is-selectable");
+  } else if (textLayer) {
+    textLayer.innerHTML = "";
+    textLayer.classList.remove("is-selectable");
+  }
   if (taskId !== renderTaskId) return;
 
   renderOverlay();
@@ -220,6 +234,7 @@ function renderThumbnails() {
 function updateToolbarState() {
   const visible = getVisibleIndices();
   const hasPages = visible.length > 0;
+  const showOcr = hasPages && !studioState?.hasNativeText;
   modalEl.querySelector("#pdf-studio-prev")?.toggleAttribute("disabled", !hasPages || studioState.currentVisibleIndex <= 0);
   modalEl.querySelector("#pdf-studio-next")?.toggleAttribute(
     "disabled",
@@ -227,8 +242,10 @@ function updateToolbarState() {
   );
   modalEl.querySelector("#pdf-studio-delete-page")?.toggleAttribute("disabled", !hasPages);
   modalEl.querySelector("#pdf-studio-rotate")?.toggleAttribute("disabled", !hasPages);
-  modalEl.querySelector("#pdf-studio-ocr-page")?.toggleAttribute("disabled", !hasPages);
-  modalEl.querySelector("#pdf-studio-ocr-all")?.toggleAttribute("disabled", !hasPages);
+  modalEl.querySelector("#pdf-studio-ocr-page")?.toggleAttribute("disabled", !showOcr);
+  modalEl.querySelector("#pdf-studio-ocr-all")?.toggleAttribute("disabled", !showOcr);
+  modalEl.querySelector("#pdf-studio-ocr-page")?.classList.toggle("hidden", !showOcr);
+  modalEl.querySelector("#pdf-studio-ocr-all")?.classList.toggle("hidden", !showOcr);
   modalEl.querySelector("#pdf-studio-extract")?.toggleAttribute("disabled", !hasPages);
   modalEl.querySelector("#pdf-studio-save")?.toggleAttribute("disabled", !hasPages && !studioState.appendBuffers.length);
 }
@@ -283,13 +300,14 @@ function setEditTool(tool) {
   modalEl.querySelectorAll(".pdf-studio-tool").forEach((btn) => {
     btn.classList.toggle("is-active", btn.dataset.tool === tool);
   });
-  const textLayer = modalEl.querySelector("#pdf-studio-text-layer");
   const overlay = modalEl.querySelector("#pdf-studio-overlay");
   const isSelect = tool === EDIT_TOOLS.SELECT;
-  textLayer?.classList.toggle("is-selectable", isSelect);
   overlay?.classList.toggle("is-interactive", !isSelect);
   renderAnnotationLayer();
   renderOverlay();
+  if (studioState?.pdfDoc) {
+    renderCurrentPage();
+  }
 }
 
 function placeInlineTextEditor(point, { initialText = "", onSave } = {}) {
@@ -522,9 +540,9 @@ async function handleSave() {
   try {
     setStatus("جارٍ حفظ التعديلات…");
     const bytes = await buildOutputBytes();
-    const ocrText = collectOcrText();
+    const ocrText = studioState.hasNativeText ? null : collectOcrText() || null;
     await callbacks.onSave?.(studioState.docId, bytes, {
-      ocrText: ocrText || null,
+      ocrText,
       filename: studioState.filename,
     });
     studioState.sourceBytes = bytes;
@@ -745,6 +763,7 @@ export async function openPdfStudio({ docId, filename, blob, libraryDocuments = 
 
   const sourceBytes = new Uint8Array(await blob.arrayBuffer());
   const pdfDoc = await loadPdfDocument(sourceBytes);
+  const hasNativeText = await pdfHasNativeText(pdfDoc);
   annotationStore.byPage = {};
   annotationStore.selectedId = null;
   annotationStore.drawing = null;
@@ -756,6 +775,7 @@ export async function openPdfStudio({ docId, filename, blob, libraryDocuments = 
     filename,
     sourceBytes,
     pdfDoc,
+    hasNativeText,
     totalPages: pdfDoc.numPages,
     deletedPages: new Set(),
     rotations: {},

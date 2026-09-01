@@ -5,41 +5,11 @@ import {
   isImageFile,
 } from "./ocr.js";
 import { fileEndsWith } from "./constants.js";
-import { loadPdfDocument, renderPageToBlob } from "./pdf-utils.js";
-
-const MIN_PDF_TEXT_CHARS = 60;
-
-export async function extractPdfTextLayer(arrayBuffer) {
-  const pdf = await loadPdfDocument(arrayBuffer);
-  const parts = [];
-  for (let i = 1; i <= pdf.numPages; i += 1) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    parts.push(content.items.map((item) => item.str).join(" "));
-    page.cleanup?.();
-  }
-  return parts.join("\n").trim();
-}
-
-async function ocrPdfPages(fileBytes, onStatus) {
-  await ensurePuterConnected();
-  const pdfDoc = await loadPdfDocument(new Uint8Array(fileBytes));
-  const parts = [];
-  for (let i = 1; i <= pdfDoc.numPages; i += 1) {
-    onStatus?.(`جارٍ OCR للصفحة ${i} من ${pdfDoc.numPages}…`);
-    const blob = await renderPageToBlob(pdfDoc, i, { scale: 2.2 });
-    const result = await extractImageText(blob, (progress) => {
-      onStatus?.(`${formatOcrProgress(progress)} — صفحة ${i}`);
-    });
-    const text = typeof result === "string" ? result : result.text;
-    if (text?.trim()) parts.push(text.trim());
-  }
-  return parts.join("\n\n").trim();
-}
+import { extractPdfTextLayer } from "./pdf-utils.js";
 
 /**
- * Extract indexable text from upload — uses PDF text layer when rich enough,
- * otherwise Puter OCR for scanned PDFs and all images.
+ * Extract indexable text from upload — Puter OCR for images only.
+ * PDFs use the embedded text layer; scanned PDFs are stored without OCR.
  */
 export async function extractIndexableText(file, fileBytes, onStatus) {
   const name = String(file?.name || "");
@@ -64,16 +34,10 @@ export async function extractIndexableText(file, fileBytes, onStatus) {
     } catch {
       text = "";
     }
-
-    if (text.trim().length >= MIN_PDF_TEXT_CHARS) {
-      return { text: text.trim(), ocrUsed: false };
-    }
-
-    onStatus?.(`PDF ممسوح ضوئياً — جارٍ OCR لـ ${name}…`);
-    const ocrText = await ocrPdfPages(fileBytes, onStatus);
-    if (ocrText) return { text: ocrText, ocrUsed: true };
-    return { text: text.trim(), ocrUsed: Boolean(text.trim()) };
+    return { text: text.trim(), ocrUsed: false };
   }
 
   return { text: "", ocrUsed: false };
 }
+
+export { extractPdfTextLayer } from "./pdf-utils.js";

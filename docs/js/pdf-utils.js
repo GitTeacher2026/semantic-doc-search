@@ -52,6 +52,45 @@ export function toArrayBuffer(bytes) {
   return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
 }
 
+export async function extractPdfTextLayer(arrayBuffer) {
+  const pdf = await loadPdfDocument(arrayBuffer);
+  const parts = [];
+  for (let i = 1; i <= pdf.numPages; i += 1) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    parts.push(content.items.map((item) => item.str).join(" "));
+    page.cleanup?.();
+  }
+  return parts.join("\n").trim();
+}
+
+const NATIVE_TEXT_MIN_CHARS = 40;
+
+export async function pdfHasNativeText(pdfDoc, minChars = NATIVE_TEXT_MIN_CHARS) {
+  let total = 0;
+  for (let i = 1; i <= pdfDoc.numPages; i += 1) {
+    const page = await pdfDoc.getPage(i);
+    const content = await page.getTextContent();
+    for (const item of content.items) {
+      total += String(item.str || "").trim().length;
+      if (total >= minChars) {
+        page.cleanup?.();
+        return true;
+      }
+    }
+    page.cleanup?.();
+  }
+  return false;
+}
+
+export async function pageHasNativeText(pdfDoc, pageNumber, minChars = 8) {
+  const page = await pdfDoc.getPage(pageNumber);
+  const content = await page.getTextContent();
+  const length = content.items.reduce((sum, item) => sum + String(item.str || "").trim().length, 0);
+  page.cleanup?.();
+  return length >= minChars;
+}
+
 export async function loadPdfDocument(bytes) {
   const pdfjs = await getPdfJs();
   return pdfjs.getDocument(getPdfDocumentOptions(bytes)).promise;
@@ -132,10 +171,13 @@ export async function renderTextLayer(pdfDoc, pageNumber, container, viewport) {
     span.style.left = `${left}px`;
     span.style.top = `${top}px`;
     span.style.fontSize = `${fontHeight}px`;
-    span.style.fontFamily = item.fontName?.includes("Arabic") ? '"Noto Sans Arabic", sans-serif' : "sans-serif";
+    span.style.lineHeight = "1";
+    span.style.fontFamily = "sans-serif";
     span.style.transform = `rotate(${angle}rad)`;
     span.style.transformOrigin = "0 0";
     span.style.whiteSpace = "pre";
+    span.style.color = "transparent";
+    span.style.webkitTextFillColor = "transparent";
     span.setAttribute("role", "presentation");
     container.appendChild(span);
   }
