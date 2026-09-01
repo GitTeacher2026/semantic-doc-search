@@ -62,11 +62,9 @@ import {
   verifyLockPassword,
 } from "./file-lock.js";
 import {
-  applyGitHubRemoteSession,
   clearStorageSession,
   isCloudSyncEnabled,
   isUsingDriveStorage,
-  isUsingGitHubStorage,
   isUsingMegaStorage,
   isUsingOneDriveStorage,
   isUsingRemoteFileStorage,
@@ -140,14 +138,6 @@ import {
   syncFoldersFromDocuments,
 } from "./folders.js";
 import {
-  canSyncGitHubMega,
-  describeSyncSummary,
-  loadMergedGitHubMegaIndex,
-  saveMergedGitHubMegaIndex,
-  syncDocumentsGitHubMega,
-} from "./storage-sync.js";
-import { isGitHubStorageConfigured } from "./github-storage.js";
-import {
   getUploadDestination,
   getUploadDestinationHint,
   getUploadDestinationLabel,
@@ -183,7 +173,6 @@ let pendingMoveTargetCategory = null;
 let authApi = null;
 let currentUser = null;
 let adminMembersApi = null;
-let dualIndexHandles = null;
 
 const appView = document.getElementById("app-view");
 const logoutBtn = document.getElementById("logout-btn");
@@ -298,15 +287,7 @@ async function hydrateDocuments(password) {
   isHydrating = true;
   setStatus("جارٍ تحميل المستندات…");
   try {
-    if (canSyncGitHubMega()) {
-      const merged = await loadMergedGitHubMegaIndex(password);
-      state = normalizeState(merged.state);
-      dualIndexHandles = { github: merged.github, mega: merged.mega };
-      applyGitHubRemoteSession(merged.github);
-    } else {
-      dualIndexHandles = null;
-      state = normalizeState(await loadDocuments(password));
-    }
+    state = normalizeState(await loadDocuments(password));
     state.folders = syncFoldersFromDocuments(state.documents, state.folders);
     migrateDocumentOcrFlags(state.documents);
     renderLibrary();
@@ -325,14 +306,6 @@ async function persistState() {
   if (!sessionPassword) return;
   state = normalizeState(state);
   state.folders = syncFoldersFromDocuments(state.documents, state.folders);
-
-  if (canSyncGitHubMega() && dualIndexHandles) {
-    const saved = await saveMergedGitHubMegaIndex(sessionPassword, state, dualIndexHandles);
-    dualIndexHandles = { github: saved.github, mega: saved.mega };
-    applyGitHubRemoteSession(saved.github);
-    return;
-  }
-
   await saveDocuments(sessionPassword, state);
 }
 
@@ -341,34 +314,23 @@ function isAuthed() {
 }
 
 function canUploadFiles() {
-  const dest = getUploadDestination();
-  if (dest === STORAGE_MODES.GITHUB) return isUsingGitHubStorage();
-  if (dest === STORAGE_MODES.MEGA) return isMegaConnected();
+  if (isMegaConnected()) return true;
   return getResolvedStorageMode() === STORAGE_MODES.LOCAL;
 }
 
-async function attachRemoteFileTargets(category, filename, blob, fileBytes) {
-  const dest = getUploadDestination();
-  let fileData = null;
+async function attachRemoteFileTargets(category, filename, blob) {
   let megaFileId = null;
 
-  if (dest === STORAGE_MODES.GITHUB && isUsingGitHubStorage()) {
-    fileData = arrayBufferToBase64(fileBytes);
-  } else if (dest === STORAGE_MODES.MEGA && isMegaConnected()) {
+  if (isMegaConnected()) {
     megaFileId = await uploadMegaDocumentFile(category, filename, blob);
   }
 
   return {
-    fileData,
+    fileData: null,
     megaFileId,
     driveFileId: null,
     onedriveFileId: null,
-    storageBackend:
-      dest === STORAGE_MODES.GITHUB
-        ? STORAGE_BACKENDS.GITHUB
-        : dest === STORAGE_MODES.MEGA
-          ? STORAGE_BACKENDS.MEGA
-          : STORAGE_BACKENDS.LOCAL,
+    storageBackend: megaFileId ? STORAGE_BACKENDS.MEGA : STORAGE_BACKENDS.LOCAL,
   };
 }
 
@@ -1300,8 +1262,6 @@ function updateLibraryFilesSummary(docs) {
 function renderFilesPage() {
   renderFileBrowser(state.documents, {
     folders: state.folders,
-    syncAvailable: canSyncGitHubMega(),
-    dualSources: canSyncGitHubMega(),
     onChange: renderFilesPage,
   });
   hydrateFileBrowserThumbnails();
@@ -1429,48 +1389,6 @@ async function ingestExternalFilesToCategory(fileList, category) {
     await ingestFiles(items);
   } catch (error) {
     setStatus(error.message, true);
-  }
-}
-
-async function handleSyncGitHubMega() {
-  if (!canSyncGitHubMega()) {
-    setStatus("يلزم ضبط GitHub والاتصال بـ MEGA للمزامنة.", true);
-    return;
-  }
-  if (
-    !window.confirm(
-      "مزامنة الملفات بين GitHub و MEGA؟\nسيتم نسخ كل ملف ليظهر في كلا المصدرين (قد يستغرق وقتاً)."
-    )
-  ) {
-    return;
-  }
-
-  try {
-    setStatus("جارٍ تحميل الفهارس من GitHub و MEGA…");
-    const merged = await loadMergedGitHubMegaIndex(sessionPassword);
-    state = normalizeState(merged.state);
-    state.folders = syncFoldersFromDocuments(state.documents, state.folders);
-    dualIndexHandles = { github: merged.github, mega: merged.mega };
-    applyGitHubRemoteSession(merged.github);
-
-    setStatus("جارٍ المزامنة بين GitHub و MEGA…");
-    const result = await syncDocumentsGitHubMega(state.documents, {
-      onProgress: ({ index, total, filename }) => {
-        setStatus(`مزامنة ${index}/${total}: ${filename}…`);
-      },
-    });
-    state.documents = result.documents;
-    state.folders = syncFoldersFromDocuments(state.documents, state.folders);
-
-    setStatus("جارٍ حفظ الفهارس في GitHub و MEGA…");
-    const saved = await saveMergedGitHubMegaIndex(sessionPassword, state, dualIndexHandles);
-    dualIndexHandles = { github: saved.github, mega: saved.mega };
-    applyGitHubRemoteSession(saved.github);
-    renderLibrary();
-    setStatus(describeSyncSummary(result), true);
-    setTimeout(() => setStatus("", false), 3500);
-  } catch (error) {
-    setStatus(`تعذّرت المزامنة: ${error.message}`, true);
   }
 }
 
@@ -2260,12 +2178,7 @@ async function ingestFiles(items) {
           throw new Error(`يوجد ملف بنفس الاسم «${uploadName}». غيّر الاسم أو احذف النسخة القديمة.`);
         }
 
-        const remoteTargets = await attachRemoteFileTargets(
-          category,
-          uploadName,
-          blob,
-          fileBytes
-        );
+        const remoteTargets = await attachRemoteFileTargets(category, uploadName, blob);
 
         state.documents.push({
           id: crypto.randomUUID(),
@@ -2306,12 +2219,7 @@ async function ingestFiles(items) {
       }
 
       const chunks = chunkText(text).map((content) => ({ content }));
-      const remoteTargets = await attachRemoteFileTargets(
-        category,
-        filename,
-        blob,
-        fileBytes
-      );
+      const remoteTargets = await attachRemoteFileTargets(category, filename, blob);
 
       state.documents.push({
         id: crypto.randomUUID(),
@@ -2432,7 +2340,6 @@ logoutBtn.addEventListener("click", () => {
   sessionPassword = "";
   state = normalizeState({});
   currentUser = null;
-  dualIndexHandles = null;
   clearStorageSession();
   clearUnlockSession();
   authApi?.logout?.();
@@ -2528,7 +2435,6 @@ initFileBrowser(fileBrowserRoot, {
   isFolderUnlocked,
   onDocumentMove: moveDocumentToCategory,
   onExternalDrop: ingestExternalFilesToCategory,
-  onSyncGitHubMega: handleSyncGitHubMega,
 });
 applySearchOptionsToForm(loadSearchOptions());
 initTheme();

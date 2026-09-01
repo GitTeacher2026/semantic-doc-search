@@ -24,6 +24,11 @@ import { isOneDriveConnected } from "./onedrive-auth.js";
 import { normalizeState, purgeExpiredTrash } from "./trash.js";
 import { getResolvedStorageMode, STORAGE_MODES } from "./storage-preference.js";
 import {
+  mergeDocumentStates,
+  mirrorDocumentToMega,
+  snapshotStateForMode,
+} from "./storage-sync.js";
+import {
   getGitHubStorePathForUser,
   getLegacyStorePath,
   localCacheKeyForUser,
@@ -32,6 +37,8 @@ import {
   shouldTryLegacyStore,
   stampOwnerOnState,
 } from "./user-storage-scope.js";
+
+const GITHUB_MIGRATION_KEY_PREFIX = "docshelf_github_migrated_v1:";
 
 let sessionKey = null;
 let currentSalt = null;
@@ -110,6 +117,72 @@ export function isUsingRemoteFileStorage() {
   return isUsingDriveStorage() || isUsingMegaStorage() || isUsingOneDriveStorage();
 }
 
+function githubMigrationKey(userId) {
+  return `${GITHUB_MIGRATION_KEY_PREFIX}${userId}`;
+}
+
+export function hasCompletedGitHubMigration(userId = currentUserId) {
+  if (!userId) return false;
+  return localStorage.getItem(githubMigrationKey(userId)) === "1";
+}
+
+function markGitHubMigrationComplete(userId) {
+  localStorage.setItem(githubMigrationKey(userId), "1");
+}
+
+function githubStateHasData(state) {
+  const normalized = normalizeState(state);
+  return Boolean(
+    normalized.documents.length ||
+      normalized.trash.length ||
+      (normalized.folders?.length || 0) > 0
+  );
+}
+
+async function migrateDocumentsWithFileData(documents = []) {
+  const migrated = [];
+  for (const doc of documents) {
+    if (doc.fileData && !doc.megaFileId) {
+      try {
+        migrated.push(await mirrorDocumentToMega(doc));
+        continue;
+      } catch {
+        migrated.push(doc);
+        continue;
+      }
+    }
+    migrated.push(doc);
+  }
+  return migrated;
+}
+
+async function maybeMigrateGitHubIndexToMega(password, megaResult) {
+  const userId = requireStorageUserId();
+  if (hasCompletedGitHubMigration(userId)) return megaResult;
+  if (!isGitHubStorageConfigured() || !isMegaConnected()) return megaResult;
+
+  const githubResult = await loadDocumentsForMode(password, STORAGE_MODES.GITHUB);
+  if (!githubStateHasData(githubResult.state)) {
+    markGitHubMigrationComplete(userId);
+    return megaResult;
+  }
+
+  const merged = mergeDocumentStates(megaResult.state, githubResult.state);
+  merged.documents = await migrateDocumentsWithFileData(merged.documents);
+  merged.trash = await migrateDocumentsWithFileData(merged.trash);
+
+  const payload = snapshotStateForMode(merged, STORAGE_MODES.MEGA);
+  const saved = await saveDocumentsForMode(
+    password,
+    payload,
+    STORAGE_MODES.MEGA,
+    megaResult.handle,
+    megaResult.crypto
+  );
+  markGitHubMigrationComplete(userId);
+  return { state: payload, handle: saved.handle, crypto: saved.crypto };
+}
+
 async function fetchGitHubStoreForUser() {
   const userId = requireStorageUserId();
   setGitHubStorePath(getGitHubStorePathForUser(userId));
@@ -149,7 +222,11 @@ async function fetchRemoteStoreForMode(mode) {
 }
 
 async function fetchRemoteStore() {
-  return fetchRemoteStoreForMode(getResolvedStorageMode());
+  const mode = getResolvedStorageMode();
+  if (mode === STORAGE_MODES.MEGA) {
+    return fetchRemoteStoreForMode(STORAGE_MODES.MEGA);
+  }
+  return fetchRemoteStoreForMode(mode);
 }
 
 async function uploadRemoteStoreForMode(mode, envelope, handle) {
@@ -239,6 +316,22 @@ export async function loadDocuments(password) {
     throw new Error("لم يُحدَّد المستخدم الحالي للتخزين.");
   }
 
+  const mode = getResolvedStorageMode();
+
+  if (mode === STORAGE_MODES.MEGA && isMegaConnected()) {
+    let megaResult = await loadDocumentsForMode(password, STORAGE_MODES.MEGA);
+    megaResult = await maybeMigrateGitHubIndexToMega(password, megaResult);
+    remoteHandle = megaResult.handle;
+    if (megaResult.crypto) {
+      currentSalt = megaResult.crypto.salt;
+      sessionKey = megaResult.crypto.key;
+    } else if (!megaResult.handle) {
+      currentSalt = crypto.getRandomValues(new Uint8Array(16));
+      sessionKey = await deriveKey(password, currentSalt);
+    }
+    return megaResult.state;
+  }
+
   if (!isCloudSyncEnabled()) {
     return finalizeState(loadLocalDocuments());
   }
@@ -269,6 +362,25 @@ export async function loadDocuments(password) {
 
 export async function saveDocuments(password, state) {
   const payload = finalizeState(state);
+  const mode = getResolvedStorageMode();
+
+  if (mode === STORAGE_MODES.MEGA && isMegaConnected()) {
+    const megaPayload = snapshotStateForMode(payload, STORAGE_MODES.MEGA);
+    const saved = await saveDocumentsForMode(
+      password,
+      megaPayload,
+      STORAGE_MODES.MEGA,
+      remoteHandle,
+      currentSalt && sessionKey ? { salt: currentSalt, key: sessionKey } : null
+    );
+    remoteHandle = saved.handle;
+    if (saved.crypto) {
+      currentSalt = saved.crypto.salt;
+      sessionKey = saved.crypto.key;
+    }
+    return;
+  }
+
   if (!isCloudSyncEnabled()) {
     saveLocalDocuments(payload);
     return;

@@ -159,12 +159,6 @@ function collectNavData(documents) {
     groups.set(groupKey, (groups.get(groupKey) || 0) + 1);
   }
 
-  if (browserOptions.dualSources) {
-    for (const storage of [STORAGE_BACKENDS.GITHUB, STORAGE_BACKENDS.MEGA]) {
-      if (!storages.has(storage)) storages.set(storage, 0);
-    }
-  }
-
   for (const folder of folderRecords) {
     const category = folder?.name;
     if (!category || categories.has(category)) continue;
@@ -271,50 +265,6 @@ function renderStorageBadges(doc) {
         `<span class="storage-badge storage-${storage}">${getStorageBackendIcon(storage)} ${escapeHtml(getStorageBackendLabel(storage))}</span>`
     )
     .join("");
-}
-
-function shouldRenderSplitSources() {
-  return (
-    browserOptions.dualSources &&
-    !browserState.storage &&
-    !browserState.category &&
-    !browserState.group &&
-    !normalizeQuery(browserState.query)
-  );
-}
-
-function renderSourceSection(title, icon, storage, docs) {
-  if (!docs.length) {
-    return `
-      <section class="fb-source-section">
-        <header class="fb-source-header">
-          <h3>${icon} ${escapeHtml(title)}</h3>
-          <span class="muted">0 ملف</span>
-        </header>
-        <p class="fb-source-empty muted">لا توجد ملفات في هذا المصدر.</p>
-      </section>`;
-  }
-
-  const content = `<div class="fb-grid">${docs.map((doc) => renderGridItem(doc)).join("")}</div>`;
-
-  return `
-    <section class="fb-source-section" data-source-section="${storage}">
-      <header class="fb-source-header">
-        <h3>${icon} ${escapeHtml(title)}</h3>
-        <span class="muted">${docs.length.toLocaleString("ar-EG")} ملف</span>
-      </header>
-      <div class="fb-source-content" data-drop-category="">${content}</div>
-    </section>`;
-}
-
-function renderSplitSourceContent(filtered) {
-  const githubDocs = filtered.filter((doc) => documentHasStorageBackend(doc, STORAGE_BACKENDS.GITHUB));
-  const megaDocs = filtered.filter((doc) => documentHasStorageBackend(doc, STORAGE_BACKENDS.MEGA));
-  return `
-    <div class="fb-source-split">
-      ${renderSourceSection("GitHub", getStorageBackendIcon(STORAGE_BACKENDS.GITHUB), STORAGE_BACKENDS.GITHUB, githubDocs)}
-      ${renderSourceSection("MEGA", getStorageBackendIcon(STORAGE_BACKENDS.MEGA), STORAGE_BACKENDS.MEGA, megaDocs)}
-    </div>`;
 }
 
 function renderImageThumb(doc) {
@@ -519,9 +469,6 @@ function bindSidebarResize(container) {
 
 function renderToolbar(filteredCount, totalCount) {
   const crumbs = getBreadcrumbs();
-  const sourceSummary = browserOptions.dualSources
-    ? "من GitHub و MEGA"
-    : "من كل المصادر";
 
   return `
     <div class="fb-toolbar">
@@ -548,12 +495,11 @@ function renderToolbar(filteredCount, totalCount) {
             <option value="category"${browserState.sort === "category" ? " selected" : ""}>التصنيف</option>
           </select>
         </label>
-        ${browserOptions.syncAvailable ? `<button id="fb-sync-github-mega" class="btn ghost small" type="button" title="نسخ الملفات بين GitHub و MEGA">مزامنة GitHub ⟷ MEGA</button>` : ""}
       </div>
     </div>
     <p class="fb-summary muted">
       ${filteredCount.toLocaleString("ar-EG")} ملف
-      ${sourceSummary}
+      من كل المصادر
       ${browserState.query ? `— نتائج «${escapeHtml(browserState.query)}»` : ""}
       · اسحب الملفات إلى المجلدات أو أفلتها من جهازك
     </p>`;
@@ -613,9 +559,7 @@ function renderContent(documents) {
     );
   }
 
-  const content = shouldRenderSplitSources()
-    ? renderSplitSourceContent(filtered)
-    : `<div class="fb-grid">${filtered.map((doc) => renderGridItem(doc)).join("")}</div>`;
+  const content = `<div class="fb-grid">${filtered.map((doc) => renderGridItem(doc)).join("")}</div>`;
 
   return renderShell(
     renderSidebar(navData),
@@ -722,10 +666,6 @@ function bindDragDrop(container, onChange) {
   };
 
   container.querySelectorAll("[data-drop-category]").forEach(bindDropZone);
-
-  container.querySelector("#fb-sync-github-mega")?.addEventListener("click", () => {
-    actionHandlers.onSyncGitHubMega?.();
-  });
 }
 
 function bindNavigation(container, onChange) {

@@ -1,5 +1,4 @@
 import { isDriveConfigured } from "./drive-auth.js";
-import { isGitHubStorageConfigured } from "./github-storage.js";
 import { isOneDriveConfigured } from "./onedrive-auth.js";
 
 const STORAGE_PREF_KEY = "docshelf_storage_mode_v2";
@@ -16,10 +15,6 @@ export function isDriveModeAvailable() {
   return isDriveConfigured();
 }
 
-export function isGitHubModeAvailable() {
-  return isGitHubStorageConfigured();
-}
-
 export function isMegaModeAvailable() {
   return true;
 }
@@ -30,12 +25,6 @@ export function isOneDriveModeAvailable() {
 
 export function getAvailableStorageModes() {
   return [
-    {
-      id: STORAGE_MODES.GITHUB,
-      label: "GitHub",
-      hint: "فهرس مشفّر في المستودع — يعمل تلقائياً عند ضبط التوكن",
-      available: isGitHubModeAvailable(),
-    },
     {
       id: STORAGE_MODES.DRIVE,
       label: "Google Drive",
@@ -70,9 +59,8 @@ export function hasStorageChoice() {
 export function getDefaultStorageMode() {
   const modes = getAvailableStorageModes();
   const preferred = [
-    STORAGE_MODES.GITHUB,
-    STORAGE_MODES.DRIVE,
     STORAGE_MODES.MEGA,
+    STORAGE_MODES.DRIVE,
     STORAGE_MODES.ONEDRIVE,
     STORAGE_MODES.LOCAL,
   ];
@@ -83,7 +71,6 @@ export function getDefaultStorageMode() {
 }
 
 export function getResolvedStorageMode() {
-  if (isGitHubModeAvailable()) return STORAGE_MODES.GITHUB;
   if (isMegaModeAvailable()) return STORAGE_MODES.MEGA;
   return STORAGE_MODES.LOCAL;
 }

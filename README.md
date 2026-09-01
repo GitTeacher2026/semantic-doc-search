@@ -11,7 +11,7 @@
 - واجهة عربية كاملة مع دعم RTL
 - رفع PDF وOffice ونصوص **والصور** (OCR اختياري عبر Puter AI من صفحة الملفات)
 - **مستكشف ملفات** منفصل (شبكة/قائمة، تصفح حسب المصدر والتصنيف، بحث وترتيب)
-- تخزين مشفّر على **GitHub** أو **Google Drive** أو **MEGA** أو **OneDrive** أو محلياً
+- تخزين مشفّر على **MEGA** (الافتراضي) أو **Google Drive** أو **OneDrive** أو محلياً
 - بحث فوري BM25 مع خيارات متقدمة ووضع داكن
 
 ## بيانات الدخول
@@ -27,7 +27,7 @@
 
 ### 1) `DOCSHELF_GITHUB_TOKEN` (مطلوب)
 
-يسمح للتطبيق بحفظ المستندات في `data/browser-store.enc.json`.
+يسمح للتطبيق بتسجيل الدخول عبر GitHub OAuth وإدارة `data/users.json` (وليس تخزين المستندات).
 
 1. سجّل الدخول كـ **GitTeacher2026**
 2. [Settings → Developer settings → Personal access tokens → Fine-grained tokens](https://github.com/settings/tokens?type=beta)
@@ -74,15 +74,18 @@
 
 ## التخزين
 
-اختر **مكان التخزين** فوق منطقة الرفع:
+**المستندات والملفات** تُخزَّن في **MEGA** فقط. سجّل الدخول ببريد وكلمة مرور MEGA من الواجهة.
+
+عند أول تحميل بعد التحديث، يُنقل الفهرس القديم من GitHub تلقائياً إلى MEGA (إن وُجد).
 
 | المصدر | الإعداد | الملاحظات |
 |--------|---------|-----------|
-| **GitHub** | `DOCSHELF_GITHUB_TOKEN` | فهرس مشفّر في المستودع — يعمل تلقائياً |
+| **MEGA** | بريد وكلمة مرور في الواجهة | التخزين الافتراضي للمستندات والملفات |
 | **Google Drive** | `GOOGLE_CLIENT_ID` + تسجيل دخول | ملفات وفهرس في مجلد «مخزن الوثائق» |
-| **MEGA** | بريد وكلمة مرور في الواجهة | لا يحتاج Secret — جلسة المتصفح فقط |
 | **OneDrive** | `ONEDRIVE_CLIENT_ID` + تسجيل دخول | ملفات وفهرس في مجلد «مخزن الوثائق» |
 | **محلي** | لا شيء | `localStorage` فقط — بدون مزامنة |
+
+> **GitHub** يبقى لاستضافة GitHub Pages وتسجيل الدخول و`users.json` — وليس لتخزين المستندات.
 
 ### إعداد Google Drive
 
@@ -147,7 +150,7 @@ streamlit run app.py --server.port 8512 --server.address 0.0.0.0
 
 ```
 docs/                     # نسخة GitHub Pages
-docs/js/storage.js        # تخزين مشفّر (GitHub · Drive · MEGA · OneDrive)
+docs/js/storage.js        # تخزين مشفّر (MEGA · Drive · OneDrive)
 docs/js/ocr.js            # OCR (Puter AI)
 .github/workflows/pages.yml
 data/browser-store.enc.json
