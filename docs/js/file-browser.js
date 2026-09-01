@@ -3,6 +3,7 @@ import {
   GROUP_LABELS,
   fileGroup,
 } from "./constants.js";
+import { isImageFile } from "./ocr.js";
 import {
   STORAGE_BACKENDS,
   documentMatchesActiveStorage,
@@ -181,6 +182,31 @@ function navigateToCrumb(crumbId) {
   }
 }
 
+function isImageDocument(doc) {
+  return isImageFile(doc?.filename) || doc?.fileGroup === "image";
+}
+
+function hasExtractedOcr(doc) {
+  return doc?.ocrExtracted === true;
+}
+
+function formatDocSizeLabel(doc) {
+  if (isImageDocument(doc) && !hasExtractedOcr(doc)) {
+    return "بدون نص مستخرج";
+  }
+  return `${doc.charCount?.toLocaleString("ar-EG") || 0} حرف`;
+}
+
+function renderOcrAction(doc, { compact = false } = {}) {
+  if (!isImageDocument(doc)) return "";
+  const title = hasExtractedOcr(doc) ? "إعادة استخراج النص" : "استخراج النص من الصورة";
+  const label = hasExtractedOcr(doc) ? "إعادة الاستخراج" : "استخراج نص";
+  if (compact) {
+    return `<button class="btn ghost small ocr-btn" data-id="${doc.id}" type="button" title="${title}">📝</button>`;
+  }
+  return `<button class="btn ghost small ocr-btn" data-id="${doc.id}" type="button">${label}</button>`;
+}
+
 function renderDocActions(doc, { compact = false } = {}) {
   const locked = doc.isLocked;
   const unlocked = actionHandlers.isDocUnlocked?.(doc);
@@ -191,6 +217,7 @@ function renderDocActions(doc, { compact = false } = {}) {
   if (compact) {
     return `
       <div class="fb-card-actions">
+        ${renderOcrAction(doc, { compact: true })}
         <button class="btn ghost small download-btn" data-id="${doc.id}" type="button" title="تنزيل">⬇</button>
         <button class="btn ghost small rename-btn" data-id="${doc.id}" type="button" title="إعادة تسمية">✏️</button>
         ${lockBtn}
@@ -199,6 +226,7 @@ function renderDocActions(doc, { compact = false } = {}) {
   }
 
   return `
+    ${renderOcrAction(doc)}
     <button class="btn ghost small download-btn" data-id="${doc.id}" type="button">تنزيل</button>
     <button class="btn ghost small rename-btn" data-id="${doc.id}" type="button">إعادة تسمية</button>
     ${locked ? `<button class="btn ghost small unlock-btn" data-id="${doc.id}" type="button">${unlocked ? "إعادة القفل" : "فتح"}</button>` : `<button class="btn ghost small lock-btn" data-id="${doc.id}" type="button">قفل</button>`}
@@ -214,9 +242,10 @@ function renderGridItem(doc) {
       <div class="fb-card-icon" aria-hidden="true">${GROUP_ICONS[groupName] || GROUP_ICONS.other}</div>
       <div class="fb-card-body">
         <h3 class="fb-card-title" title="${escapeHtml(doc.filename)}">${escapeHtml(doc.filename)}</h3>
-        <p class="fb-card-meta muted">${escapeHtml(doc.category || "عام")} · ${doc.charCount?.toLocaleString("ar-EG") || 0} حرف</p>
+        <p class="fb-card-meta muted">${escapeHtml(doc.category || "عام")} · ${formatDocSizeLabel(doc)}</p>
         <div class="fb-card-badges">
           <span class="storage-badge storage-${storage}">${getStorageBackendIcon(storage)} ${escapeHtml(getStorageBackendLabel(storage))}</span>
+          ${isImageDocument(doc) && !hasExtractedOcr(doc) ? '<span class="ocr-badge">بدون نص</span>' : ""}
           ${doc.isLocked ? '<span class="lock-badge">🔒 مقفل</span>' : ""}
         </div>
       </div>
@@ -241,7 +270,7 @@ function renderListRow(doc) {
       <div class="fb-list-storage">
         <span class="storage-badge storage-${storage}">${getStorageBackendIcon(storage)} ${escapeHtml(getStorageBackendLabel(storage))}</span>
       </div>
-      <div class="fb-list-size muted">${doc.charCount?.toLocaleString("ar-EG") || 0}</div>
+      <div class="fb-list-size muted">${formatDocSizeLabel(doc)}</div>
       <div class="fb-list-actions">${renderDocActions(doc)}</div>
     </article>`;
 }
@@ -384,6 +413,9 @@ function renderContent(documents) {
 }
 
 function bindActions(container) {
+  container.querySelectorAll(".ocr-btn").forEach((btn) => {
+    btn.addEventListener("click", () => actionHandlers.onOcr?.(btn.dataset.id));
+  });
   container.querySelectorAll(".delete-btn").forEach((btn) => {
     btn.addEventListener("click", () => actionHandlers.onDelete?.(btn.dataset.id));
   });

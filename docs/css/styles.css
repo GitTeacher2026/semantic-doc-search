@@ -854,6 +854,44 @@ mark.query-hit, .query-hit {
   font-size: 0.84rem;
 }
 
+.pending-images-note {
+  margin-top: 0.85rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+.ocr-dialog-card {
+  max-width: 34rem;
+}
+
+.ocr-dialog-filename {
+  margin: 0 0 0.35rem;
+  word-break: break-word;
+}
+
+.ocr-dialog-status {
+  margin: 0.75rem 0 0;
+  min-height: 1.25rem;
+}
+
+.ocr-dialog-status.error {
+  color: var(--danger);
+}
+
+.ocr-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #9a6700;
+  background: #fff7d6;
+  border: 1px solid #f5d565;
+}
+
 .storage-settings-panel {
   display: grid;
   gap: 0.75rem;
@@ -1644,6 +1682,17 @@ html[data-theme="dark"] .btn.ghost {
 html[data-theme="dark"] .status {
   background: #1a2a40;
   border-color: #2f4d67;
+}
+
+html[data-theme="dark"] .ocr-badge {
+  color: #f5d565;
+  background: #3a2f10;
+  border-color: #7c5e10;
+}
+
+html[data-theme="dark"] .pending-images-note,
+html[data-theme="dark"] .ocr-dialog-card .drive-connect-panel {
+  background: var(--surface-muted);
 }
 
 /* ── File browser (Drive / Windows 11 style) ── */

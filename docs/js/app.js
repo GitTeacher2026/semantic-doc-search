@@ -125,6 +125,7 @@ import {
 
 const CHUNK_SIZE = 800;
 const CHUNK_OVERLAP = 120;
+const IMAGE_NO_OCR_PREVIEW = "صورة — لم يُستخرج نص بعد";
 
 let currentAppPage = "library";
 let pendingFiles = [];
@@ -136,6 +137,7 @@ let pendingRenameId = null;
 let pendingLockId = null;
 let pendingUnlockId = null;
 let pendingUnlockAction = null;
+let pendingOcrId = null;
 let authApi = null;
 let currentUser = null;
 let adminMembersApi = null;
@@ -171,6 +173,7 @@ const puterConnectBtn = document.getElementById("puter-connect-btn");
 const puterDisconnectBtn = document.getElementById("puter-disconnect-btn");
 const puterEmailInput = document.getElementById("puter-email");
 const puterPasswordInput = document.getElementById("puter-password");
+const pendingImagesNote = document.getElementById("pending-images-note");
 const pendingFilesEl = document.getElementById("pending-files");
 const ingestBtn = document.getElementById("ingest-btn");
 const libraryFilesSummary = document.getElementById("library-files-summary");
@@ -233,11 +236,19 @@ const unlockConfirmBtn = document.getElementById("unlock-confirm-btn");
 const unlockCancelBtn = document.getElementById("unlock-cancel-btn");
 const unlockDialogBackdrop = document.getElementById("unlock-dialog-backdrop");
 
+const ocrDialog = document.getElementById("ocr-dialog");
+const ocrDialogFilename = document.getElementById("ocr-dialog-filename");
+const ocrDialogStatus = document.getElementById("ocr-dialog-status");
+const ocrExtractBtn = document.getElementById("ocr-extract-btn");
+const ocrCancelBtn = document.getElementById("ocr-cancel-btn");
+const ocrDialogBackdrop = document.getElementById("ocr-dialog-backdrop");
+
 async function hydrateDocuments(password) {
   isHydrating = true;
   setStatus("جارٍ تحميل المستندات…");
   try {
     state = normalizeState(await loadDocuments(password));
+    migrateDocumentOcrFlags(state.documents);
     renderLibrary();
     renderTrash();
     updateStoragePanel();
@@ -438,17 +449,30 @@ async function refreshPuterConnectPanel() {
 
 async function handlePuterConnect() {
   try {
-    setStatus("جارٍ الاتصال بـ Puter AI…");
+    const inDialog = ocrDialog && !ocrDialog.classList.contains("hidden");
+    if (inDialog) {
+      setOcrDialogStatus("جارٍ الاتصال بـ Puter AI…");
+    } else {
+      setStatus("جارٍ الاتصال بـ Puter AI…");
+    }
     await loginToPuter({
       email: puterEmailInput?.value,
       password: puterPasswordInput?.value,
     });
     if (puterPasswordInput) puterPasswordInput.value = "";
     await refreshPuterConnectPanel();
-    setStatus("تم الاتصال بـ Puter AI.", true);
-    setTimeout(() => setStatus("", false), 2000);
+    if (inDialog) {
+      setOcrDialogStatus("تم الاتصال بـ Puter AI.", false);
+    } else {
+      setStatus("تم الاتصال بـ Puter AI.", true);
+      setTimeout(() => setStatus("", false), 2000);
+    }
   } catch (error) {
-    setStatus(error.message, true);
+    if (ocrDialog && !ocrDialog.classList.contains("hidden")) {
+      setOcrDialogStatus(error.message, true);
+    } else {
+      setStatus(error.message, true);
+    }
   }
 }
 
@@ -573,10 +597,36 @@ function largeIconMarkup(group) {
   return `<div class="file-icon-large ${group}" aria-hidden="true">${icon}</div>`;
 }
 
+function migrateDocumentOcrFlags(documents) {
+  for (const doc of documents) {
+    if (!isImageFile(doc?.filename)) continue;
+    if (doc.ocrExtracted === true || doc.ocrExtracted === false) continue;
+    doc.ocrExtracted = Boolean((doc.charCount || 0) > 0 && doc.chunks?.length);
+  }
+}
+
+function updatePendingImagesNote() {
+  const hasImages = pendingFiles.some((file) => isImageFile(file.name));
+  pendingImagesNote?.classList.toggle("hidden", !hasImages);
+}
+
+function setOcrDialogStatus(message, isError = false) {
+  if (!ocrDialogStatus) return;
+  if (!message) {
+    ocrDialogStatus.textContent = "";
+    ocrDialogStatus.classList.add("hidden");
+    ocrDialogStatus.classList.remove("error");
+    return;
+  }
+  ocrDialogStatus.textContent = message;
+  ocrDialogStatus.classList.remove("hidden");
+  ocrDialogStatus.classList.toggle("error", isError);
+}
 function setPendingFiles(files) {
   syncPreviewUrls(files, isImageFile);
   pendingFiles = [...files];
   renderPendingFiles();
+  updatePendingImagesNote();
   updateUploadAccess();
 }
 
@@ -593,7 +643,7 @@ function renderPendingFileCard(file, index) {
     <article class="pending-file-card${image ? " is-image" : ""}">
       ${visual}
       <div class="pending-file-name">${escapeHtml(file.name)}</div>
-      <div class="pending-file-size">${formatFileSize(file.size)}${image ? " · OCR" : ""}</div>
+      <div class="pending-file-size">${formatFileSize(file.size)}${image ? " · صورة" : ""}</div>
       <button class="pending-file-remove" type="button" data-index="${index}">إزالة</button>
     </article>`;
 }
@@ -785,24 +835,11 @@ async function extractPdfText(arrayBuffer) {
   return parts.join("\n").trim();
 }
 
-async function extractText(file, arrayBuffer, { onOcrProgress } = {}) {
+async function extractText(file, arrayBuffer) {
   const name = String(file?.name || "");
   const buffer = arrayBuffer || (await file.arrayBuffer());
   if (isImageFile(name)) {
-    const result = await extractImageText(
-      new Blob([buffer], { type: file.type || "image/jpeg" }),
-      onOcrProgress,
-      { engine: readOcrEngineFromForm() }
-    );
-    if (result && typeof result === "object" && result.fallbackFrom) {
-      onOcrProgress?.({
-        stage: "ocr",
-        pct: 100,
-        engine: result.engine,
-        fallbackReason: "done",
-      });
-    }
-    return typeof result === "string" ? result : result.text;
+    throw new Error("استخراج نص الصور يتم من صفحة الملفات بعد الفهرسة.");
   }
   if (fileEndsWith(name, ".pdf")) return extractPdfText(buffer);
   if (fileEndsWith(name, ".docx")) return extractDocxText(buffer);
@@ -1069,6 +1106,106 @@ function findDocumentById(id) {
   return state.documents.find((doc) => doc.id === id);
 }
 
+function guessImageMime(filename) {
+  const ext = fileExtension(filename).toLowerCase();
+  const map = {
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp",
+    gif: "image/gif",
+    bmp: "image/bmp",
+    tif: "image/tiff",
+    tiff: "image/tiff",
+  };
+  return map[ext] || "image/jpeg";
+}
+
+async function getDocumentBlob(doc) {
+  let bytes;
+  if (doc.fileData) {
+    bytes = Uint8Array.from(atob(doc.fileData), (char) => char.charCodeAt(0));
+  } else if (doc.driveFileId) {
+    bytes = new Uint8Array(await downloadDriveFile(doc.driveFileId));
+  } else if (doc.megaFileId) {
+    bytes = new Uint8Array(await downloadMegaFile(doc.megaFileId));
+  } else if (doc.onedriveFileId) {
+    bytes = new Uint8Array(await downloadOneDriveFile(doc.onedriveFileId));
+  } else {
+    throw new Error("تعذّر الوصول إلى ملف الصورة. أعد رفع الصورة.");
+  }
+  return new Blob([bytes], { type: guessImageMime(doc.filename) });
+}
+
+async function extractOcrForDocument(doc) {
+  const blob = await getDocumentBlob(doc);
+  const result = await extractImageText(blob, (progress) => {
+    setOcrDialogStatus(`${formatOcrProgress(progress)} — ${doc.filename}`);
+  }, { engine: readOcrEngineFromForm(ocrDialog || document) });
+  const text = typeof result === "string" ? result : result.text;
+  if (!text) throw new Error("لم يُعثر على نص في الصورة.");
+  return text;
+}
+
+function openOcrDialog(docId) {
+  const doc = findDocumentById(docId);
+  if (!doc || !isImageFile(doc.filename)) return;
+  if (doc.isLocked && !isDocUnlocked(doc)) {
+    openUnlockDialog(docId, "ocr");
+    return;
+  }
+
+  pendingOcrId = docId;
+  if (ocrDialogFilename) {
+    ocrDialogFilename.textContent = doc.ocrExtracted
+      ? `إعادة استخراج النص من: ${doc.filename}`
+      : `الملف: ${doc.filename}`;
+  }
+  setOcrDialogStatus("");
+  updateOcrEnginePanel();
+  ocrExtractBtn.disabled = false;
+  ocrDialog?.classList.remove("hidden");
+}
+
+function closeOcrDialog() {
+  pendingOcrId = null;
+  setOcrDialogStatus("");
+  ocrExtractBtn.disabled = false;
+  ocrDialog?.classList.add("hidden");
+}
+
+async function confirmOcrExtract() {
+  if (!pendingOcrId) return;
+  const doc = findDocumentById(pendingOcrId);
+  if (!doc) return closeOcrDialog();
+
+  ocrExtractBtn.disabled = true;
+  setOcrDialogStatus(`جارٍ استخراج النص من ${doc.filename}…`);
+  try {
+    const text = await extractOcrForDocument(doc);
+    const category = assignCategory(text, doc.filename, state.documents.filter((item) => item.id !== doc.id));
+    doc.category = category;
+    doc.charCount = text.length;
+    doc.preview = text.replace(/\s+/g, " ").slice(0, 280);
+    doc.chunks = chunkText(text).map((content) => ({ content }));
+    doc.ocrExtracted = true;
+
+    setStatus("جارٍ حفظ النص المستخرج…");
+    await persistState();
+    renderLibrary();
+    setOcrDialogStatus("تم استخراج النص وحفظه بنجاح.", false);
+    setStatus("تم استخراج النص من الصورة.", true);
+    setTimeout(() => {
+      closeOcrDialog();
+      setStatus("", false);
+    }, 1200);
+  } catch (error) {
+    setOcrDialogStatus(error.message, true);
+    setStatus(`تعذّر استخراج النص: ${error.message}`, true);
+    ocrExtractBtn.disabled = false;
+  }
+}
+
 async function downloadDocument(doc) {
   try {
     let bytes;
@@ -1333,6 +1470,8 @@ async function confirmUnlock() {
 
   if (action === "download") {
     downloadDocument(doc);
+  } else if (action === "ocr") {
+    openOcrDialog(docId);
   } else {
     setStatus("تم فتح الملف المقفل.", true);
     setTimeout(() => setStatus("", false), 2000);
@@ -1352,21 +1491,51 @@ async function ingestFiles(files) {
     for (const file of files) {
       const arrayBuffer = await file.arrayBuffer();
       const image = isImageFile(file.name);
+      const backend = getActiveStorageBackend();
+      const blob = new Blob([arrayBuffer]);
+
       if (image) {
-        setStatus(`جارٍ استخراج النص من الصورة (OCR): ${file.name}…`);
+        const category = assignCategory("", file.name, state.documents);
+        let fileData = null;
+        let driveFileId = null;
+        let megaFileId = null;
+        let onedriveFileId = null;
+
+        if (backend === STORAGE_BACKENDS.DRIVE) {
+          driveFileId = await uploadDriveDocumentFile(category, file.name, blob);
+        } else if (backend === STORAGE_BACKENDS.MEGA) {
+          megaFileId = await uploadMegaDocumentFile(category, file.name, blob);
+        } else if (backend === STORAGE_BACKENDS.ONEDRIVE) {
+          onedriveFileId = await uploadOneDriveDocumentFile(category, file.name, blob);
+        } else {
+          fileData = arrayBufferToBase64(arrayBuffer);
+        }
+
+        state.documents.push({
+          id: crypto.randomUUID(),
+          filename: file.name,
+          category,
+          fileGroup: fileGroup(file.name),
+          extension: fileExtension(file.name),
+          charCount: 0,
+          preview: IMAGE_NO_OCR_PREVIEW,
+          fileData,
+          driveFileId,
+          megaFileId,
+          onedriveFileId,
+          storageBackend: backend,
+          chunks: [],
+          ocrExtracted: false,
+          isLocked: false,
+          lockHash: null,
+        });
+        continue;
       }
-      const text = await extractText(file, arrayBuffer, {
-        onOcrProgress: (progress) => {
-          if (image) {
-            setStatus(`${formatOcrProgress(progress)} — ${file.name}`);
-          }
-        },
-      });
+
+      const text = await extractText(file, arrayBuffer);
       if (!text) throw new Error(`لم يُعثر على نص في ${file.name}`);
       const category = assignCategory(text, file.name, state.documents);
       const chunks = chunkText(text).map((content) => ({ content }));
-      const backend = getActiveStorageBackend();
-      const blob = new Blob([arrayBuffer]);
       let fileData = null;
       let driveFileId = null;
       let megaFileId = null;
@@ -1378,9 +1547,6 @@ async function ingestFiles(files) {
         megaFileId = await uploadMegaDocumentFile(category, file.name, blob);
       } else if (backend === STORAGE_BACKENDS.ONEDRIVE) {
         onedriveFileId = await uploadOneDriveDocumentFile(category, file.name, blob);
-      } else if (backend === STORAGE_BACKENDS.GITHUB) {
-        const keepBinary = !image;
-        fileData = keepBinary ? arrayBufferToBase64(arrayBuffer) : null;
       } else {
         fileData = arrayBufferToBase64(arrayBuffer);
       }
@@ -1540,6 +1706,7 @@ initFileBrowser(fileBrowserRoot, {
   onRename: openRenameDialog,
   onLock: openLockDialog,
   onUnlock: handleUnlockButton,
+  onOcr: openOcrDialog,
   isDocUnlocked,
 });
 applySearchOptionsToForm(loadSearchOptions());
@@ -1553,7 +1720,11 @@ advancedSearchPanel?.querySelectorAll("input").forEach((input) => {
   });
 });
 
-document.getElementById("ocr-engine")?.addEventListener("change", (event) => {
+ocrExtractBtn?.addEventListener("click", () => confirmOcrExtract());
+ocrCancelBtn?.addEventListener("click", closeOcrDialog);
+ocrDialogBackdrop?.addEventListener("click", closeOcrDialog);
+
+document.getElementById("ocr-engine")?.addEventListener("change", () => {
   saveOcrOptions({ engine: readOcrEngineFromForm() });
   updateOcrEnginePanel();
 });
