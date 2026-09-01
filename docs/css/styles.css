@@ -2057,6 +2057,50 @@ html[data-theme="dark"] .pending-image-fields.is-incomplete {
   overflow: auto;
 }
 
+.fb-source-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.fb-source-section {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  overflow: hidden;
+}
+
+.fb-source-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+}
+
+.fb-source-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.fb-source-content {
+  padding: 0.85rem;
+}
+
+.fb-source-empty {
+  margin: 0;
+  padding: 1.25rem 1rem 1.5rem;
+}
+
+@media (max-width: 960px) {
+  .fb-source-split {
+    grid-template-columns: 1fr;
+  }
+}
+
 .fb-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));

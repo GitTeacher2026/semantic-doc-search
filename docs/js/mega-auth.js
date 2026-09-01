@@ -1,17 +1,21 @@
-const MEGA_MODULE_URL = "https://esm.sh/megajs@1.3.5/dist/main.browser-es.mjs";
+import { MEGA_EMAIL, MEGA_PASSWORD } from "./config.js";
 
-const EMAIL_KEY = "docshelf_mega_email";
+const MEGA_MODULE_URL = "https://esm.sh/megajs@1.3.5/dist/main.browser-es.mjs";
 
 let megaStorage = null;
 let megaEmail = null;
 let loginPromise = null;
+
+export function isMegaConfigured() {
+  return Boolean(String(MEGA_EMAIL || "").trim() && String(MEGA_PASSWORD || "").trim());
+}
 
 export function isMegaConnected() {
   return Boolean(megaStorage);
 }
 
 export function getMegaEmail() {
-  return megaEmail || sessionStorage.getItem(EMAIL_KEY) || "";
+  return megaEmail || String(MEGA_EMAIL || "").trim();
 }
 
 export function getMegaStorage() {
@@ -30,14 +34,13 @@ export function logoutMega() {
   megaStorage = null;
   megaEmail = null;
   loginPromise = null;
-  sessionStorage.removeItem(EMAIL_KEY);
 }
 
 export async function loginToMega(email, password) {
   const normalizedEmail = String(email || "").trim();
   const normalizedPassword = String(password || "");
   if (!normalizedEmail || !normalizedPassword) {
-    throw new Error("أدخل بريد MEGA وكلمة المرور.");
+    throw new Error("بيانات اعتماد MEGA غير متوفرة.");
   }
 
   if (loginPromise) return loginPromise;
@@ -52,7 +55,6 @@ export async function loginToMega(email, password) {
     await storage.ready;
     megaStorage = storage;
     megaEmail = normalizedEmail;
-    sessionStorage.setItem(EMAIL_KEY, normalizedEmail);
     return storage;
   })();
 
@@ -61,4 +63,10 @@ export async function loginToMega(email, password) {
   } finally {
     loginPromise = null;
   }
+}
+
+export async function ensureMegaAutoLogin() {
+  if (isMegaConnected()) return megaStorage;
+  if (!isMegaConfigured()) return null;
+  return loginToMega(MEGA_EMAIL, MEGA_PASSWORD);
 }

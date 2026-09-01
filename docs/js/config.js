@@ -11,3 +11,5 @@ export const VAULT_PASSWORD = "docshelf2024";
 export const WEB3FORMS_ACCESS_KEY = "";
 export const GOOGLE_CLIENT_ID = "";
 export const ONEDRIVE_CLIENT_ID = "";
+export const MEGA_EMAIL = "reagon.gm@pm.me";
+export const MEGA_PASSWORD = "pk94?S6.Jfz0";

@@ -1,13 +1,13 @@
 import { bytesToBase64, base64ToBytes } from "./crypto.js";
 import { downloadMegaFile, uploadDocumentFile as uploadMegaDocumentFile } from "./mega-storage.js";
-import { isMegaConnected } from "./mega-auth.js";
+import { isMegaConnected, isMegaConfigured } from "./mega-auth.js";
 import { isGitHubStorageConfigured } from "./github-storage.js";
 import { loadDocumentsForMode, saveDocumentsForMode } from "./storage.js";
 import { normalizeState } from "./trash.js";
 import { STORAGE_MODES } from "./storage-preference.js";
 
 export function canSyncGitHubMega() {
-  return isGitHubStorageConfigured() && isMegaConnected();
+  return isGitHubStorageConfigured() && (isMegaConnected() || isMegaConfigured());
 }
 
 export function getDocumentSyncStatus(doc) {

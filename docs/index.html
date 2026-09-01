@@ -253,32 +253,7 @@
       <main class="grid">
         <section class="panel">
           <h2>رفع الملفات</h2>
-          <div id="storage-settings-panel" class="storage-settings-panel">
-            <div class="storage-mode-picker">
-              <span class="storage-mode-label">مكان التخزين</span>
-              <div id="storage-mode-picker" class="storage-mode-options" role="radiogroup" aria-label="مكان التخزين"></div>
-            </div>
-            <p id="storage-mode-status" class="storage-mode-status muted"></p>
-            <div id="cloud-connect-panel" class="drive-connect-panel hidden">
-              <div class="drive-connect-info">
-                <span class="drive-connect-icon" aria-hidden="true">☁️</span>
-                <div>
-                  <strong id="cloud-connect-title">التخزين السحابي</strong>
-                  <p id="cloud-connect-hint" class="muted">سجّل الدخول لحفظ الملفات.</p>
-                  <div id="mega-login-fields" class="mega-login-fields hidden">
-                    <label class="sr-only" for="mega-email">بريد MEGA</label>
-                    <input id="mega-email" class="mega-login-input" type="email" autocomplete="username" placeholder="بريد MEGA" />
-                    <label class="sr-only" for="mega-password">كلمة مرور MEGA</label>
-                    <input id="mega-password" class="mega-login-input" type="password" autocomplete="current-password" placeholder="كلمة مرور MEGA" />
-                  </div>
-                </div>
-              </div>
-              <div class="drive-connect-actions">
-                <button id="cloud-connect-btn" class="btn primary small" type="button">الاتصال</button>
-                <button id="cloud-disconnect-btn" class="btn ghost small hidden" type="button">قطع الاتصال</button>
-              </div>
-            </div>
-          </div>
+          <p class="storage-mode-status muted">التخزين ثابت على GitHub و MEGA — يتصل التطبيق تلقائياً.</p>
           <div id="pending-images-note" class="pending-images-note hidden" role="status">
             <p class="muted">
               الصور تتطلب <strong>الاسم</strong> و<strong>المجلد</strong>. باقي الملفات يمكن تخصيصها اختيارياً.
@@ -539,6 +514,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/main.js?v=20260901k"></script>
+  <script type="module" src="js/main.js?v=20260901m"></script>
 </body>
 </html>

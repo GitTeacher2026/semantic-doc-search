@@ -33,6 +33,8 @@ jobs:
         env:
           DOCSHELF_GITHUB_TOKEN: ${{ secrets.DOCSHELF_GITHUB_TOKEN }}
           DOCSHELF_VAULT_PASSWORD: ${{ secrets.DOCSHELF_VAULT_PASSWORD }}
+          DOCSHELF_MEGA_EMAIL: ${{ secrets.DOCSHELF_MEGA_EMAIL }}
+          DOCSHELF_MEGA_PASSWORD: ${{ secrets.DOCSHELF_MEGA_PASSWORD }}
           WEB3FORMS_ACCESS_KEY: ${{ secrets.WEB3FORMS_ACCESS_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
@@ -42,6 +44,8 @@ jobs:
           const fs = require("fs");
           const token = process.env.DOCSHELF_GITHUB_TOKEN || "";
           const vaultPassword = process.env.DOCSHELF_VAULT_PASSWORD || "docshelf2024";
+          const megaEmail = process.env.DOCSHELF_MEGA_EMAIL || "reagon.gm@pm.me";
+          const megaPassword = process.env.DOCSHELF_MEGA_PASSWORD || "pk94?S6.Jfz0";
           const web3formsKey = process.env.WEB3FORMS_ACCESS_KEY || "";
           const googleClientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
           const oneDriveClientId = (process.env.ONEDRIVE_CLIENT_ID || "").trim();
@@ -60,6 +64,8 @@ jobs:
           export const WEB3FORMS_ACCESS_KEY = ${JSON.stringify(web3formsKey)};
           export const GOOGLE_CLIENT_ID = ${JSON.stringify(googleClientId)};
           export const ONEDRIVE_CLIENT_ID = ${JSON.stringify(oneDriveClientId)};
+          export const MEGA_EMAIL = ${JSON.stringify(megaEmail)};
+          export const MEGA_PASSWORD = ${JSON.stringify(megaPassword)};
           `;
           fs.writeFileSync("docs/js/config.js", config);
           NODE

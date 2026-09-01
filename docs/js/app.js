@@ -84,12 +84,7 @@ import {
   logoutGoogleDrive,
 } from "./drive-auth.js";
 import { downloadDriveFile, renameDriveFile, uploadDocumentFile as uploadDriveDocumentFile } from "./drive-storage.js";
-import {
-  getMegaEmail,
-  isMegaConnected,
-  loginToMega,
-  logoutMega,
-} from "./mega-auth.js";
+import { isMegaConnected, ensureMegaAutoLogin } from "./mega-auth.js";
 import {
   downloadMegaFile,
   renameMegaFile,
@@ -186,17 +181,6 @@ const pendingUsersList = document.getElementById("pending-users-list");
 const resendEmailBtn = document.getElementById("resend-email-btn");
 const dropZone = document.getElementById("drop-zone");
 const fileInput = document.getElementById("file-input");
-const storageSettingsPanel = document.getElementById("storage-settings-panel");
-const storageModePicker = document.getElementById("storage-mode-picker");
-const storageModeStatus = document.getElementById("storage-mode-status");
-const cloudConnectPanel = document.getElementById("cloud-connect-panel");
-const cloudConnectTitle = document.getElementById("cloud-connect-title");
-const cloudConnectHint = document.getElementById("cloud-connect-hint");
-const cloudConnectBtn = document.getElementById("cloud-connect-btn");
-const cloudDisconnectBtn = document.getElementById("cloud-disconnect-btn");
-const megaLoginFields = document.getElementById("mega-login-fields");
-const megaEmailInput = document.getElementById("mega-email");
-const megaPasswordInput = document.getElementById("mega-password");
 const puterConnectPanel = document.getElementById("puter-connect-panel");
 const puterConnectTitle = document.getElementById("puter-connect-title");
 const puterConnectHint = document.getElementById("puter-connect-hint");
@@ -288,7 +272,6 @@ async function hydrateDocuments(password) {
     migrateDocumentOcrFlags(state.documents);
     renderLibrary();
     renderTrash();
-    updateStoragePanel();
     updateUploadAccess();
     setStatus("", false);
   } catch (error) {
@@ -311,153 +294,31 @@ function isAuthed() {
 }
 
 function canUploadFiles() {
-  const mode = getResolvedStorageMode();
-  if (mode === STORAGE_MODES.LOCAL) return true;
-  if (mode === STORAGE_MODES.GITHUB) return isUsingGitHubStorage();
-  if (mode === STORAGE_MODES.DRIVE) return isUsingDriveStorage();
-  if (mode === STORAGE_MODES.MEGA) return isUsingMegaStorage();
-  if (mode === STORAGE_MODES.ONEDRIVE) return isUsingOneDriveStorage();
-  return false;
+  if (isUsingGitHubStorage()) return true;
+  if (isMegaConnected()) return true;
+  return getResolvedStorageMode() === STORAGE_MODES.LOCAL;
 }
 
-function isCloudMode(mode = getResolvedStorageMode()) {
-  return mode !== STORAGE_MODES.LOCAL;
-}
+async function attachRemoteFileTargets(category, filename, blob, fileBytes) {
+  let fileData = null;
+  let megaFileId = null;
 
-function cloudModeNeedsAuth(mode = getResolvedStorageMode()) {
-  return mode === STORAGE_MODES.DRIVE || mode === STORAGE_MODES.MEGA || mode === STORAGE_MODES.ONEDRIVE;
-}
-
-function renderStorageModePicker() {
-  if (!storageModePicker) return;
-  const modes = getAvailableStorageModes();
-  const current = getResolvedStorageMode();
-  storageModePicker.replaceChildren(
-    ...modes.map((mode) => {
-      const label = document.createElement("label");
-      label.className = "storage-mode-option";
-      const input = document.createElement("input");
-      input.type = "radio";
-      input.name = "storage-mode";
-      input.value = mode.id;
-      input.checked = mode.id === current;
-      label.append(input, document.createTextNode(` ${mode.label}`));
-      return label;
-    })
-  );
-}
-
-function updateCloudConnectPanel() {
-  const mode = getResolvedStorageMode();
-  const needsAuth = cloudModeNeedsAuth(mode);
-  cloudConnectPanel?.classList.toggle("hidden", !needsAuth);
-  megaLoginFields?.classList.toggle("hidden", mode !== STORAGE_MODES.MEGA);
-
-  if (!needsAuth) return;
-
-  if (mode === STORAGE_MODES.DRIVE) {
-    cloudConnectTitle.textContent = "Google Drive";
-    cloudConnectHint.textContent = isDriveConnected()
-      ? "متصل — يُحفظ الفهرس والملفات في مجلد مخزن الوثائق."
-      : "سجّل الدخول بحساب Google المصرّح به لحفظ الملفات.";
-    cloudConnectBtn.textContent = isDriveConnected() ? "إعادة الاتصال" : "الاتصال بـ Google Drive";
-    cloudDisconnectBtn.classList.toggle("hidden", !isDriveConnected());
-  } else if (mode === STORAGE_MODES.MEGA) {
-    cloudConnectTitle.textContent = "MEGA";
-    cloudConnectHint.textContent = isMegaConnected()
-      ? `متصل كـ ${getMegaEmail()}`
-      : "أدخل بريد MEGA وكلمة المرور — تُستخدم للجلسة الحالية فقط.";
-    cloudConnectBtn.textContent = isMegaConnected() ? "إعادة الاتصال" : "الاتصال بـ MEGA";
-    cloudDisconnectBtn.classList.toggle("hidden", !isMegaConnected());
-    if (megaEmailInput && !megaEmailInput.value) {
-      megaEmailInput.value = getMegaEmail();
-    }
-  } else if (mode === STORAGE_MODES.ONEDRIVE) {
-    cloudConnectTitle.textContent = "OneDrive";
-    cloudConnectHint.textContent = isOneDriveConnected()
-      ? "متصل — يُحفظ الفهرس والملفات في مجلد مخزن الوثائق."
-      : "سجّل الدخول بحساب Microsoft المصرّح به.";
-    cloudConnectBtn.textContent = isOneDriveConnected() ? "إعادة الاتصال" : "الاتصال بـ OneDrive";
-    cloudDisconnectBtn.classList.toggle("hidden", !isOneDriveConnected());
+  if (isUsingGitHubStorage()) {
+    fileData = arrayBufferToBase64(fileBytes);
   }
-}
-
-function updateStoragePanel() {
-  const modes = getAvailableStorageModes();
-  storageSettingsPanel?.classList.toggle("hidden", modes.length === 0);
-  renderStorageModePicker();
-  updateCloudConnectPanel();
-
-  const mode = getResolvedStorageMode();
-  const label = getStorageModeLabel(mode);
-  const hint = getStorageModeHint(mode);
-  if (storageModeStatus) {
-    const syncHint =
-      isGitHubStorageConfigured() && isMegaConnected()
-        ? " · المزامنة بين GitHub و MEGA متاحة من صفحة الملفات"
-        : "";
-    if (!canUploadFiles() && isCloudMode(mode)) {
-      storageModeStatus.textContent = `${label}: ${hint} — يلزم الاتصال قبل الرفع.${syncHint}`;
-    } else if (isCloudSyncEnabled()) {
-      storageModeStatus.textContent = `${label}: ${hint}${syncHint}`;
-    } else {
-      storageModeStatus.textContent = `${label}: ${hint}${syncHint}`;
-    }
+  if (isMegaConnected()) {
+    megaFileId = await uploadMegaDocumentFile(category, filename, blob);
   }
-}
 
-async function handleStorageModeChange(nextMode) {
-  if (!nextMode || nextMode === getResolvedStorageMode()) return;
-  setStorageMode(nextMode);
-  clearStorageSession();
-  updateStoragePanel();
-  updateUploadAccess();
-  if (!sessionPassword) return;
-  try {
-    setStatus("جارٍ تحميل المستندات من مصدر التخزين الجديد…");
-    await hydrateDocuments(sessionPassword);
-  } catch (error) {
-    setStatus(`تعذّر تحميل المستندات: ${error.message}`, true);
-  }
-}
-
-async function handleCloudConnect() {
-  const mode = getResolvedStorageMode();
-  try {
-    if (mode === STORAGE_MODES.DRIVE) {
-      setStatus("جارٍ الاتصال بـ Google Drive…");
-      await loginToGoogleDrive();
-    } else if (mode === STORAGE_MODES.MEGA) {
-      setStatus("جارٍ الاتصال بـ MEGA…");
-      await loginToMega(megaEmailInput?.value, megaPasswordInput?.value);
-      if (megaPasswordInput) megaPasswordInput.value = "";
-    } else if (mode === STORAGE_MODES.ONEDRIVE) {
-      setStatus("جارٍ الاتصال بـ OneDrive…");
-      await loginToOneDrive();
-    }
-    clearStorageSession();
-    updateStoragePanel();
-    updateUploadAccess();
-    if (sessionPassword) {
-      await hydrateDocuments(sessionPassword);
-    }
-    setStatus("تم الاتصال بنجاح.", true);
-    setTimeout(() => setStatus("", false), 2000);
-  } catch (error) {
-    setStatus(error.message, true);
-  }
-}
-
-function handleCloudDisconnect() {
-  const mode = getResolvedStorageMode();
-  if (mode === STORAGE_MODES.DRIVE) logoutGoogleDrive();
-  if (mode === STORAGE_MODES.MEGA) logoutMega();
-  if (mode === STORAGE_MODES.ONEDRIVE) logoutOneDrive();
-  clearStorageSession();
-  updateStoragePanel();
-  updateUploadAccess();
-  setStatus("تم قطع الاتصال.", true);
-  setTimeout(() => setStatus("", false), 2000);
+  return {
+    fileData,
+    megaFileId,
+    driveFileId: null,
+    onedriveFileId: null,
+    ...(fileData && megaFileId
+      ? {}
+      : { storageBackend: fileData ? STORAGE_BACKENDS.GITHUB : megaFileId ? STORAGE_BACKENDS.MEGA : STORAGE_BACKENDS.LOCAL }),
+  };
 }
 
 function updatePuterConnectPanel() {
@@ -664,7 +525,6 @@ function showView() {
     renderLibrary();
     renderTrash();
     refreshAdminToolbar();
-    updateStoragePanel();
     updateUploadAccess();
     switchAppPage("library");
   }
@@ -2037,7 +1897,6 @@ async function ingestFiles(items) {
       const file = item.file;
       const fileBytes = new Uint8Array(await file.arrayBuffer());
       const image = isImageFile(file.name);
-      const backend = getActiveStorageBackend();
       const blob = new Blob([fileBytes]);
 
       if (image) {
@@ -2055,20 +1914,12 @@ async function ingestFiles(items) {
           throw new Error(`يوجد ملف بنفس الاسم «${uploadName}». غيّر الاسم أو احذف النسخة القديمة.`);
         }
 
-        let fileData = null;
-        let driveFileId = null;
-        let megaFileId = null;
-        let onedriveFileId = null;
-
-        if (backend === STORAGE_BACKENDS.DRIVE) {
-          driveFileId = await uploadDriveDocumentFile(category, uploadName, blob);
-        } else if (backend === STORAGE_BACKENDS.MEGA) {
-          megaFileId = await uploadMegaDocumentFile(category, uploadName, blob);
-        } else if (backend === STORAGE_BACKENDS.ONEDRIVE) {
-          onedriveFileId = await uploadOneDriveDocumentFile(category, uploadName, blob);
-        } else {
-          fileData = arrayBufferToBase64(fileBytes);
-        }
+        const remoteTargets = await attachRemoteFileTargets(
+          category,
+          uploadName,
+          blob,
+          fileBytes
+        );
 
         state.documents.push({
           id: crypto.randomUUID(),
@@ -2078,11 +1929,7 @@ async function ingestFiles(items) {
           extension: fileExtension(uploadName),
           charCount: 0,
           preview: IMAGE_NO_OCR_PREVIEW,
-          fileData,
-          driveFileId,
-          megaFileId,
-          onedriveFileId,
-          storageBackend: backend,
+          ...remoteTargets,
           chunks: [],
           ocrExtracted: false,
           isLocked: false,
@@ -2112,20 +1959,12 @@ async function ingestFiles(items) {
       }
 
       const chunks = chunkText(text).map((content) => ({ content }));
-      let fileData = null;
-      let driveFileId = null;
-      let megaFileId = null;
-      let onedriveFileId = null;
-
-      if (backend === STORAGE_BACKENDS.DRIVE) {
-        driveFileId = await uploadDriveDocumentFile(category, filename, blob);
-      } else if (backend === STORAGE_BACKENDS.MEGA) {
-        megaFileId = await uploadMegaDocumentFile(category, filename, blob);
-      } else if (backend === STORAGE_BACKENDS.ONEDRIVE) {
-        onedriveFileId = await uploadOneDriveDocumentFile(category, filename, blob);
-      } else {
-        fileData = arrayBufferToBase64(fileBytes);
-      }
+      const remoteTargets = await attachRemoteFileTargets(
+        category,
+        filename,
+        blob,
+        fileBytes
+      );
 
       state.documents.push({
         id: crypto.randomUUID(),
@@ -2135,11 +1974,7 @@ async function ingestFiles(items) {
         extension: fileExtension(filename),
         charCount: text.length,
         preview: text.replace(/\s+/g, " ").slice(0, 280),
-        fileData,
-        driveFileId,
-        megaFileId,
-        onedriveFileId,
-        storageBackend: backend,
+        ...remoteTargets,
         chunks,
         isLocked: false,
         lockHash: null,
@@ -2149,12 +1984,12 @@ async function ingestFiles(items) {
     await persistState();
     renderLibrary();
     setStatus(
-      isUsingRemoteFileStorage()
-        ? `اكتملت الفهرسة وحُفظت في ${getStorageModeLabel()}.`
+      canSyncGitHubMega()
+        ? "اكتملت الفهرسة وحُفظت في GitHub و MEGA."
         : isUsingGitHubStorage()
           ? "اكتملت الفهرسة وحُفظت في GitHub."
-          : isCloudSyncEnabled()
-            ? "اكتملت الفهرسة وحُفظت في التخزين السحابي."
+          : isMegaConnected()
+            ? "اكتملت الفهرسة وحُفظت في MEGA."
             : "اكتملت الفهرسة.",
       true
     );
@@ -2346,21 +2181,6 @@ document.getElementById("ocr-engine")?.addEventListener("change", () => {
   updateOcrEnginePanel();
 });
 
-storageModePicker?.addEventListener("change", (event) => {
-  const target = event.target;
-  if (target?.name === "storage-mode" && target.checked) {
-    handleStorageModeChange(target.value);
-  }
-});
-
-cloudConnectBtn?.addEventListener("click", () => {
-  handleCloudConnect();
-});
-
-cloudDisconnectBtn?.addEventListener("click", () => {
-  handleCloudDisconnect();
-});
-
 puterConnectBtn?.addEventListener("click", () => {
   handlePuterConnect();
 });
@@ -2381,10 +2201,11 @@ export async function startApp({ user, auth }) {
   });
 
   try {
+    setStatus("جارٍ الاتصال بـ MEGA…");
+    await ensureMegaAutoLogin();
     await hydrateDocuments(sessionPassword);
     applySearchOptionsToForm(loadSearchOptions());
     updateOcrEnginePanel();
-    updateStoragePanel();
     updateUploadAccess();
     showView();
   } catch (error) {

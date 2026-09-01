@@ -279,6 +279,58 @@ function renderStorageBadges(doc) {
     .join("");
 }
 
+function shouldRenderSplitSources() {
+  return (
+    browserOptions.dualSources &&
+    !browserState.storage &&
+    !browserState.category &&
+    !browserState.group &&
+    !normalizeQuery(browserState.query)
+  );
+}
+
+function renderSourceSection(title, icon, storage, docs) {
+  if (!docs.length) {
+    return `
+      <section class="fb-source-section">
+        <header class="fb-source-header">
+          <h3>${icon} ${escapeHtml(title)}</h3>
+          <span class="muted">0 ملف</span>
+        </header>
+        <p class="fb-source-empty muted">لا توجد ملفات في هذا المصدر.</p>
+      </section>`;
+  }
+
+  const content =
+    browserState.view === "list"
+      ? `<div class="fb-list">
+          <div class="fb-list-header muted">
+            <span>الملف</span><span>التصنيف</span><span>التخزين</span><span>الحجم</span><span>إجراءات</span>
+          </div>
+          ${docs.map((doc) => renderListRow(doc)).join("")}
+        </div>`
+      : `<div class="fb-grid">${docs.map((doc) => renderGridItem(doc)).join("")}</div>`;
+
+  return `
+    <section class="fb-source-section" data-source-section="${storage}">
+      <header class="fb-source-header">
+        <h3>${icon} ${escapeHtml(title)}</h3>
+        <span class="muted">${docs.length.toLocaleString("ar-EG")} ملف</span>
+      </header>
+      <div class="fb-source-content" data-drop-category="">${content}</div>
+    </section>`;
+}
+
+function renderSplitSourceContent(filtered) {
+  const githubDocs = filtered.filter((doc) => documentHasStorageBackend(doc, STORAGE_BACKENDS.GITHUB));
+  const megaDocs = filtered.filter((doc) => documentHasStorageBackend(doc, STORAGE_BACKENDS.MEGA));
+  return `
+    <div class="fb-source-split">
+      ${renderSourceSection("GitHub", getStorageBackendIcon(STORAGE_BACKENDS.GITHUB), STORAGE_BACKENDS.GITHUB, githubDocs)}
+      ${renderSourceSection("MEGA", getStorageBackendIcon(STORAGE_BACKENDS.MEGA), STORAGE_BACKENDS.MEGA, megaDocs)}
+    </div>`;
+}
+
 function renderGridItem(doc) {
   const groupName = doc.fileGroup || fileGroup(doc.filename);
   const lockedClass = doc.isLocked ? " is-locked" : "";
@@ -471,8 +523,9 @@ function renderContent(documents) {
       </div>`;
   }
 
-  const content =
-    browserState.view === "list"
+  const content = shouldRenderSplitSources()
+    ? renderSplitSourceContent(filtered)
+    : browserState.view === "list"
       ? `<div class="fb-list">
           <div class="fb-list-header muted">
             <span>الملف</span><span>التصنيف</span><span>التخزين</span><span>الحجم</span><span>إجراءات</span>

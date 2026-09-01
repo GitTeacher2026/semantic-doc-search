@@ -82,19 +82,14 @@ export function getDefaultStorageMode() {
   return STORAGE_MODES.LOCAL;
 }
 
-export function getStorageMode() {
-  try {
-    const saved = localStorage.getItem(STORAGE_PREF_KEY);
-    const allowed = new Set(getAvailableStorageModes().map((item) => item.id));
-    if (saved && allowed.has(saved)) return saved;
-  } catch {
-    /* ignore */
-  }
-  return getDefaultStorageMode();
+export function getResolvedStorageMode() {
+  if (isGitHubModeAvailable()) return STORAGE_MODES.GITHUB;
+  if (isMegaModeAvailable()) return STORAGE_MODES.MEGA;
+  return STORAGE_MODES.LOCAL;
 }
 
-export function getResolvedStorageMode() {
-  return getStorageMode();
+export function getStorageMode() {
+  return getResolvedStorageMode();
 }
 
 export function setStorageMode(mode) {

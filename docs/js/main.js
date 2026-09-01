@@ -7,7 +7,7 @@ import {
   isAuthenticated,
 } from "./auth-page.js";
 import { initTheme } from "./theme.js";
-import { startApp } from "./app.js?v=20260901k";
+import { startApp } from "./app.js?v=20260901m";
 
 initTheme();
 
