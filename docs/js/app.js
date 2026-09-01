@@ -128,7 +128,7 @@ const CHUNK_OVERLAP = 120;
 const IMAGE_NO_OCR_PREVIEW = "صورة — لم يُستخرج نص بعد";
 
 let currentAppPage = "library";
-let pendingFiles = [];
+let pendingItems = [];
 let state = normalizeState({});
 let sessionPassword = "";
 let isHydrating = false;
@@ -521,7 +521,74 @@ function updateUploadAccess() {
   const allowed = canUploadFiles();
   dropZone?.classList.toggle("is-disabled", !allowed);
   if (fileInput) fileInput.disabled = !allowed;
-  ingestBtn.disabled = !allowed || !pendingFiles.length;
+  updateIngestButtonState();
+}
+
+function getExistingCategories() {
+  const categories = new Set();
+  for (const doc of state.documents) {
+    if (doc.category) categories.add(doc.category);
+  }
+  return [...categories].sort((a, b) => a.localeCompare(b, "ar"));
+}
+
+function defaultImageBaseName(filename) {
+  const dot = String(filename || "").lastIndexOf(".");
+  return dot > 0 ? filename.slice(0, dot) : filename;
+}
+
+function sanitizeCategoryInput(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, " ")
+    .slice(0, 80);
+}
+
+function createPendingItem(file) {
+  const image = isImageFile(file.name);
+  return {
+    file,
+    meta: image
+      ? {
+          displayName: defaultImageBaseName(file.name),
+          folder: "",
+          newFolder: "",
+        }
+      : null,
+  };
+}
+
+function resolveImageCategory(meta) {
+  if (!meta) return "";
+  if (meta.folder === "__new__") {
+    return sanitizeCategoryInput(meta.newFolder);
+  }
+  return sanitizeCategoryInput(meta.folder);
+}
+
+function buildImageUploadFilename(displayName, originalName) {
+  const base = sanitizeFilenameInput(displayName);
+  if (!base) return "";
+  const ext = fileExtension(originalName);
+  if (!ext) return base;
+  const withoutExt = base.replace(new RegExp(`\\.${ext}$`, "i"), "");
+  return `${withoutExt}.${ext}`;
+}
+
+function isPendingImageReady(item) {
+  if (!item?.meta) return true;
+  const filename = buildImageUploadFilename(item.meta.displayName, item.file.name);
+  const category = resolveImageCategory(item.meta);
+  return Boolean(filename && category);
+}
+
+function updateIngestButtonState() {
+  if (!ingestBtn) return;
+  const allowed = canUploadFiles();
+  const hasItems = pendingItems.length > 0;
+  const imagesReady = pendingItems.every((item) => isPendingImageReady(item));
+  ingestBtn.disabled = !allowed || !hasItems || !imagesReady;
 }
 
 function showView() {
@@ -606,8 +673,21 @@ function migrateDocumentOcrFlags(documents) {
 }
 
 function updatePendingImagesNote() {
-  const hasImages = pendingFiles.some((file) => isImageFile(file.name));
+  const hasImages = pendingItems.some((item) => isImageFile(item.file.name));
   pendingImagesNote?.classList.toggle("hidden", !hasImages);
+}
+
+function setPendingItems(items) {
+  const files = items.map((item) => item.file);
+  syncPreviewUrls(files, isImageFile);
+  pendingItems = [...items];
+  renderPendingFiles();
+  updatePendingImagesNote();
+  updateIngestButtonState();
+}
+
+function setPendingFiles(files) {
+  setPendingItems(files.map((file) => createPendingItem(file)));
 }
 
 function setOcrDialogStatus(message, isError = false) {
@@ -622,15 +702,54 @@ function setOcrDialogStatus(message, isError = false) {
   ocrDialogStatus.classList.remove("hidden");
   ocrDialogStatus.classList.toggle("error", isError);
 }
-function setPendingFiles(files) {
-  syncPreviewUrls(files, isImageFile);
-  pendingFiles = [...files];
-  renderPendingFiles();
-  updatePendingImagesNote();
-  updateUploadAccess();
+
+function renderPendingFolderOptions(selected = "") {
+  const categories = getExistingCategories();
+  const options = [
+    `<option value=""${selected === "" ? " selected" : ""}>— اختر مجلداً —</option>`,
+    ...categories.map(
+      (category) =>
+        `<option value="${escapeHtml(category)}"${selected === category ? " selected" : ""}>${escapeHtml(category)}</option>`
+    ),
+    `<option value="__new__"${selected === "__new__" ? " selected" : ""}>+ مجلد جديد…</option>`,
+  ];
+  return options.join("");
 }
 
-function renderPendingFileCard(file, index) {
+function renderPendingImageFields(item, index) {
+  const meta = item.meta;
+  const ready = isPendingImageReady(item);
+  const showNewFolder = meta.folder === "__new__";
+  return `
+    <div class="pending-image-fields${ready ? "" : " is-incomplete"}">
+      <label class="pending-image-label" for="pending-image-name-${index}">اسم الصورة</label>
+      <input
+        id="pending-image-name-${index}"
+        class="pending-image-name-input"
+        type="text"
+        data-index="${index}"
+        value="${escapeHtml(meta.displayName)}"
+        placeholder="مثال: مخطط الطابق الثاني"
+        autocomplete="off"
+      />
+      <label class="pending-image-label" for="pending-image-folder-${index}">المجلد / الموقع</label>
+      <select id="pending-image-folder-${index}" class="pending-image-folder-select" data-index="${index}">
+        ${renderPendingFolderOptions(meta.folder)}
+      </select>
+      <input
+        class="pending-image-folder-new${showNewFolder ? "" : " hidden"}"
+        type="text"
+        data-index="${index}"
+        value="${escapeHtml(meta.newFolder)}"
+        placeholder="اسم المجلد الجديد"
+        autocomplete="off"
+      />
+      <p class="pending-image-hint muted">يُحفظ الملف في المجلد المحدد — استخراج النص لاحقاً من صفحة الملفات.</p>
+    </div>`;
+}
+
+function renderPendingFileCard(item, index) {
+  const file = item.file;
   const image = isImageFile(file.name);
   const previewUrl = image ? ensurePreviewUrl(file) : "";
   const visual = image
@@ -639,32 +758,93 @@ function renderPendingFileCard(file, index) {
       </button>`
     : largeIconMarkup(fileGroup(file.name));
 
+  if (image) {
+    return `
+      <article class="pending-file-card is-image">
+        ${visual}
+        ${renderPendingImageFields(item, index)}
+        <div class="pending-file-footer">
+          <span class="pending-file-size muted">${formatFileSize(file.size)} · ${escapeHtml(file.name)}</span>
+          <button class="pending-file-remove" type="button" data-index="${index}">إزالة</button>
+        </div>
+      </article>`;
+  }
+
   return `
-    <article class="pending-file-card${image ? " is-image" : ""}">
+    <article class="pending-file-card">
       ${visual}
       <div class="pending-file-name">${escapeHtml(file.name)}</div>
-      <div class="pending-file-size">${formatFileSize(file.size)}${image ? " · صورة" : ""}</div>
+      <div class="pending-file-size">${formatFileSize(file.size)}</div>
       <button class="pending-file-remove" type="button" data-index="${index}">إزالة</button>
     </article>`;
 }
 
+function bindPendingImageFields() {
+  pendingFilesEl.querySelectorAll(".pending-image-name-input").forEach((input) => {
+    input.addEventListener("input", () => {
+      const index = Number(input.dataset.index);
+      const item = pendingItems[index];
+      if (!item?.meta) return;
+      item.meta.displayName = input.value;
+      updateIngestButtonState();
+      input.closest(".pending-image-fields")?.classList.toggle("is-incomplete", !isPendingImageReady(item));
+    });
+  });
+
+  pendingFilesEl.querySelectorAll(".pending-image-folder-select").forEach((select) => {
+    select.addEventListener("change", () => {
+      const index = Number(select.dataset.index);
+      const item = pendingItems[index];
+      if (!item?.meta) return;
+      item.meta.folder = select.value;
+      const card = select.closest(".pending-file-card");
+      const newInput = card?.querySelector(".pending-image-folder-new");
+      if (newInput) {
+        newInput.classList.toggle("hidden", select.value !== "__new__");
+        if (select.value !== "__new__") {
+          item.meta.newFolder = "";
+          newInput.value = "";
+        } else {
+          newInput.focus();
+        }
+      }
+      updateIngestButtonState();
+      card?.querySelector(".pending-image-fields")?.classList.toggle("is-incomplete", !isPendingImageReady(item));
+    });
+  });
+
+  pendingFilesEl.querySelectorAll(".pending-image-folder-new").forEach((input) => {
+    input.addEventListener("input", () => {
+      const index = Number(input.dataset.index);
+      const item = pendingItems[index];
+      if (!item?.meta) return;
+      item.meta.newFolder = input.value;
+      updateIngestButtonState();
+      input.closest(".pending-image-fields")?.classList.toggle("is-incomplete", !isPendingImageReady(item));
+    });
+  });
+}
+
 function renderPendingFiles() {
-  if (!pendingFiles.length) {
+  if (!pendingItems.length) {
     pendingFilesEl.classList.add("hidden");
+    pendingFilesEl.classList.remove("has-images");
     pendingFilesEl.innerHTML = "";
     return;
   }
 
+  const hasImages = pendingItems.some((item) => isImageFile(item.file.name));
   pendingFilesEl.classList.remove("hidden");
-  pendingFilesEl.innerHTML = pendingFiles
-    .map((file, index) => renderPendingFileCard(file, index))
+  pendingFilesEl.classList.toggle("has-images", hasImages);
+  pendingFilesEl.innerHTML = pendingItems
+    .map((item, index) => renderPendingFileCard(item, index))
     .join("");
 
   pendingFilesEl.querySelectorAll(".pending-file-thumb").forEach((btn) => {
     btn.addEventListener("click", (event) => {
       event.stopPropagation();
       const index = Number(btn.dataset.previewIndex);
-      const file = pendingFiles[index];
+      const file = pendingItems[index]?.file;
       if (!file) return;
       const url = ensurePreviewUrl(file);
       if (url) openImagePreview(url, file.name);
@@ -675,9 +855,12 @@ function renderPendingFiles() {
     btn.addEventListener("click", (event) => {
       event.stopPropagation();
       const index = Number(btn.dataset.index);
-      setPendingFiles(pendingFiles.filter((_, i) => i !== index));
+      setPendingItems(pendingItems.filter((_, i) => i !== index));
     });
   });
+
+  bindPendingImageFields();
+  updateIngestButtonState();
 }
 
 function setupDropZone() {
@@ -687,9 +870,8 @@ function setupDropZone() {
       setStatus("تعذّر رفع الملفات. تحقق من إعدادات التخزين.", true);
       return;
     }
-    const merged = [...pendingFiles];
-    for (const file of fileList) merged.push(file);
-    setPendingFiles(merged);
+    const merged = [...pendingItems, ...fileList.map((file) => createPendingItem(file))];
+    setPendingItems(merged);
   };
 
   dropZone.addEventListener("click", (event) => {
@@ -1478,7 +1660,7 @@ async function confirmUnlock() {
   }
 }
 
-async function ingestFiles(files) {
+async function ingestFiles(items) {
   if (!canUploadFiles()) {
     setStatus("تعذّر رفع الملفات. تحقق من إعدادات التخزين.", true);
     return;
@@ -1488,35 +1670,47 @@ async function ingestFiles(files) {
   setStatus("جارٍ فهرسة الملفات…");
   const documentsBefore = state.documents.length;
   try {
-    for (const file of files) {
+    for (const item of items) {
+      const file = item.file;
       const arrayBuffer = await file.arrayBuffer();
       const image = isImageFile(file.name);
       const backend = getActiveStorageBackend();
       const blob = new Blob([arrayBuffer]);
 
       if (image) {
-        const category = assignCategory("", file.name, state.documents);
+        const uploadName = buildImageUploadFilename(item.meta?.displayName, file.name);
+        const category = resolveImageCategory(item.meta);
+        if (!uploadName) {
+          throw new Error("أدخل اسماً صالحاً لكل صورة قبل الفهرسة.");
+        }
+        if (!category) {
+          throw new Error(`اختر مجلداً أو أنشئ مجلداً جديداً للصورة «${uploadName}».`);
+        }
+        if (hasDuplicateFilename(uploadName)) {
+          throw new Error(`يوجد ملف بنفس الاسم «${uploadName}». غيّر الاسم أو احذف النسخة القديمة.`);
+        }
+
         let fileData = null;
         let driveFileId = null;
         let megaFileId = null;
         let onedriveFileId = null;
 
         if (backend === STORAGE_BACKENDS.DRIVE) {
-          driveFileId = await uploadDriveDocumentFile(category, file.name, blob);
+          driveFileId = await uploadDriveDocumentFile(category, uploadName, blob);
         } else if (backend === STORAGE_BACKENDS.MEGA) {
-          megaFileId = await uploadMegaDocumentFile(category, file.name, blob);
+          megaFileId = await uploadMegaDocumentFile(category, uploadName, blob);
         } else if (backend === STORAGE_BACKENDS.ONEDRIVE) {
-          onedriveFileId = await uploadOneDriveDocumentFile(category, file.name, blob);
+          onedriveFileId = await uploadOneDriveDocumentFile(category, uploadName, blob);
         } else {
           fileData = arrayBufferToBase64(arrayBuffer);
         }
 
         state.documents.push({
           id: crypto.randomUUID(),
-          filename: file.name,
+          filename: uploadName,
           category,
-          fileGroup: fileGroup(file.name),
-          extension: fileExtension(file.name),
+          fileGroup: fileGroup(uploadName),
+          extension: fileExtension(uploadName),
           charCount: 0,
           preview: IMAGE_NO_OCR_PREVIEW,
           fileData,
@@ -1590,9 +1784,9 @@ async function ingestFiles(files) {
       : "";
     setStatus(`خطأ: ${error.message}${hint}`, true);
   } finally {
-    ingestBtn.disabled = !pendingFiles.length;
+    updateIngestButtonState();
     revokeAllPreviewUrls();
-    pendingFiles = [];
+    pendingItems = [];
     renderPendingFiles();
     fileInput.value = "";
   }
@@ -1660,7 +1854,7 @@ logoutBtn.addEventListener("click", () => {
 });
 
 ingestBtn.addEventListener("click", () => {
-  if (pendingFiles.length) ingestFiles(pendingFiles);
+  if (pendingItems.length) ingestFiles(pendingItems);
 });
 
 searchBtn.addEventListener("click", runSearch);

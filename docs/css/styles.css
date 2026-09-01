@@ -1066,6 +1066,71 @@ mark.query-hit, .query-hit {
   margin-bottom: 1rem;
 }
 
+.pending-files-grid.has-images {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+.pending-file-card.is-image {
+  align-items: stretch;
+  text-align: start;
+  gap: 0.65rem;
+}
+
+.pending-image-fields {
+  display: grid;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.pending-image-fields.is-incomplete {
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  border: 1px dashed #f5d565;
+  background: #fffdf5;
+}
+
+.pending-image-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.pending-image-name-input,
+.pending-image-folder-select,
+.pending-image-folder-new {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+}
+
+.pending-image-hint {
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.pending-file-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  margin-top: 0.15rem;
+}
+
+.pending-file-footer .pending-file-size {
+  margin: 0;
+  text-align: start;
+}
+
+.pending-file-card.is-image .pending-file-remove {
+  flex-shrink: 0;
+}
+
 .pending-file-card {
   display: flex;
   flex-direction: column;
@@ -1693,6 +1758,11 @@ html[data-theme="dark"] .ocr-badge {
 html[data-theme="dark"] .pending-images-note,
 html[data-theme="dark"] .ocr-dialog-card .drive-connect-panel {
   background: var(--surface-muted);
+}
+
+html[data-theme="dark"] .pending-image-fields.is-incomplete {
+  background: #2a2410;
+  border-color: #7c5e10;
 }
 
 /* ── File browser (Drive / Windows 11 style) ── */
