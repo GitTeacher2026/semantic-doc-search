@@ -120,12 +120,13 @@
 
 ## ترجمة SmPC
 
-ترجمة نشرة خصائص المنتج إلى العربية تستخدم محركات مفتوحة المصدر:
+تبويب **البحث → SmPC** يدعم ثلاثة مصادر اختيارية:
 
-1. **[MyMemory](https://mymemory.translated.net/)** — الافتراضي، بدون مفتاح API، يعمل من المتصفح (CORS)
-2. **[LibreTranslate](https://github.com/LibreTranslate/LibreTranslate)** — اختياري عبر أسرار `LIBRETRANSLATE_URL` و `LIBRETRANSLATE_API_KEY` في نشر Pages
+1. **DailyMed** — نشرة FDA الأمريكية الكاملة
+2. **eMC** — SmPC من [medicines.org.uk](https://www.medicines.org.uk/emc/)
+3. **drugs.com** — Package Insert / Prescribing Information
 
-عرض النسخة الإنجليزية في واجهة SmPC يفرض اتجاه LTR حتى مع واجهة الموقع العربية RTL.
+يُفتح العرض في نافذة منبثقة مع الترجمة إلى العربية عبر **[MyMemory](https://mymemory.translated.net/)** (ومحرك LibreTranslate اختياري عبر أسرار `LIBRETRANSLATE_URL` / `LIBRETRANSLATE_API_KEY`). عرض الإنجليزية LTR.
 
 ## سلة المهملات
 

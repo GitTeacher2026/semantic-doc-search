@@ -3286,6 +3286,77 @@ html[data-theme="dark"] .fb-card:hover {
   line-height: 1.55;
 }
 
+.smpc-source-fieldset {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.75rem 0.9rem 0.95rem;
+  margin: 0 0 1rem;
+  background: var(--surface-muted, #f7f3ea);
+}
+
+.smpc-source-fieldset legend {
+  padding: 0 0.35rem;
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+.smpc-source-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.smpc-source-option {
+  display: block;
+  cursor: pointer;
+}
+
+.smpc-source-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.smpc-source-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  align-items: flex-start;
+  min-height: 100%;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel, #fff);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.smpc-source-card strong {
+  font-size: 0.98rem;
+}
+
+.smpc-source-card small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.smpc-source-option input:checked + .smpc-source-card {
+  border-color: #0f6e56;
+  box-shadow: inset 0 0 0 1px #0f6e56;
+  background: #eef7f3;
+}
+
+.smpc-source-option input:focus-visible + .smpc-source-card {
+  outline: 2px solid #0f6e56;
+  outline-offset: 2px;
+}
+
+@media (max-width: 700px) {
+  .smpc-source-tabs {
+    grid-template-columns: 1fr;
+  }
+}
+
 .smpc-search-status.is-error {
   color: #b91c1c;
 }

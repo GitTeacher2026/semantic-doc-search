@@ -108,7 +108,7 @@ import {
 } from "./drive-leech.js";
 import {
   bindSmpcSearchResults,
-  hydrateDailyMedLabel,
+  hydrateSmpcDocument,
   renderSmpcDocument,
   renderSmpcSearchResults,
   searchSmpc,
@@ -289,6 +289,7 @@ const smpcSearchBtn = document.getElementById("smpc-search-btn");
 const smpcClearBtn = document.getElementById("smpc-clear-btn");
 const smpcSearchStatus = document.getElementById("smpc-search-status");
 const smpcSearchResults = document.getElementById("smpc-search-results");
+const smpcSourceInputs = [...document.querySelectorAll('input[name="smpc-source"]')];
 const smpcViewerModal = document.getElementById("smpc-viewer-modal");
 const smpcViewerBackdrop = document.getElementById("smpc-viewer-backdrop");
 const smpcViewer = document.getElementById("smpc-viewer");
@@ -1727,6 +1728,17 @@ function closeSmpcViewer() {
   if (smpcTranslateBtn) smpcTranslateBtn.disabled = false;
 }
 
+function getSelectedSmpcSource() {
+  const selected = smpcSourceInputs.find((input) => input.checked);
+  return selected?.value || "dailymed";
+}
+
+function smpcSourceLabel(source = getSelectedSmpcSource()) {
+  if (source === "emc") return "eMC (medicines.org.uk)";
+  if (source === "drugs") return "drugs.com";
+  return "DailyMed";
+}
+
 async function runSmpcSearch() {
   const query = smpcSearchQuery?.value.trim() || "";
   if (!query) {
@@ -1734,12 +1746,13 @@ async function runSmpcSearch() {
     return;
   }
 
+  const source = getSelectedSmpcSource();
   smpcSearchBtn.disabled = true;
-  setSmpcStatus(`جارٍ البحث عن SmPC لـ «${query}» عبر OpenFDA / DailyMed…`);
+  setSmpcStatus(`جارٍ البحث في ${smpcSourceLabel(source)} عن «${query}»…`);
   closeSmpcViewer();
   try {
     const limit = Number(smpcResultCount?.value || 8);
-    smpcResultsCache = await searchSmpc(query, { limit });
+    smpcResultsCache = await searchSmpc(query, { limit, source });
     if (smpcSearchResults) {
       smpcSearchResults.innerHTML = renderSmpcSearchResults(smpcResultsCache);
       bindSmpcSearchResults(smpcSearchResults, { onOpen: openSmpcDocument });
@@ -1747,8 +1760,8 @@ async function runSmpcSearch() {
     if (smpcClearBtn) smpcClearBtn.disabled = !smpcResultsCache.length;
     setSmpcStatus(
       smpcResultsCache.length
-        ? `عُثر على ${smpcResultsCache.length} منتجاً. افتح النتيجة في نافذة منبثقة لعرض SmPC أو انتقل للمواقع المرجعية.`
-        : "لا نتائج — جرّب اسماً عاماً (API) أو اسماً تجارياً إنجليزياً.",
+        ? `عُثر على ${smpcResultsCache.length} نتيجة من ${smpcSourceLabel(source)}. اضغط «عرض SmPC» لفتح النشرة الكاملة.`
+        : `لا نتائج من ${smpcSourceLabel(source)} — جرّب اسماً إنجليزياً أو مصدراً آخر.`,
       !smpcResultsCache.length
     );
   } catch (error) {
@@ -1762,14 +1775,21 @@ async function openSmpcDocument(docId) {
   let doc = smpcResultsCache.find((item) => item.id === docId);
   if (!doc) return;
 
-  setSmpcStatus("جارٍ تحميل نشرة خصائص المنتج…");
+  setSmpcStatus(`جارٍ تحميل النشرة الكاملة من ${doc.sourceLabel || smpcSourceLabel(doc.source)}…`);
   try {
-    doc = await hydrateDailyMedLabel(doc);
+    doc = await hydrateSmpcDocument(doc, {
+      onStatus: (message) => setSmpcStatus(message),
+    });
+    if (!doc.sections?.length) {
+      throw new Error("لم يتوفر محتوى كامل لهذه النشرة.");
+    }
     smpcResultsCache = smpcResultsCache.map((item) => (item.id === docId ? doc : item));
     activeSmpcDoc = doc;
     activeSmpcArabicSections = null;
-    if (smpcViewerTitle) smpcViewerTitle.textContent = "نشرة خصائص المنتج (SmPC)";
-    if (smpcViewerSubtitle) smpcViewerSubtitle.textContent = doc.title || "";
+    if (smpcViewerTitle) smpcViewerTitle.textContent = `SmPC — ${doc.sourceLabel || ""}`;
+    if (smpcViewerSubtitle) {
+      smpcViewerSubtitle.textContent = `${doc.title || ""} · ${doc.sections.length} قسماً`;
+    }
     if (smpcViewerEn) smpcViewerEn.innerHTML = renderSmpcDocument(doc);
     if (smpcViewerAr) {
       smpcViewerAr.innerHTML = "";
@@ -1779,11 +1799,13 @@ async function openSmpcDocument(docId) {
     if (smpcDownloadArBtn) smpcDownloadArBtn.disabled = true;
     if (smpcDownloadBothBtn) smpcDownloadBothBtn.disabled = true;
     if (smpcTranslateBtn) smpcTranslateBtn.disabled = false;
-    setSmpcViewerStatus("يمكنك الترجمة إلى العربية أو تنزيل DOCX من شريط الأدوات.");
+    setSmpcViewerStatus(
+      `نشرة كاملة (${doc.sections.length} قسماً) من ${doc.sourceLabel}. يمكنك الترجمة أو تنزيل DOCX.`
+    );
     smpcViewerModal?.classList.remove("hidden");
     document.body.classList.add("smpc-viewer-open");
     smpcViewerClose?.focus?.();
-    setSmpcStatus(`تم فتح SmPC لـ «${doc.title}» في نافذة منبثقة.`, false);
+    setSmpcStatus(`تم فتح النشرة الكاملة لـ «${doc.title}».`, false);
   } catch (error) {
     setSmpcStatus(error.message, true);
   }
@@ -2917,6 +2939,14 @@ smpcClearBtn?.addEventListener("click", () => {
   if (smpcClearBtn) smpcClearBtn.disabled = true;
   closeSmpcViewer();
   setSmpcStatus("");
+});
+smpcSourceInputs.forEach((input) => {
+  input.addEventListener("change", () => {
+    if (smpcSearchResults) smpcSearchResults.innerHTML = "";
+    if (smpcClearBtn) smpcClearBtn.disabled = true;
+    closeSmpcViewer();
+    setSmpcStatus(`المصدر: ${smpcSourceLabel()}. أدخل اسماً ثم ابحث.`);
+  });
 });
 smpcResultCount?.addEventListener("input", () => {
   if (smpcResultCountLabel) smpcResultCountLabel.textContent = smpcResultCount.value;

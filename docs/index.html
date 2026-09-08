@@ -459,19 +459,38 @@
         <section id="smpc-search-panel" class="panel hidden">
           <h2>بحث SmPC — نشرة خصائص المنتج</h2>
           <p class="muted smpc-search-intro">
-            ابحث بالمادة الفعّالة (API) أو الاسم التجاري أو الشكل الصيدلاني. يُجلب المحتوى المنظَّم من OpenFDA/DailyMed
-            (يعادل SmPC)، مع روابط مباشرة إلى
-            <a href="https://www.medicines.org.uk/emc/" target="_blank" rel="noopener noreferrer">medicines.org.uk</a>،
-            <a href="https://dailymed.nlm.nih.gov/" target="_blank" rel="noopener noreferrer">DailyMed</a>، و
-            <a href="https://www.drugs.com/" target="_blank" rel="noopener noreferrer">drugs.com</a>.
-            الترجمة إلى العربية عبر
-            <a href="https://mymemory.translated.net/" target="_blank" rel="noopener noreferrer">MyMemory</a>
-            (مفتوح المصدر / مجاني) مع دعم اختياري لـ
-            <a href="https://github.com/LibreTranslate/LibreTranslate" target="_blank" rel="noopener noreferrer">LibreTranslate</a>.
-            عرض الإنجليزية من اليسار لليمين (LTR).
+            اختر المصدر ثم ابحث بالمادة الفعّالة أو الاسم التجاري. يُعرض SmPC/النشرة الكاملة داخل نافذة منبثقة مع خيارات الترجمة والتنزيل.
           </p>
+
+          <fieldset class="smpc-source-fieldset">
+            <legend>مصدر النشرة</legend>
+            <div class="smpc-source-tabs" role="radiogroup" aria-label="مصدر SmPC">
+              <label class="smpc-source-option">
+                <input type="radio" name="smpc-source" value="dailymed" checked />
+                <span class="smpc-source-card">
+                  <strong>DailyMed</strong>
+                  <small>FDA / SPL كامل</small>
+                </span>
+              </label>
+              <label class="smpc-source-option">
+                <input type="radio" name="smpc-source" value="emc" />
+                <span class="smpc-source-card">
+                  <strong>eMC</strong>
+                  <small>medicines.org.uk</small>
+                </span>
+              </label>
+              <label class="smpc-source-option">
+                <input type="radio" name="smpc-source" value="drugs" />
+                <span class="smpc-source-card">
+                  <strong>drugs.com</strong>
+                  <small>Package Insert</small>
+                </span>
+              </label>
+            </div>
+          </fieldset>
+
           <label for="smpc-search-query">اسم الدواء / API / الشكل</label>
-          <input id="smpc-search-query" type="search" placeholder="مثال: ibuprofen, amoxicillin capsules, atorvastatin" />
+          <input id="smpc-search-query" type="search" placeholder="مثال: ibuprofen, amoxicillin, atorvastatin" />
           <label for="smpc-result-count">عدد النتائج: <span id="smpc-result-count-label">8</span></label>
           <input id="smpc-result-count" type="range" min="3" max="15" value="8" />
           <div class="search-actions">
@@ -850,6 +869,6 @@
 
   <iframe id="credential-catcher" name="credential-catcher" title="" tabindex="-1" aria-hidden="true" hidden></iframe>
 
-  <script type="module" src="js/main.js?v=20260908d"></script>
+  <script type="module" src="js/main.js?v=20260908e"></script>
 </body>
 </html>
