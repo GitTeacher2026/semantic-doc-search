@@ -120,11 +120,14 @@
 
 ## ترجمة SmPC
 
-تبويب **البحث → SmPC** يدعم ثلاثة مصادر اختيارية:
+تبويب **البحث → SmPC** يدعم مصادر اختيارية:
 
-1. **DailyMed** — نشرة FDA الأمريكية الكاملة
-2. **eMC** — SmPC من [medicines.org.uk](https://www.medicines.org.uk/emc/)
-3. **drugs.com** — Package Insert / Prescribing Information
+1. **الكل** — بحث موحّد في المصادر الثلاثة
+2. **DailyMed** — نشرة FDA الأمريكية (عبر OpenFDA أولاً، بدون وسطاء عند الإمكان)
+3. **eMC** — SmPC من [medicines.org.uk](https://www.medicines.org.uk/emc/)
+4. **drugs.com** — Package Insert / Prescribing Information
+
+جلب الصفحات يعتمد وسطاء مع مهلات وإعادة محاولة (Jina أولاً). إذا فشل وسيط واحد لا يُعطَّل البحث بالكامل.
 
 **بحث مخصص (فلاتر):** الشكل الصيدلاني، المصنّع، نوع التعبئة، عدد الوحدات في العبوة، مجموعة ATC / الفئة الدوائية، طريق الإعطاء، التركيز، ونوع المنتج (Rx/OTC). يمكن البحث بالفلاتر فقط دون اسم دواء. أدق النتائج عبر OpenFDA NDC لـ DailyMed و drugs.com؛ لـ eMC تُضاف الفلاتر ككلمات بحث.
 
