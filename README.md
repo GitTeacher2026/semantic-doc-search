@@ -126,7 +126,8 @@
 2. **eMC** — SmPC من [medicines.org.uk](https://www.medicines.org.uk/emc/)
 3. **drugs.com** — Package Insert / Prescribing Information
 
-يُفتح العرض في نافذة منبثقة مع الترجمة إلى العربية عبر **[MyMemory](https://mymemory.translated.net/)** (ومحرك LibreTranslate اختياري عبر أسرار `LIBRETRANSLATE_URL` / `LIBRETRANSLATE_API_KEY`). عرض الإنجليزية LTR.
+يُفتح العرض في نافذة منبثقة مع ترجمة سريعة إلى العربية (Google Translate العام مع احتياطي MyMemory، وLibreTranslate اختياري). عرض الإنجليزية LTR.
+DailyMed يحمّل نسخة XSL/الطباعة الكاملة وليس معاينة قصيرة.
 
 ## سلة المهملات
 
