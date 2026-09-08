@@ -118,6 +118,15 @@
 1. الصق **رمز API** من [puter.com/dashboard](https://puter.com/dashboard#account) في حقل كلمة المرور، ثم اضغط **الاتصال بـ Puter**
 2. أو اترك كلمة المرور فارغة واضغط **الاتصال** لفتح نافذة تسجيل Puter
 
+## ترجمة SmPC
+
+ترجمة نشرة خصائص المنتج إلى العربية تستخدم محركات مفتوحة المصدر:
+
+1. **[MyMemory](https://mymemory.translated.net/)** — الافتراضي، بدون مفتاح API، يعمل من المتصفح (CORS)
+2. **[LibreTranslate](https://github.com/LibreTranslate/LibreTranslate)** — اختياري عبر أسرار `LIBRETRANSLATE_URL` و `LIBRETRANSLATE_API_KEY` في نشر Pages
+
+عرض النسخة الإنجليزية في واجهة SmPC يفرض اتجاه LTR حتى مع واجهة الموقع العربية RTL.
+
 ## سلة المهملات
 
 - الملفات المحذوفة تبقى 30 يوماً ثم تُحذف تلقائياً.
