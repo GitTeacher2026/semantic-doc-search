@@ -1,101 +1,205 @@
-import { ensurePuterConnected } from "./puter-auth.js";
+/**
+ * Open-source SmPC translation:
+ * 1) MyMemory Translation API (free, CORS-friendly)
+ * 2) Optional self-hosted LibreTranslate (URL + API key in config)
+ *
+ * MyMemory: https://mymemory.translated.net/doc/spec.php
+ * LibreTranslate: https://github.com/LibreTranslate/LibreTranslate
+ */
 
-const CHUNK_CHARS = 3500;
+import { LIBRETRANSLATE_API_KEY, LIBRETRANSLATE_URL } from "./config.js";
 
-function extractChatText(response) {
-  if (response == null) return "";
-  if (typeof response === "string") return response.trim();
-  if (typeof response?.message === "string") return response.message.trim();
-  if (typeof response?.text === "string") return response.text.trim();
-  const content = response?.message?.content;
-  if (typeof content === "string") return content.trim();
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => (typeof part === "string" ? part : part?.text || ""))
-      .join("")
-      .trim();
-  }
-  return String(response).trim();
+const MYMEMORY_ENDPOINT = "https://api.mymemory.translated.net/get";
+const MYMEMORY_CHUNK = 450;
+const LIBRE_CHUNK = 1200;
+const REQUEST_GAP_MS = 350;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function translateChunk(puter, text, { onStatus } = {}) {
-  const prompt = [
-    "You are a professional pharmaceutical translator.",
-    "Translate the following Summary of Product Characteristics (SmPC) excerpt from English to Modern Standard Arabic.",
-    "Keep section headings meaning, medical terminology accurate, and numbers/units unchanged.",
-    "Output ONLY the Arabic translation — no preface or notes.",
-    "",
-    text,
-  ].join("\n");
-
-  onStatus?.("جارٍ الترجمة عبر Puter AI…");
-  const response = await puter.ai.chat(prompt, { model: "gpt-5.4-nano" });
-  const translated = extractChatText(response);
-  if (!translated) throw new Error("تعذّر الحصول على ترجمة من Puter AI.");
-  return translated;
-}
-
-function chunkText(text, size = CHUNK_CHARS) {
-  const source = String(text || "");
+function chunkText(text, size) {
+  const source = String(text || "").trim();
+  if (!source) return [];
   if (source.length <= size) return [source];
+
   const parts = [];
   let start = 0;
   while (start < source.length) {
     let end = Math.min(source.length, start + size);
     if (end < source.length) {
-      const breakAt = source.lastIndexOf("\n\n", end);
-      if (breakAt > start + size * 0.5) end = breakAt;
+      const window = source.slice(start, end);
+      const breakAt = Math.max(
+        window.lastIndexOf("\n\n"),
+        window.lastIndexOf(". "),
+        window.lastIndexOf(".\n"),
+        window.lastIndexOf(" ")
+      );
+      if (breakAt > size * 0.4) end = start + breakAt + 1;
     }
-    parts.push(source.slice(start, end).trim());
+    const piece = source.slice(start, end).trim();
+    if (piece) parts.push(piece);
     start = end;
   }
-  return parts.filter(Boolean);
+  return parts;
+}
+
+async function translateWithMyMemory(text) {
+  const url =
+    `${MYMEMORY_ENDPOINT}?q=${encodeURIComponent(text)}` +
+    `&langpair=${encodeURIComponent("en|ar")}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`MyMemory (${response.status})`);
+  const data = await response.json();
+  if (Number(data.responseStatus) !== 200) {
+    throw new Error(data.responseDetails || "فشلت ترجمة MyMemory.");
+  }
+  const translated = String(data.responseData?.translatedText || "")
+    .replace(/[\u200e\u200f\u202a-\u202e]/g, "")
+    .trim();
+  if (!translated) throw new Error("MyMemory أعاد ترجمة فارغة.");
+  if (/QUERY LENGTH LIMIT EXCEEDED/i.test(translated)) {
+    throw new Error("تجاوز حد طول النص في MyMemory.");
+  }
+  return translated;
+}
+
+async function translateWithLibreTranslate(text) {
+  const base = String(LIBRETRANSLATE_URL || "").replace(/\/$/, "");
+  if (!base) throw new Error("LibreTranslate غير مضبوط.");
+
+  const payload = {
+    q: text,
+    source: "en",
+    target: "ar",
+    format: "text",
+  };
+  const key = String(LIBRETRANSLATE_API_KEY || "").trim();
+  if (key) payload.api_key = key;
+
+  const response = await fetch(`${base}/translate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || `LibreTranslate (${response.status})`);
+  }
+  const data = await response.json();
+  const translated = String(data.translatedText || "").trim();
+  if (!translated) throw new Error("LibreTranslate أعاد ترجمة فارغة.");
+  return translated;
+}
+
+async function translateChunk(text, { preferLibre = false } = {}) {
+  const errors = [];
+  const order = preferLibre
+    ? [translateWithLibreTranslate, translateWithMyMemory]
+    : [translateWithMyMemory, translateWithLibreTranslate];
+
+  for (const fn of order) {
+    if (fn === translateWithLibreTranslate && !String(LIBRETRANSLATE_URL || "").trim()) {
+      continue;
+    }
+    try {
+      return await fn(text);
+    } catch (error) {
+      errors.push(error.message);
+    }
+  }
+  throw new Error(errors.filter(Boolean).join(" · ") || "تعذّرت الترجمة.");
+}
+
+async function translateLongText(text, { onStatus, label = "النص", preferLibre = false } = {}) {
+  const prefer = preferLibre && Boolean(String(LIBRETRANSLATE_URL || "").trim());
+  const size = prefer ? LIBRE_CHUNK : MYMEMORY_CHUNK;
+  const chunks = chunkText(text, size);
+  if (!chunks.length) return "";
+
+  const out = [];
+  for (let i = 0; i < chunks.length; i += 1) {
+    onStatus?.(
+      chunks.length > 1
+        ? `ترجمة ${label} عبر محرك مفتوح المصدر… (${i + 1}/${chunks.length})`
+        : `ترجمة ${label} عبر محرك مفتوح المصدر…`
+    );
+    out.push(await translateChunk(chunks[i], { preferLibre: prefer }));
+    if (i < chunks.length - 1) await sleep(REQUEST_GAP_MS);
+  }
+  return out.join("\n\n").trim();
+}
+
+const HEADING_GLOSSARY = {
+  "1. Name of the medicinal product": "1. اسم المستحضر الدوائي",
+  "2. Qualitative and quantitative composition": "2. التركيب النوعي والكمي",
+  "3. Pharmaceutical form": "3. الشكل الصيدلاني",
+  "4. Clinical particulars": "4. الخصائص السريرية",
+  "4.1 Therapeutic indications": "4.1 الاستطبابات العلاجية",
+  "4.2 Posology and method of administration": "4.2 الجرعة وطريقة الإعطاء",
+  "4.3 Contraindications": "4.3 موانع الاستعمال",
+  "4.4 Special warnings and precautions": "4.4 تحذيرات واحتياطات خاصة",
+  "4.5 Interaction with other medicinal products": "4.5 التداخلات مع أدوية أخرى",
+  "4.6 Fertility, pregnancy and lactation": "4.6 الخصوبة والحمل والرضاعة",
+  "4.7 Effects on ability to drive and use machines": "4.7 تأثيرات القيادة وتشغيل الآلات",
+  "4.8 Undesirable effects": "4.8 التأثيرات غير المرغوبة",
+  "4.9 Overdose": "4.9 فرط الجرعة",
+  "5. Pharmacological properties": "5. الخصائص الدوائية",
+  "6. Pharmaceutical particulars": "6. الخصائص الصيدلانية",
+  "DailyMed listing": "قائمة DailyMed",
+};
+
+async function translateHeading(title, { onStatus, preferLibre = false } = {}) {
+  const known = HEADING_GLOSSARY[title];
+  if (known) return known;
+  try {
+    return await translateLongText(title, {
+      onStatus,
+      label: "عنوان القسم",
+      preferLibre,
+    });
+  } catch {
+    return title;
+  }
+}
+
+export function getTranslationEngineLabel() {
+  if (String(LIBRETRANSLATE_URL || "").trim()) {
+    return "LibreTranslate (ذاتي) + MyMemory";
+  }
+  return "MyMemory Translation API (مفتوح)";
 }
 
 export async function translateSmpcSections(sections, { onStatus } = {}) {
-  const puter = await ensurePuterConnected();
+  const preferLibre = Boolean(String(LIBRETRANSLATE_URL || "").trim());
+  onStatus?.(`محرك الترجمة: ${getTranslationEngineLabel()}`);
   const translated = [];
 
   for (let i = 0; i < sections.length; i += 1) {
     const section = sections[i];
     onStatus?.(`ترجمة القسم ${i + 1} من ${sections.length}: ${section.title}`);
-    const bodyChunks = chunkText(section.text);
-    const arabicBodies = [];
-    for (let c = 0; c < bodyChunks.length; c += 1) {
-      if (bodyChunks.length > 1) {
-        onStatus?.(`ترجمة القسم ${i + 1}/${sections.length} — جزء ${c + 1}/${bodyChunks.length}`);
-      }
-      arabicBodies.push(await translateChunk(puter, `${section.title}\n\n${bodyChunks[c]}`, { onStatus }));
-    }
-
-    let arabicTitle = section.title;
-    try {
-      arabicTitle = await translateChunk(
-        puter,
-        `Translate this SmPC section heading to Arabic. Output only the heading:\n${section.title}`,
-        { onStatus }
-      );
-    } catch {
-      /* keep English heading */
-    }
-
+    const arabicTitle = await translateHeading(section.title, { onStatus, preferLibre });
+    const arabicText = await translateLongText(section.text, {
+      onStatus,
+      label: `القسم ${i + 1}`,
+      preferLibre,
+    });
     translated.push({
       key: section.key,
-      title: arabicTitle.replace(/^#+\s*/, "").trim() || section.title,
-      text: arabicBodies.join("\n\n").trim(),
+      title: arabicTitle,
+      text: arabicText,
     });
+    if (i < sections.length - 1) await sleep(REQUEST_GAP_MS);
   }
 
   return translated;
 }
 
 export async function translatePlainText(text, { onStatus } = {}) {
-  const puter = await ensurePuterConnected();
-  const chunks = chunkText(text);
-  const out = [];
-  for (let i = 0; i < chunks.length; i += 1) {
-    onStatus?.(`ترجمة النص… (${i + 1}/${chunks.length})`);
-    out.push(await translateChunk(puter, chunks[i], { onStatus }));
-  }
-  return out.join("\n\n");
+  const preferLibre = Boolean(String(LIBRETRANSLATE_URL || "").trim());
+  return translateLongText(text, {
+    onStatus,
+    label: "النص",
+    preferLibre,
+  });
 }

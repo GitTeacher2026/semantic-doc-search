@@ -41,6 +41,8 @@ jobs:
           GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
           PUTER_AUTH_TOKEN: ${{ secrets.PUTER_AUTH_TOKEN }}
           PHARMACOPOEIA_DRIVE_FOLDER_ID: ${{ secrets.PHARMACOPOEIA_DRIVE_FOLDER_ID }}
+          LIBRETRANSLATE_URL: ${{ secrets.LIBRETRANSLATE_URL }}
+          LIBRETRANSLATE_API_KEY: ${{ secrets.LIBRETRANSLATE_API_KEY }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           node <<'NODE'
@@ -80,6 +82,8 @@ jobs:
           export const MEGA_EMAIL = ${JSON.stringify(megaEmail)};
           export const MEGA_PASSWORD = ${JSON.stringify(megaPassword)};
           export const PHARMACOPOEIA_DRIVE_FOLDER_ID = ${JSON.stringify(pharmaFolderId)};
+          export const LIBRETRANSLATE_URL = ${JSON.stringify((process.env.LIBRETRANSLATE_URL || "").trim())};
+          export const LIBRETRANSLATE_API_KEY = ${JSON.stringify((process.env.LIBRETRANSLATE_API_KEY || "").trim())};
           `;
           fs.writeFileSync("docs/js/config.js", config);
           NODE

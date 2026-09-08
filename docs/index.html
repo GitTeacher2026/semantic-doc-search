@@ -464,6 +464,11 @@
             <a href="https://www.medicines.org.uk/emc/" target="_blank" rel="noopener noreferrer">medicines.org.uk</a>،
             <a href="https://dailymed.nlm.nih.gov/" target="_blank" rel="noopener noreferrer">DailyMed</a>، و
             <a href="https://www.drugs.com/" target="_blank" rel="noopener noreferrer">drugs.com</a>.
+            الترجمة إلى العربية عبر
+            <a href="https://mymemory.translated.net/" target="_blank" rel="noopener noreferrer">MyMemory</a>
+            (مفتوح المصدر / مجاني) مع دعم اختياري لـ
+            <a href="https://github.com/LibreTranslate/LibreTranslate" target="_blank" rel="noopener noreferrer">LibreTranslate</a>.
+            عرض الإنجليزية من اليسار لليمين (LTR).
           </p>
           <label for="smpc-search-query">اسم الدواء / API / الشكل</label>
           <input id="smpc-search-query" type="search" placeholder="مثال: ibuprofen, amoxicillin capsules, atorvastatin" />
@@ -484,8 +489,8 @@
               <button id="smpc-download-both-btn" class="btn ghost small" type="button" disabled>تنزيل EN + AR</button>
               <button id="smpc-viewer-close" class="btn ghost small" type="button">إغلاق</button>
             </div>
-            <div id="smpc-viewer-en" class="smpc-viewer-pane"></div>
-            <div id="smpc-viewer-ar" class="smpc-viewer-pane hidden"></div>
+            <div id="smpc-viewer-en" class="smpc-viewer-pane smpc-viewer-en" dir="ltr" lang="en"></div>
+            <div id="smpc-viewer-ar" class="smpc-viewer-pane smpc-viewer-ar hidden" dir="rtl" lang="ar"></div>
           </div>
         </section>
       </main>
@@ -833,6 +838,6 @@
 
   <iframe id="credential-catcher" name="credential-catcher" title="" tabindex="-1" aria-hidden="true" hidden></iframe>
 
-  <script type="module" src="js/main.js?v=20260908b"></script>
+  <script type="module" src="js/main.js?v=20260908c"></script>
 </body>
 </html>

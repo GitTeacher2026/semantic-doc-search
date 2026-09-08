@@ -3387,3 +3387,40 @@ html[data-theme="dark"] .fb-card:hover {
   padding-top: 1rem;
   border-top: 2px dashed var(--line);
 }
+
+.smpc-viewer-en,
+.smpc-viewer-en .smpc-document,
+.smpc-document-en,
+#smpc-viewer-en,
+#smpc-viewer-en .smpc-document {
+  direction: ltr !important;
+  text-align: left !important;
+  unicode-bidi: isolate;
+}
+
+.smpc-viewer-en .smpc-document-header,
+.smpc-viewer-en .smpc-document-header h3,
+.smpc-viewer-en .smpc-section,
+.smpc-viewer-en .smpc-section h4,
+.smpc-viewer-en .smpc-section-body,
+#smpc-viewer-en .smpc-section-body,
+.smpc-document-en .smpc-section-body {
+  direction: ltr !important;
+  text-align: left !important;
+}
+
+.smpc-viewer-en .smpc-section-body,
+#smpc-viewer-en .smpc-section-body,
+.smpc-document-en .smpc-section-body {
+  white-space: pre-wrap;
+}
+
+.smpc-viewer-ar,
+.smpc-viewer-ar .smpc-document,
+.smpc-document-ar,
+#smpc-viewer-ar,
+#smpc-viewer-ar .smpc-document {
+  direction: rtl !important;
+  text-align: right !important;
+  unicode-bidi: isolate;
+}

@@ -293,11 +293,11 @@ export function renderSmpcDocument(doc, { arabicSections = null } = {}) {
   const isArabic = Boolean(arabicSections);
 
   return `
-    <article class="smpc-document" data-id="${escapeHtml(doc.id)}" dir="${isArabic ? "rtl" : "ltr"}">
+    <article class="smpc-document ${isArabic ? "smpc-document-ar" : "smpc-document-en"}" data-id="${escapeHtml(doc.id)}" dir="${isArabic ? "rtl" : "ltr"}" lang="${isArabic ? "ar" : "en"}">
       <header class="smpc-document-header">
         <h3>${escapeHtml(isArabic ? "نشرة خصائص المنتج (ترجمة عربية)" : "Summary of Product Characteristics")}</h3>
         <p class="muted">${escapeHtml(doc.title)}</p>
-        <p class="muted smpc-document-source">المصدر: ${escapeHtml(doc.sourceLabel)} · البيانات المنظمة من OpenFDA/DailyMed مع روابط إلى medicines.org.uk و drugs.com</p>
+        <p class="muted smpc-document-source" dir="${isArabic ? "rtl" : "ltr"}">المصدر: ${escapeHtml(doc.sourceLabel)} · البيانات المنظمة من OpenFDA/DailyMed مع روابط إلى medicines.org.uk و drugs.com</p>
       </header>
       <div class="smpc-sections">
         ${sections
