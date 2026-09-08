@@ -2,15 +2,15 @@
  * SmPC search & full-document viewer for three sources:
  * - DailyMed (US SPL / prescribing info)
  * - eMC / medicines.org.uk (UK SmPC)
- * - drugs.com (US package insert / pro monograph)
+ * - drugs.com (US package insert — content via FDA/DailyMed when site blocks bots)
  *
- * Full text for eMC & drugs.com (and DailyMed HTML labels) is fetched via
- * Jina Reader (https://r.jina.ai) because those sites block browser CORS.
+ * Sites without CORS are loaded through public readers/proxies with fallbacks.
  */
 
 const OPENFDA_LABEL = "https://api.fda.gov/drug/label.json";
 const DAILYMED_SPLS = "https://dailymed.nlm.nih.gov/dailymed/services/v2/spls.json";
 const JINA_PREFIX = "https://r.jina.ai/";
+const ALLORIGINS_RAW = "https://api.allorigins.win/raw?url=";
 
 export const SMPC_SOURCE_OPTIONS = [
   {
@@ -26,7 +26,7 @@ export const SMPC_SOURCE_OPTIONS = [
   {
     id: "drugs",
     label: "drugs.com",
-    hint: "Package Insert / Prescribing Information",
+    hint: "Package Insert (عبر FDA عند الحجب)",
   },
 ];
 
@@ -111,19 +111,109 @@ function sectionKey(title, index) {
   return `${index + 1}-${slug}`;
 }
 
-async function fetchJina(url, { format = "markdown", timeout = 45, waitFor = "" } = {}) {
-  const headers = {
-    Accept: "text/plain,*/*",
-    "X-Return-Format": format,
-    "X-Timeout": String(timeout),
-  };
-  if (waitFor) headers["X-Wait-For-Selector"] = waitFor;
+async function fetchRemotePage(url, { preferHtml = false } = {}) {
+  const target = String(url || "").trim();
+  if (!target) throw new Error("رابط المصدر فارغ.");
 
-  const response = await fetch(`${JINA_PREFIX}${url}`, { headers });
-  if (!response.ok) {
-    throw new Error(`تعذّر جلب المصدر عبر القارئ (${response.status})`);
+  const errors = [];
+  const attempts = [];
+
+  // 1) Jina without custom headers (avoids CORS preflight failures)
+  attempts.push({
+    name: "jina",
+    run: async () => {
+      const response = await fetch(`${JINA_PREFIX}${target}`);
+      if (!response.ok) throw new Error(`jina (${response.status})`);
+      return response.text();
+    },
+  });
+
+  // 2) Jina HTML mode (may require preflight; useful when available)
+  if (preferHtml) {
+    attempts.push({
+      name: "jina-html",
+      run: async () => {
+        const response = await fetch(`${JINA_PREFIX}${target}`, {
+          headers: {
+            "X-Return-Format": "html",
+            "X-Timeout": "45",
+          },
+        });
+        if (!response.ok) throw new Error(`jina-html (${response.status})`);
+        return response.text();
+      },
+    });
   }
-  return response.text();
+
+  // 3) allorigins raw proxy
+  attempts.push({
+    name: "allorigins",
+    run: async () => {
+      const response = await fetch(`${ALLORIGINS_RAW}${encodeURIComponent(target)}`);
+      if (!response.ok) throw new Error(`allorigins (${response.status})`);
+      return response.text();
+    },
+  });
+
+  // 4) allorigins JSON envelope
+  attempts.push({
+    name: "allorigins-json",
+    run: async () => {
+      const response = await fetch(
+        `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`
+      );
+      if (!response.ok) throw new Error(`allorigins-json (${response.status})`);
+      const data = await response.json();
+      if (!data?.contents) throw new Error("allorigins-json empty");
+      return String(data.contents);
+    },
+  });
+
+  for (const attempt of attempts) {
+    try {
+      const text = await attempt.run();
+      if (!text || text.length < 80) {
+        errors.push(`${attempt.name}: empty`);
+        continue;
+      }
+      if (isBlockedOrMissing(text)) {
+        errors.push(`${attempt.name}: blocked`);
+        continue;
+      }
+      return { text, via: attempt.name };
+    } catch (error) {
+      errors.push(`${attempt.name}: ${error?.message || error}`);
+    }
+  }
+
+  throw new Error(
+    `تعذّر جلب الصفحة (Failed to fetch). المحاولات: ${errors.slice(0, 4).join(" · ")}`
+  );
+}
+
+/** @deprecated use fetchRemotePage */
+async function fetchJina(url, { format = "markdown", timeout = 45, waitFor = "" } = {}) {
+  const preferHtml = format === "html";
+  // Prefer simple jina first; only use header mode when HTML explicitly requested
+  if (preferHtml) {
+    try {
+      const response = await fetch(`${JINA_PREFIX}${url}`, {
+        headers: {
+          "X-Return-Format": "html",
+          "X-Timeout": String(timeout),
+          ...(waitFor ? { "X-Wait-For-Selector": waitFor } : {}),
+        },
+      });
+      if (response.ok) {
+        const text = await response.text();
+        if (text && !isBlockedOrMissing(text) && text.length > 80) return text;
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  const { text } = await fetchRemotePage(url, { preferHtml });
+  return text;
 }
 
 function isBlockedOrMissing(text) {
@@ -189,7 +279,7 @@ async function hydrateDailyMedFull(doc) {
 
   for (const candidate of urls) {
     try {
-      const markdown = await fetchJina(candidate.url, { format: "markdown", timeout: 70 });
+      const { text: markdown } = await fetchRemotePage(candidate.url);
       if (isBlockedOrMissing(markdown) || markdown.length < 1500) continue;
 
       let sections = parseMarkdownSections(markdown, {
@@ -504,32 +594,9 @@ function normalizeDailyMedListing(item) {
 }
 
 async function searchDailyMedSource(query, { limit = 8 } = {}) {
-  // DailyMed JSON is not CORS-enabled in browsers. Prefer OpenFDA (CORS *),
-  // and optionally enrich listing titles via Jina→DailyMed search.
+  // OpenFDA has CORS *. DailyMed JSON often does not — use OpenFDA first.
   const seen = new Set();
   const results = [];
-
-  try {
-    const raw = await fetchJina(
-      `${DAILYMED_SPLS}?drug_name=${encodeURIComponent(query)}&pagesize=${limit}`,
-      { format: "text", timeout: 35 }
-    );
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const data = JSON.parse(jsonMatch[0]);
-      for (const item of data.data || []) {
-        const doc = normalizeDailyMedListing(item);
-        if (!doc.setId || seen.has(doc.setId)) continue;
-        seen.add(doc.setId);
-        results.push(doc);
-        if (results.length >= limit) break;
-      }
-    }
-  } catch {
-    /* fall back to OpenFDA */
-  }
-
-  if (results.length >= limit) return results.slice(0, limit);
 
   for (const expr of buildQueryVariants(query)) {
     if (results.length >= limit) break;
@@ -550,6 +617,27 @@ async function searchDailyMedSource(query, { limit = 8 } = {}) {
     } catch {
       /* try next */
     }
+  }
+
+  if (results.length >= limit) return results.slice(0, limit);
+
+  try {
+    const { text } = await fetchRemotePage(
+      `${DAILYMED_SPLS}?drug_name=${encodeURIComponent(query)}&pagesize=${limit}`
+    );
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const data = JSON.parse(jsonMatch[0]);
+      for (const item of data.data || []) {
+        const doc = normalizeDailyMedListing(item);
+        if (!doc.setId || seen.has(doc.setId)) continue;
+        seen.add(doc.setId);
+        results.push(doc);
+        if (results.length >= limit) break;
+      }
+    }
+  } catch {
+    /* ignore */
   }
 
   return results.slice(0, limit);
@@ -613,21 +701,10 @@ function parseEmcSearch(markdownOrHtml, { limit = 8 } = {}) {
 
 async function searchEmcSource(query, { limit = 8 } = {}) {
   const searchUrl = `https://www.medicines.org.uk/emc/search?q=${encodeURIComponent(query)}&docType=smpc`;
-  let payload = "";
-  try {
-    payload = await fetchJina(searchUrl, {
-      format: "markdown",
-      timeout: 50,
-      waitFor: "a[href*='/emc/product/']",
-    });
-  } catch {
-    payload = await fetchJina(searchUrl, { format: "html", timeout: 50 });
-  }
-  let results = parseEmcSearch(payload, { limit });
+  const { text: payload } = await fetchRemotePage(searchUrl, { preferHtml: true });
+  const results = parseEmcSearch(payload, { limit });
   if (!results.length) {
-    // HTML pass if markdown missed anchors
-    const html = await fetchJina(searchUrl, { format: "html", timeout: 50 });
-    results = parseEmcSearch(html, { limit });
+    throw new Error("لا نتائج eMC — جرّب اسماً إنجليزياً مثل ibuprofen.");
   }
   return results;
 }
@@ -636,19 +713,24 @@ async function searchDrugsComSource(query, { limit = 8 } = {}) {
   const q = String(query || "").trim();
   const candidates = new Map();
 
-  const addCandidate = (name, hint = "") => {
+  const addCandidate = (name, hint = "", setId = "") => {
     const slug = slugify(name);
     if (!slug || slug.length < 3) return;
-    if (candidates.has(slug)) return;
+    if (candidates.has(slug)) {
+      const existing = candidates.get(slug);
+      if (!existing.setId && setId) existing.setId = setId;
+      return;
+    }
     candidates.set(slug, {
       id: `drugs:${slug}`,
       source: "drugs",
       sourceLabel: "drugs.com",
       title: name,
       api: hint || name,
-      formulation: "Package insert (Pro)",
+      formulation: "US Package Insert",
       manufacturer: "",
       slug,
+      setId: setId || "",
       url: `https://www.drugs.com/pro/${slug}.html`,
       sections: [],
       englishText: name,
@@ -658,7 +740,6 @@ async function searchDrugsComSource(query, { limit = 8 } = {}) {
   };
 
   addCandidate(q);
-  // Single-token and de-branded variants
   q.split(/[\/,|]/).map((part) => part.trim()).filter(Boolean).forEach((part) => addCandidate(part));
 
   for (const expr of buildQueryVariants(q)) {
@@ -666,9 +747,12 @@ async function searchDrugsComSource(query, { limit = 8 } = {}) {
       const batch = await fetchOpenFda(expr, Math.min(limit, 6));
       for (const item of batch) {
         const fda = item.openfda || {};
-        for (const brand of fda.brand_name || []) addCandidate(brand, joinList(fda.generic_name));
-        for (const generic of fda.generic_name || []) addCandidate(String(generic).split(",")[0], generic);
-        for (const substance of fda.substance_name || []) addCandidate(substance);
+        const setId = item.set_id || "";
+        for (const brand of fda.brand_name || []) addCandidate(brand, joinList(fda.generic_name), setId);
+        for (const generic of fda.generic_name || []) {
+          addCandidate(String(generic).split(",")[0], generic, setId);
+        }
+        for (const substance of fda.substance_name || []) addCandidate(substance, "", setId);
       }
     } catch {
       /* continue */
@@ -676,11 +760,13 @@ async function searchDrugsComSource(query, { limit = 8 } = {}) {
     if (candidates.size >= limit * 2) break;
   }
 
-  // Prefer exact query / short INN-like slugs; deprioritize long store-brand labels
   const ordered = [...candidates.values()].sort((a, b) => {
     const exactA = a.slug === slugify(q) ? 0 : 1;
     const exactB = b.slug === slugify(q) ? 0 : 1;
     if (exactA !== exactB) return exactA - exactB;
+    const setA = a.setId ? 0 : 1;
+    const setB = b.setId ? 0 : 1;
+    if (setA !== setB) return setA - setB;
     const junkA = /care-one|topcare|leader|good-sense|equaline|kirkland|up-and-up|infant/i.test(a.slug) ? 1 : 0;
     const junkB = /care-one|topcare|leader|good-sense|equaline|kirkland|up-and-up|infant/i.test(b.slug) ? 1 : 0;
     if (junkA !== junkB) return junkA - junkB;
@@ -699,31 +785,47 @@ export async function searchSmpc(query, { limit = 8, source = "dailymed" } = {})
   return searchDailyMedSource(q, { limit });
 }
 
+function parseEmcMarkdownSections(markdown) {
+  const sections = parseMarkdownSections(markdown, { minBody: 15, requireNumbered: false });
+  const filtered = sections.filter(
+    (section) =>
+      /^\d+(?:\.\d+)*\b/.test(section.title) ||
+      /name of the medicinal|composition|pharmaceutical|clinical|indication|posology|contraindic|warning|interaction|pregnancy|undesirable|overdose|pharmacolog|excipient|shelf|storage|packag|nature and contents|marketing authorisation/i.test(
+        section.title
+      )
+  );
+  return filtered.length >= 3 ? filtered : sections;
+}
+
 async function hydrateEmcFull(doc) {
   const url = doc.url || (doc.productId ? `https://www.medicines.org.uk/emc/product/${doc.productId}/smpc` : "");
   if (!url) return doc;
 
-  const html = await fetchJina(url, {
-    format: "html",
-    timeout: 60,
-    waitFor: "#smpc details, .spcWrapper details",
-  });
-  if (isBlockedOrMissing(html)) {
+  const { text, via } = await fetchRemotePage(url, { preferHtml: true });
+  if (isBlockedOrMissing(text)) {
     throw new Error("تعذّر تحميل SmPC من eMC.");
   }
-  const sections = parseEmcHtml(html);
+
+  let sections = [];
+  if (/<details[\s>]/i.test(text) || /spcWrapper/i.test(text)) {
+    sections = parseEmcHtml(text);
+  }
+  if (sections.length < 3) {
+    sections = parseEmcMarkdownSections(text);
+  }
   if (!sections.length) {
     throw new Error("لم يُعثر على أقسام SmPC في صفحة eMC.");
   }
 
-  // Prefer product title from page <title>
-  const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+  const titleMatch =
+    text.match(/<title>([^<]+)<\/title>/i) || text.match(/^Title:\s*(.+)$/m);
   let title = doc.title;
   if (titleMatch) {
-    title = stripTags(titleMatch[1])
-      .replace(/\s*-\s*Summary of Product Characteristics.*$/i, "")
-      .replace(/\s*\|\s*\d+\s*$/i, "")
-      .trim() || title;
+    title =
+      stripTags(titleMatch[1])
+        .replace(/\s*-\s*Summary of Product Characteristics.*$/i, "")
+        .replace(/\s*\|\s*\d+\s*$/i, "")
+        .trim() || title;
   }
 
   return {
@@ -735,63 +837,82 @@ async function hydrateEmcFull(doc) {
     englishText: sections.map((s) => `${s.title}\n${s.text}`).join("\n\n"),
     hydrated: true,
     needsFullLabel: false,
+    fetchVia: via,
   };
 }
 
 async function hydrateDrugsComFull(doc) {
-  const slugCandidates = [...new Set([
-    doc.slug,
-    slugify(doc.title),
-    slugify(doc.api),
-    slugify(String(doc.api || "").split(",")[0]),
-    slugify(String(doc.title || "").split(/[\/,(]/)[0]),
-  ].filter((s) => s && s.length >= 3))];
+  // drugs.com blocks automated fetch (403). Use FDA/DailyMed full label as the
+  // equivalent US package insert, while keeping the drugs.com deep link.
+  const queryHints = [
+    doc.slug?.replace(/-/g, " "),
+    doc.title,
+    doc.api,
+    String(doc.api || "").split(",")[0],
+  ]
+    .map((x) => String(x || "").trim())
+    .filter(Boolean);
 
-  const urlPatternsFor = (slug) => [
-    `https://www.drugs.com/pro/${slug}.html`,
-    `https://www.drugs.com/mtm/${slug}.html`,
-    `https://www.drugs.com/${slug}.html`,
-    `https://www.drugs.com/ppa/${slug}.html`,
-  ];
+  let setId = doc.setId || "";
+  let openFdaDoc = null;
 
-  let lastError = null;
-  for (const slug of slugCandidates) {
-    for (const url of urlPatternsFor(slug)) {
-      try {
-        const markdown = await fetchJina(url, { format: "markdown", timeout: 70 });
-        if (isBlockedOrMissing(markdown) || markdown.length < 800) {
-          lastError = new Error(`تعذّر فتح ${url}`);
-          continue;
-        }
-        const sections = parseDrugsComMarkdown(markdown);
-        if (sections.length < 3) {
-          lastError = new Error(`تعذّر استخراج أقسام كافية من ${url}`);
-          continue;
-        }
-        const titleMatch = markdown.match(/^Title:\s*(.+)$/m);
-        const title = titleMatch
-          ? titleMatch[1]
-              .replace(/\s*:\s*Package Insert.*$/i, "")
-              .replace(/\s*Uses, Dosage.*$/i, "")
-              .trim()
-          : doc.title;
-        return {
-          ...doc,
-          title: title || doc.title,
-          slug,
-          sourceLabel: "drugs.com",
-          url,
-          sections,
-          englishText: sections.map((s) => `${s.title}\n${s.text}`).join("\n\n"),
-          hydrated: true,
-          needsFullLabel: false,
-        };
-      } catch (error) {
-        lastError = error;
-      }
+  if (setId) {
+    try {
+      const results = await fetchOpenFda(`set_id:"${setId}"`, 1);
+      if (results.length) openFdaDoc = normalizeOpenFda(results[0]);
+    } catch {
+      /* continue */
     }
   }
-  throw lastError || new Error("لم يُعثر على نشرة drugs.com لهذا الدواء. جرّب الاسم العلمي الإنجليزي (مثل ibuprofen).");
+
+  if (!openFdaDoc) {
+    for (const hint of queryHints) {
+      for (const expr of buildQueryVariants(hint).slice(0, 3)) {
+        try {
+          const batch = await fetchOpenFda(expr, 3);
+          if (!batch.length) continue;
+          openFdaDoc = normalizeOpenFda(batch[0]);
+          setId = openFdaDoc.setId || setId;
+          break;
+        } catch {
+          /* next */
+        }
+      }
+      if (openFdaDoc) break;
+    }
+  }
+
+  if (setId || openFdaDoc?.setId) {
+    const base = {
+      ...(openFdaDoc || doc),
+      id: doc.id,
+      source: "drugs",
+      setId: setId || openFdaDoc?.setId,
+      title: doc.title || openFdaDoc?.title,
+      url: doc.url,
+      needsFullLabel: true,
+      hydrated: false,
+    };
+    const full = await hydrateDailyMedFull(base);
+    if (full?.sections?.length >= 3) {
+      return {
+        ...full,
+        id: doc.id,
+        source: "drugs",
+        sourceLabel: "drugs.com ≈ FDA/DailyMed Package Insert",
+        title: doc.title || full.title,
+        url: doc.url,
+        drugsComUrl: doc.url,
+        setId: full.setId || setId,
+        hydrated: true,
+        needsFullLabel: false,
+      };
+    }
+  }
+
+  throw new Error(
+    "drugs.com يمنع الجلب الآلي. افتح الرابط يدوياً أو استخدم مصدر DailyMed لنفس الدواء."
+  );
 }
 
 export async function hydrateSmpcDocument(doc, { onStatus } = {}) {
