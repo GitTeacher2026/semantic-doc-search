@@ -126,6 +126,8 @@
 2. **eMC** — SmPC من [medicines.org.uk](https://www.medicines.org.uk/emc/)
 3. **drugs.com** — Package Insert / Prescribing Information
 
+**بحث مخصص (فلاتر):** الشكل الصيدلاني، المصنّع، نوع التعبئة، عدد الوحدات في العبوة، مجموعة ATC / الفئة الدوائية، طريق الإعطاء، التركيز، ونوع المنتج (Rx/OTC). يمكن البحث بالفلاتر فقط دون اسم دواء. أدق النتائج عبر OpenFDA NDC لـ DailyMed و drugs.com؛ لـ eMC تُضاف الفلاتر ككلمات بحث.
+
 يُفتح العرض في نافذة منبثقة مع ترجمة سريعة إلى العربية (Google Translate العام مع احتياطي MyMemory، وLibreTranslate اختياري). عرض الإنجليزية LTR.
 DailyMed يحمّل نسخة XSL/الطباعة الكاملة وليس معاينة قصيرة.
 

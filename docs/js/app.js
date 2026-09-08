@@ -290,6 +290,15 @@ const smpcClearBtn = document.getElementById("smpc-clear-btn");
 const smpcSearchStatus = document.getElementById("smpc-search-status");
 const smpcSearchResults = document.getElementById("smpc-search-results");
 const smpcSourceInputs = [...document.querySelectorAll('input[name="smpc-source"]')];
+const smpcFilterFormulation = document.getElementById("smpc-filter-formulation");
+const smpcFilterManufacturer = document.getElementById("smpc-filter-manufacturer");
+const smpcFilterPackagingType = document.getElementById("smpc-filter-packaging-type");
+const smpcFilterPackagingCount = document.getElementById("smpc-filter-packaging-count");
+const smpcFilterAtc = document.getElementById("smpc-filter-atc");
+const smpcFilterRoute = document.getElementById("smpc-filter-route");
+const smpcFilterStrength = document.getElementById("smpc-filter-strength");
+const smpcFilterProductType = document.getElementById("smpc-filter-product-type");
+const smpcFiltersPanel = document.getElementById("smpc-filters");
 const smpcViewerModal = document.getElementById("smpc-viewer-modal");
 const smpcViewerBackdrop = document.getElementById("smpc-viewer-backdrop");
 const smpcViewer = document.getElementById("smpc-viewer");
@@ -1739,29 +1748,89 @@ function smpcSourceLabel(source = getSelectedSmpcSource()) {
   return "DailyMed";
 }
 
+function collectSmpcFilters() {
+  const countRaw = smpcFilterPackagingCount?.value;
+  const countNum = Number(countRaw);
+  return {
+    formulation: smpcFilterFormulation?.value.trim() || "",
+    manufacturer: smpcFilterManufacturer?.value.trim() || "",
+    packagingType: smpcFilterPackagingType?.value.trim() || "",
+    packagingCount: Number.isFinite(countNum) && countNum > 0 ? countNum : "",
+    atc: smpcFilterAtc?.value.trim() || "",
+    route: smpcFilterRoute?.value.trim() || "",
+    strength: smpcFilterStrength?.value.trim() || "",
+    productType: smpcFilterProductType?.value || "",
+  };
+}
+
+function hasCollectedSmpcFilters(filters = collectSmpcFilters()) {
+  return Boolean(
+    filters.formulation ||
+      filters.manufacturer ||
+      filters.packagingType ||
+      filters.packagingCount ||
+      filters.atc ||
+      filters.route ||
+      filters.strength ||
+      filters.productType
+  );
+}
+
+function clearSmpcFilters() {
+  if (smpcFilterFormulation) smpcFilterFormulation.value = "";
+  if (smpcFilterManufacturer) smpcFilterManufacturer.value = "";
+  if (smpcFilterPackagingType) smpcFilterPackagingType.value = "";
+  if (smpcFilterPackagingCount) smpcFilterPackagingCount.value = "";
+  if (smpcFilterAtc) smpcFilterAtc.value = "";
+  if (smpcFilterRoute) smpcFilterRoute.value = "";
+  if (smpcFilterStrength) smpcFilterStrength.value = "";
+  if (smpcFilterProductType) smpcFilterProductType.value = "";
+  if (smpcFiltersPanel) smpcFiltersPanel.open = false;
+}
+
+function summarizeSmpcFilters(filters) {
+  const parts = [];
+  if (filters.formulation) parts.push(`شكل: ${filters.formulation}`);
+  if (filters.manufacturer) parts.push(`مصنّع: ${filters.manufacturer}`);
+  if (filters.packagingType) parts.push(`تعبئة: ${filters.packagingType}`);
+  if (filters.packagingCount) parts.push(`عدد: ${filters.packagingCount}`);
+  if (filters.atc) parts.push(`ATC/فئة: ${filters.atc}`);
+  if (filters.route) parts.push(`طريق: ${filters.route}`);
+  if (filters.strength) parts.push(`تركيز: ${filters.strength}`);
+  if (filters.productType) parts.push(filters.productType.includes("OTC") ? "OTC" : "Rx");
+  return parts.join(" · ");
+}
+
 async function runSmpcSearch() {
   const query = smpcSearchQuery?.value.trim() || "";
-  if (!query) {
-    setSmpcStatus("أدخل اسم المادة الفعّالة أو الاسم التجاري أو الشكل الصيدلاني.", true);
+  const filters = collectSmpcFilters();
+  const hasFilters = hasCollectedSmpcFilters(filters);
+  if (!query && !hasFilters) {
+    setSmpcStatus("أدخل اسم الدواء أو فعّل فلتراً واحداً على الأقل من البحث المخصص.", true);
     return;
   }
 
   const source = getSelectedSmpcSource();
   smpcSearchBtn.disabled = true;
-  setSmpcStatus(`جارٍ البحث في ${smpcSourceLabel(source)} عن «${query}»…`);
+  const filterHint = hasFilters ? ` · فلاتر: ${summarizeSmpcFilters(filters)}` : "";
+  setSmpcStatus(
+    query
+      ? `جارٍ البحث في ${smpcSourceLabel(source)} عن «${query}»${filterHint}…`
+      : `جارٍ البحث بالفلاتر في ${smpcSourceLabel(source)}${filterHint}…`
+  );
   closeSmpcViewer();
   try {
     const limit = Number(smpcResultCount?.value || 8);
-    smpcResultsCache = await searchSmpc(query, { limit, source });
+    smpcResultsCache = await searchSmpc(query, { limit, source, filters });
     if (smpcSearchResults) {
       smpcSearchResults.innerHTML = renderSmpcSearchResults(smpcResultsCache);
       bindSmpcSearchResults(smpcSearchResults, { onOpen: openSmpcDocument });
     }
-    if (smpcClearBtn) smpcClearBtn.disabled = !smpcResultsCache.length;
+    if (smpcClearBtn) smpcClearBtn.disabled = !smpcResultsCache.length && !query && !hasFilters;
     setSmpcStatus(
       smpcResultsCache.length
-        ? `عُثر على ${smpcResultsCache.length} نتيجة من ${smpcSourceLabel(source)}. اضغط «عرض SmPC» لفتح النشرة الكاملة.`
-        : `لا نتائج من ${smpcSourceLabel(source)} — جرّب اسماً إنجليزياً أو مصدراً آخر.`,
+        ? `عُثر على ${smpcResultsCache.length} نتيجة من ${smpcSourceLabel(source)}${filterHint}. اضغط «عرض SmPC» لفتح النشرة الكاملة.`
+        : `لا نتائج من ${smpcSourceLabel(source)}${filterHint} — جرّب اسماً إنجليزياً أو خفّف الفلاتر.`,
       !smpcResultsCache.length
     );
   } catch (error) {
@@ -2936,6 +3005,7 @@ smpcSearchBtn?.addEventListener("click", () => runSmpcSearch());
 smpcClearBtn?.addEventListener("click", () => {
   if (smpcSearchResults) smpcSearchResults.innerHTML = "";
   if (smpcSearchQuery) smpcSearchQuery.value = "";
+  clearSmpcFilters();
   if (smpcClearBtn) smpcClearBtn.disabled = true;
   closeSmpcViewer();
   setSmpcStatus("");
@@ -2945,7 +3015,7 @@ smpcSourceInputs.forEach((input) => {
     if (smpcSearchResults) smpcSearchResults.innerHTML = "";
     if (smpcClearBtn) smpcClearBtn.disabled = true;
     closeSmpcViewer();
-    setSmpcStatus(`المصدر: ${smpcSourceLabel()}. أدخل اسماً ثم ابحث.`);
+    setSmpcStatus(`المصدر: ${smpcSourceLabel()}. أدخل اسماً أو فلاتر مخصصة ثم ابحث.`);
   });
 });
 smpcResultCount?.addEventListener("input", () => {
@@ -2956,6 +3026,25 @@ smpcSearchQuery?.addEventListener("keydown", (event) => {
     event.preventDefault();
     runSmpcSearch();
   }
+});
+[
+  smpcFilterFormulation,
+  smpcFilterManufacturer,
+  smpcFilterPackagingType,
+  smpcFilterPackagingCount,
+  smpcFilterAtc,
+  smpcFilterRoute,
+  smpcFilterStrength,
+].forEach((input) => {
+  input?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      runSmpcSearch();
+    }
+  });
+});
+smpcFilterProductType?.addEventListener("change", () => {
+  if (smpcClearBtn) smpcClearBtn.disabled = false;
 });
 smpcTranslateBtn?.addEventListener("click", () => translateActiveSmpc());
 smpcDownloadEnBtn?.addEventListener("click", () => downloadActiveSmpc("en"));

@@ -8,6 +8,7 @@
  */
 
 const OPENFDA_LABEL = "https://api.fda.gov/drug/label.json";
+const OPENFDA_NDC = "https://api.fda.gov/drug/ndc.json";
 const DAILYMED_SPLS = "https://dailymed.nlm.nih.gov/dailymed/services/v2/spls.json";
 const JINA_PREFIX = "https://r.jina.ai/";
 const ALLORIGINS_RAW = "https://api.allorigins.win/raw?url=";
@@ -500,6 +501,174 @@ async function fetchOpenFda(searchExpr, limit = 8) {
   return data.results || [];
 }
 
+
+export function normalizeSmpcFilters(raw = {}) {
+  const num = Number(raw.packagingCount);
+  return {
+    formulation: String(raw.formulation || "").trim(),
+    manufacturer: String(raw.manufacturer || "").trim(),
+    packagingType: String(raw.packagingType || "").trim(),
+    packagingCount: Number.isFinite(num) && num > 0 ? Math.round(num) : "",
+    atc: String(raw.atc || "").trim(),
+    route: String(raw.route || "").trim(),
+    strength: String(raw.strength || "").trim(),
+    productType: String(raw.productType || "").trim(),
+  };
+}
+
+export function hasActiveSmpcFilters(filters = {}) {
+  const f = normalizeSmpcFilters(filters);
+  return Boolean(
+    f.formulation ||
+      f.manufacturer ||
+      f.packagingType ||
+      f.packagingCount ||
+      f.atc ||
+      f.route ||
+      f.strength ||
+      f.productType
+  );
+}
+
+function quoteFda(value) {
+  return `"${String(value || "").replace(/"/g, '\\"')}"`;
+}
+
+function parsePackagingMeta(packaging = []) {
+  const items = Array.isArray(packaging) ? packaging : [];
+  return items.map((item) => {
+    const description = String(item?.description || "");
+    const countMatch = description.match(/^(\d+)\b/);
+    const typeMatch = description.match(/\b(?:in|IN)\s+1\s+([A-Z][A-Z ,/-]*)/i) ||
+      description.match(/\b(BOTTLE|BLISTER|CARTON|VIAL|AMPULE|AMPOULE|SYRINGE|TUBE|POUCH|BAG|CAN|JAR)\b/i);
+    return {
+      description,
+      count: countMatch ? Number(countMatch[1]) : null,
+      type: typeMatch ? String(typeMatch[1]).replace(/,.*/, "").trim().toUpperCase() : "",
+      ndc: item?.package_ndc || "",
+    };
+  });
+}
+
+function matchesPackagingFilters(packagingMeta, filters) {
+  const f = normalizeSmpcFilters(filters);
+  if (!f.packagingType && !f.packagingCount) return true;
+  if (!packagingMeta.length) return false;
+  return packagingMeta.some((pkg) => {
+    const typeOk = !f.packagingType || (pkg.type && pkg.type.includes(f.packagingType.toUpperCase())) ||
+      (pkg.description && pkg.description.toUpperCase().includes(f.packagingType.toUpperCase()));
+    const countOk = !f.packagingCount || Number(pkg.count) === Number(f.packagingCount) ||
+      (pkg.description && new RegExp(`(^|\\b)${f.packagingCount}\\b`).test(pkg.description));
+    return typeOk && countOk;
+  });
+}
+
+function buildNdcSearchExpr(query, filters = {}) {
+  const f = normalizeSmpcFilters(filters);
+  const parts = [];
+  const q = String(query || "").trim();
+  if (q) {
+    const escaped = q.replace(/"/g, '\\"');
+    parts.push(`(generic_name:${quoteFda(escaped)} OR brand_name:${quoteFda(escaped)} OR substance_name:${quoteFda(escaped)})`);
+  }
+  if (f.formulation) parts.push(`dosage_form:${quoteFda(f.formulation)}`);
+  if (f.manufacturer) parts.push(`labeler_name:${quoteFda(f.manufacturer)}`);
+  if (f.route) parts.push(`route:${quoteFda(f.route)}`);
+  if (f.productType) parts.push(`product_type:${quoteFda(f.productType)}`);
+  if (f.strength) parts.push(`active_ingredients.strength:${quoteFda(f.strength)}`);
+  if (f.packagingType) parts.push(`packaging.description:${quoteFda(f.packagingType)}`);
+  if (f.packagingCount) parts.push(`packaging.description:${quoteFda(String(f.packagingCount))}`);
+  // FDA pharm_class approximates therapeutic/ATC grouping; free-text ATC codes also search here.
+  if (f.atc) parts.push(`pharm_class:${quoteFda(f.atc)}`);
+  return parts.join(" AND ");
+}
+
+async function fetchOpenFdaNdc(searchExpr, limit = 12) {
+  if (!searchExpr) return [];
+  const url = `${OPENFDA_NDC}?search=${encodeURIComponent(searchExpr)}&limit=${limit}`;
+  const response = await fetch(url);
+  if (response.status === 404) return [];
+  if (!response.ok) throw new Error(`OpenFDA NDC (${response.status})`);
+  const data = await response.json();
+  return data.results || [];
+}
+
+function normalizeNdcResult(item, { source = "dailymed" } = {}) {
+  const openfda = item.openfda || {};
+  const setIds = openfda.spl_set_id || [];
+  const setId = Array.isArray(setIds) ? setIds[0] || "" : String(setIds || "");
+  const brand = item.brand_name || item.brand_name_base || "";
+  const generic = item.generic_name || "";
+  const form = item.dosage_form || "";
+  const route = Array.isArray(item.route) ? item.route.join(", ") : item.route || "";
+  const manufacturer = item.labeler_name || joinList(openfda.manufacturer_name);
+  const packagingMeta = parsePackagingMeta(item.packaging || []);
+  const pharmClass = Array.isArray(item.pharm_class) ? item.pharm_class.join(" · ") : "";
+  const strength = Array.isArray(item.active_ingredients)
+    ? item.active_ingredients
+        .map((ing) => [ing.name, ing.strength].filter(Boolean).join(" "))
+        .filter(Boolean)
+        .join(" · ")
+    : "";
+  const packageSummary = packagingMeta
+    .slice(0, 3)
+    .map((pkg) => pkg.description)
+    .filter(Boolean)
+    .join(" | ");
+
+  const title = brand || generic || "Untitled product";
+  const idBase = setId || item.product_ndc || slugify(title);
+  return {
+    id: `${source}:${idBase}:${item.product_ndc || slugify(packageSummary || title)}`,
+    source,
+    sourceLabel: source === "drugs" ? "drugs.com" : "DailyMed / OpenFDA NDC",
+    title,
+    api: generic,
+    formulation: [form, strength, route].filter(Boolean).join(" · "),
+    manufacturer,
+    setId,
+    url:
+      source === "drugs"
+        ? `https://www.drugs.com/pro/${slugify(brand || generic)}.html`
+        : setId
+          ? `https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=${setId}`
+          : "https://dailymed.nlm.nih.gov/",
+    sections: [],
+    englishText: title,
+    needsFullLabel: Boolean(setId),
+    hydrated: false,
+    packagingType: packagingMeta.map((p) => p.type).filter(Boolean).join(", "),
+    packagingCount: packagingMeta.map((p) => p.count).filter((n) => n != null).join(", "),
+    packagingSummary: packageSummary,
+    pharmClass,
+    strength,
+    route,
+    productType: item.product_type || "",
+    productNdc: item.product_ndc || "",
+  };
+}
+
+async function searchByNdcFilters(query, { limit = 8, source = "dailymed", filters = {} } = {}) {
+  const expr = buildNdcSearchExpr(query, filters);
+  if (!expr) return [];
+  const rows = await fetchOpenFdaNdc(expr, Math.min(Math.max(limit * 3, 12), 40));
+  const f = normalizeSmpcFilters(filters);
+  const seen = new Set();
+  const out = [];
+
+  for (const item of rows) {
+    const packagingMeta = parsePackagingMeta(item.packaging || []);
+    if (!matchesPackagingFilters(packagingMeta, f)) continue;
+    const doc = normalizeNdcResult(item, { source });
+    const key = `${doc.setId || doc.productNdc}|${doc.packagingSummary}|${doc.manufacturer}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(doc);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 function buildQueryVariants(query) {
   const q = String(query || "").trim();
   if (!q) return [];
@@ -510,6 +679,59 @@ function buildQueryVariants(query) {
     `openfda.substance_name:"${escaped}"`,
     `active_ingredient:"${escaped}"`,
   ];
+}
+
+function matchesClientFilters(doc, filters = {}) {
+  const f = normalizeSmpcFilters(filters);
+  if (!hasActiveSmpcFilters(f)) return true;
+  const blob = [
+    doc.title,
+    doc.api,
+    doc.formulation,
+    doc.manufacturer,
+    doc.packagingType,
+    doc.packagingCount,
+    doc.packagingSummary,
+    doc.pharmClass,
+    doc.strength,
+    doc.route,
+    doc.productType,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  const checks = [
+    f.formulation,
+    f.manufacturer,
+    f.packagingType,
+    f.atc,
+    f.route,
+    f.strength,
+    f.productType,
+  ];
+  for (const needle of checks) {
+    if (needle && !blob.includes(String(needle).toLowerCase())) return false;
+  }
+  if (f.packagingCount) {
+    const pack = String(doc.packagingSummary || doc.packagingCount || blob);
+    const countOk =
+      new RegExp(`(^|\\b)${f.packagingCount}\\b`).test(pack) ||
+      String(doc.packagingCount || "")
+        .split(/[,|]/)
+        .map((s) => s.trim())
+        .includes(String(f.packagingCount));
+    if (!countOk) return false;
+  }
+  return true;
+}
+
+function appendFilterKeywords(query, filters = {}) {
+  const f = normalizeSmpcFilters(filters);
+  return [query, f.formulation, f.manufacturer, f.packagingType, f.packagingCount, f.atc, f.route, f.strength]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
 }
 
 function normalizeOpenFda(item) {
@@ -593,12 +815,24 @@ function normalizeDailyMedListing(item) {
   };
 }
 
-async function searchDailyMedSource(query, { limit = 8 } = {}) {
+async function searchDailyMedSource(query, { limit = 8, filters = {} } = {}) {
+  const f = normalizeSmpcFilters(filters);
+  const q = String(query || "").trim();
+  if (!q && !hasActiveSmpcFilters(f)) return [];
+  if (hasActiveSmpcFilters(f)) {
+    const filtered = await searchByNdcFilters(q || f.atc || f.formulation || f.manufacturer, {
+      limit,
+      source: "dailymed",
+      filters: f,
+    });
+    if (filtered.length) return filtered;
+  }
+
   // OpenFDA has CORS *. DailyMed JSON often does not — use OpenFDA first.
   const seen = new Set();
   const results = [];
 
-  for (const expr of buildQueryVariants(query)) {
+  for (const expr of buildQueryVariants(q)) {
     if (results.length >= limit) break;
     try {
       const batch = await fetchOpenFda(expr, Math.min(6, limit));
@@ -607,6 +841,7 @@ async function searchDailyMedSource(query, { limit = 8 } = {}) {
         if (!setId || seen.has(setId)) continue;
         seen.add(setId);
         const doc = normalizeOpenFda(item);
+        if (!matchesClientFilters(doc, f)) continue;
         results.push({
           ...doc,
           needsFullLabel: true,
@@ -623,7 +858,7 @@ async function searchDailyMedSource(query, { limit = 8 } = {}) {
 
   try {
     const { text } = await fetchRemotePage(
-      `${DAILYMED_SPLS}?drug_name=${encodeURIComponent(query)}&pagesize=${limit}`
+      `${DAILYMED_SPLS}?drug_name=${encodeURIComponent(q)}&pagesize=${Math.max(limit * 2, 10)}`
     );
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
@@ -631,6 +866,7 @@ async function searchDailyMedSource(query, { limit = 8 } = {}) {
       for (const item of data.data || []) {
         const doc = normalizeDailyMedListing(item);
         if (!doc.setId || seen.has(doc.setId)) continue;
+        if (!matchesClientFilters(doc, f)) continue;
         seen.add(doc.setId);
         results.push(doc);
         if (results.length >= limit) break;
@@ -699,18 +935,35 @@ function parseEmcSearch(markdownOrHtml, { limit = 8 } = {}) {
   return found;
 }
 
-async function searchEmcSource(query, { limit = 8 } = {}) {
-  const searchUrl = `https://www.medicines.org.uk/emc/search?q=${encodeURIComponent(query)}&docType=smpc`;
+async function searchEmcSource(query, { limit = 8, filters = {} } = {}) {
+  const f = normalizeSmpcFilters(filters);
+  const searchQ = appendFilterKeywords(query, f);
+  if (!searchQ) return [];
+
+  const searchUrl = `https://www.medicines.org.uk/emc/search?q=${encodeURIComponent(searchQ)}&docType=smpc`;
   const { text: payload } = await fetchRemotePage(searchUrl, { preferHtml: true });
-  const results = parseEmcSearch(payload, { limit });
+  const results = parseEmcSearch(payload, { limit: Math.max(limit * 2, 12) }).filter((doc) =>
+    matchesClientFilters(doc, f)
+  );
   if (!results.length) {
-    throw new Error("لا نتائج eMC — جرّب اسماً إنجليزياً مثل ibuprofen.");
+    throw new Error("لا نتائج eMC — جرّب اسماً إنجليزياً مثل ibuprofen أو خفّف الفلاتر.");
   }
-  return results;
+  return results.slice(0, limit);
 }
 
-async function searchDrugsComSource(query, { limit = 8 } = {}) {
+async function searchDrugsComSource(query, { limit = 8, filters = {} } = {}) {
+  const f = normalizeSmpcFilters(filters);
   const q = String(query || "").trim();
+  if (!q && !hasActiveSmpcFilters(f)) return [];
+  if (hasActiveSmpcFilters(f)) {
+    const filtered = await searchByNdcFilters(q || f.atc || f.formulation || f.manufacturer, {
+      limit,
+      source: "drugs",
+      filters: f,
+    });
+    if (filtered.length) return filtered;
+  }
+
   const candidates = new Map();
 
   const addCandidate = (name, hint = "", setId = "") => {
@@ -760,29 +1013,42 @@ async function searchDrugsComSource(query, { limit = 8 } = {}) {
     if (candidates.size >= limit * 2) break;
   }
 
-  const ordered = [...candidates.values()].sort((a, b) => {
-    const exactA = a.slug === slugify(q) ? 0 : 1;
-    const exactB = b.slug === slugify(q) ? 0 : 1;
-    if (exactA !== exactB) return exactA - exactB;
-    const setA = a.setId ? 0 : 1;
-    const setB = b.setId ? 0 : 1;
-    if (setA !== setB) return setA - setB;
-    const junkA = /care-one|topcare|leader|good-sense|equaline|kirkland|up-and-up|infant/i.test(a.slug) ? 1 : 0;
-    const junkB = /care-one|topcare|leader|good-sense|equaline|kirkland|up-and-up|infant/i.test(b.slug) ? 1 : 0;
-    if (junkA !== junkB) return junkA - junkB;
-    return a.slug.length - b.slug.length;
-  });
+  const ordered = [...candidates.values()]
+    .filter((doc) => matchesClientFilters(doc, f))
+    .sort((a, b) => {
+      const exactA = a.slug === slugify(q) ? 0 : 1;
+      const exactB = b.slug === slugify(q) ? 0 : 1;
+      if (exactA !== exactB) return exactA - exactB;
+      const setA = a.setId ? 0 : 1;
+      const setB = b.setId ? 0 : 1;
+      if (setA !== setB) return setA - setB;
+      const junkA = /care-one|topcare|leader|good-sense|equaline|kirkland|up-and-up|infant/i.test(a.slug) ? 1 : 0;
+      const junkB = /care-one|topcare|leader|good-sense|equaline|kirkland|up-and-up|infant/i.test(b.slug) ? 1 : 0;
+      if (junkA !== junkB) return junkA - junkB;
+      return a.slug.length - b.slug.length;
+    });
   return ordered.slice(0, limit);
 }
 
-export async function searchSmpc(query, { limit = 8, source = "dailymed" } = {}) {
+export async function searchSmpc(query, { limit = 8, source = "dailymed", filters = {} } = {}) {
   const q = String(query || "").trim();
-  if (!q) return [];
+  const f = normalizeSmpcFilters(filters);
   const src = SMPC_SOURCE_OPTIONS.some((item) => item.id === source) ? source : "dailymed";
+  if (!q && !hasActiveSmpcFilters(f)) return [];
 
-  if (src === "emc") return searchEmcSource(q, { limit });
-  if (src === "drugs") return searchDrugsComSource(q, { limit });
-  return searchDailyMedSource(q, { limit });
+  // Filtered NDC search is richest for DailyMed / drugs.com
+  if ((src === "dailymed" || src === "drugs") && hasActiveSmpcFilters(f)) {
+    const filtered = await searchByNdcFilters(q || f.atc || f.formulation || f.manufacturer, {
+      limit,
+      source: src,
+      filters: f,
+    });
+    if (filtered.length) return filtered;
+  }
+
+  if (src === "emc") return searchEmcSource(q, { limit, filters: f });
+  if (src === "drugs") return searchDrugsComSource(q, { limit, filters: f });
+  return searchDailyMedSource(q, { limit, filters: f });
 }
 
 function parseEmcMarkdownSections(markdown) {
@@ -957,6 +1223,9 @@ export function renderSmpcSearchResults(docs) {
             ${doc.api ? `API: ${escapeHtml(doc.api)}` : ""}
             ${doc.formulation ? ` · ${escapeHtml(doc.formulation)}` : ""}
             ${doc.manufacturer ? ` · ${escapeHtml(doc.manufacturer)}` : ""}
+            ${doc.packagingSummary ? ` · Pack: ${escapeHtml(doc.packagingSummary)}` : ""}
+            ${doc.pharmClass ? ` · Class: ${escapeHtml(String(doc.pharmClass).slice(0, 90))}` : ""}
+            ${doc.productType ? ` · ${escapeHtml(doc.productType)}` : ""}
           </p>
           <div class="smpc-ext-links">
             <a class="btn ghost small" href="${escapeHtml(doc.url)}" target="_blank" rel="noopener noreferrer">فتح المصدر</a>
