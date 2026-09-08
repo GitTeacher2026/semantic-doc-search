@@ -3342,19 +3342,108 @@ html[data-theme="dark"] .fb-card:hover {
   margin-bottom: 0.55rem;
 }
 
-.smpc-viewer {
-  margin-top: 1rem;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 0.85rem;
-  background: var(--surface-muted);
+.smpc-viewer-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1250;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+}
+
+.smpc-viewer-modal.hidden {
+  display: none;
+}
+
+.smpc-viewer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 14, 22, 0.7);
+}
+
+.smpc-viewer-shell {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 1280px);
+  height: min(100%, 100dvh);
+  margin: 0 auto;
+  background: var(--panel, var(--surface));
+  border-inline: 1px solid var(--line);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+
+.smpc-viewer-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-muted, #f3eee4);
+}
+
+.smpc-viewer-header-text {
+  min-width: min(100%, 18rem);
+  flex: 1 1 16rem;
+}
+
+.smpc-viewer-header-text h2 {
+  margin: 0 0 0.2rem;
+  font-size: 1.15rem;
+}
+
+.smpc-viewer-header-text .muted {
+  margin: 0;
+  font-size: 0.88rem;
 }
 
 .smpc-viewer-toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin-bottom: 0.85rem;
+  justify-content: flex-end;
+}
+
+.smpc-viewer-status {
+  margin: 0;
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+
+.smpc-viewer-status.is-error {
+  color: var(--danger);
+}
+
+.smpc-viewer-status.hidden {
+  display: none;
+}
+
+.smpc-viewer-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 1rem;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  background: var(--surface-muted, #f7f3ea);
+}
+
+.smpc-viewer-body.has-arabic {
+  grid-template-columns: 1fr 1fr;
+}
+
+.smpc-viewer-pane {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.85rem 1rem;
+  background: var(--panel, #fff);
+  overflow: auto;
+  min-height: 12rem;
 }
 
 .smpc-document-header h3 {
@@ -3380,12 +3469,6 @@ html[data-theme="dark"] .fb-card:hover {
   font-size: 0.92rem;
   line-height: 1.55;
   white-space: normal;
-}
-
-.smpc-viewer-pane + .smpc-viewer-pane {
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 2px dashed var(--line);
 }
 
 .smpc-viewer-en,
@@ -3423,4 +3506,18 @@ html[data-theme="dark"] .fb-card:hover {
   direction: rtl !important;
   text-align: right !important;
   unicode-bidi: isolate;
+}
+
+@media (max-width: 900px) {
+  .smpc-viewer-body.has-arabic {
+    grid-template-columns: 1fr;
+  }
+
+  .smpc-viewer-shell {
+    width: 100%;
+  }
+}
+
+body.smpc-viewer-open {
+  overflow: hidden;
 }

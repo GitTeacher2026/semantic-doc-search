@@ -289,9 +289,14 @@ const smpcSearchBtn = document.getElementById("smpc-search-btn");
 const smpcClearBtn = document.getElementById("smpc-clear-btn");
 const smpcSearchStatus = document.getElementById("smpc-search-status");
 const smpcSearchResults = document.getElementById("smpc-search-results");
+const smpcViewerModal = document.getElementById("smpc-viewer-modal");
+const smpcViewerBackdrop = document.getElementById("smpc-viewer-backdrop");
 const smpcViewer = document.getElementById("smpc-viewer");
 const smpcViewerEn = document.getElementById("smpc-viewer-en");
 const smpcViewerAr = document.getElementById("smpc-viewer-ar");
+const smpcViewerTitle = document.getElementById("smpc-viewer-title");
+const smpcViewerSubtitle = document.getElementById("smpc-viewer-subtitle");
+const smpcViewerStatus = document.getElementById("smpc-viewer-status");
 const smpcTranslateBtn = document.getElementById("smpc-translate-btn");
 const smpcDownloadEnBtn = document.getElementById("smpc-download-en-btn");
 const smpcDownloadArBtn = document.getElementById("smpc-download-ar-btn");
@@ -1693,15 +1698,33 @@ function setSmpcStatus(message, isError = false) {
   smpcSearchStatus.classList.toggle("is-error", Boolean(isError));
 }
 
+function setSmpcViewerStatus(message, isError = false) {
+  if (!smpcViewerStatus) return;
+  if (!message) {
+    smpcViewerStatus.textContent = "";
+    smpcViewerStatus.classList.add("hidden");
+    smpcViewerStatus.classList.remove("is-error");
+    return;
+  }
+  smpcViewerStatus.textContent = message;
+  smpcViewerStatus.classList.remove("hidden");
+  smpcViewerStatus.classList.toggle("is-error", Boolean(isError));
+}
+
 function closeSmpcViewer() {
-  smpcViewer?.classList.add("hidden");
+  smpcViewerModal?.classList.add("hidden");
+  document.body.classList.remove("smpc-viewer-open");
+  smpcViewer?.classList.remove("has-arabic");
   smpcViewerAr?.classList.add("hidden");
   if (smpcViewerEn) smpcViewerEn.innerHTML = "";
   if (smpcViewerAr) smpcViewerAr.innerHTML = "";
+  if (smpcViewerSubtitle) smpcViewerSubtitle.textContent = "";
+  setSmpcViewerStatus("");
   activeSmpcDoc = null;
   activeSmpcArabicSections = null;
   if (smpcDownloadArBtn) smpcDownloadArBtn.disabled = true;
   if (smpcDownloadBothBtn) smpcDownloadBothBtn.disabled = true;
+  if (smpcTranslateBtn) smpcTranslateBtn.disabled = false;
 }
 
 async function runSmpcSearch() {
@@ -1724,7 +1747,7 @@ async function runSmpcSearch() {
     if (smpcClearBtn) smpcClearBtn.disabled = !smpcResultsCache.length;
     setSmpcStatus(
       smpcResultsCache.length
-        ? `عُثر على ${smpcResultsCache.length} منتجاً. افتح النتيجة لعرض SmPC أو انتقل للمواقع المرجعية.`
+        ? `عُثر على ${smpcResultsCache.length} منتجاً. افتح النتيجة في نافذة منبثقة لعرض SmPC أو انتقل للمواقع المرجعية.`
         : "لا نتائج — جرّب اسماً عاماً (API) أو اسماً تجارياً إنجليزياً.",
       !smpcResultsCache.length
     );
@@ -1745,16 +1768,22 @@ async function openSmpcDocument(docId) {
     smpcResultsCache = smpcResultsCache.map((item) => (item.id === docId ? doc : item));
     activeSmpcDoc = doc;
     activeSmpcArabicSections = null;
+    if (smpcViewerTitle) smpcViewerTitle.textContent = "نشرة خصائص المنتج (SmPC)";
+    if (smpcViewerSubtitle) smpcViewerSubtitle.textContent = doc.title || "";
     if (smpcViewerEn) smpcViewerEn.innerHTML = renderSmpcDocument(doc);
     if (smpcViewerAr) {
       smpcViewerAr.innerHTML = "";
       smpcViewerAr.classList.add("hidden");
     }
-    smpcViewer?.classList.remove("hidden");
+    smpcViewer?.classList.remove("has-arabic");
     if (smpcDownloadArBtn) smpcDownloadArBtn.disabled = true;
     if (smpcDownloadBothBtn) smpcDownloadBothBtn.disabled = true;
-    smpcViewer?.scrollIntoView({ behavior: "smooth", block: "start" });
-    setSmpcStatus(`تم عرض SmPC لـ «${doc.title}». يمكنك الترجمة والتنزيل كـ DOCX.`, false);
+    if (smpcTranslateBtn) smpcTranslateBtn.disabled = false;
+    setSmpcViewerStatus("يمكنك الترجمة إلى العربية أو تنزيل DOCX من شريط الأدوات.");
+    smpcViewerModal?.classList.remove("hidden");
+    document.body.classList.add("smpc-viewer-open");
+    smpcViewerClose?.focus?.();
+    setSmpcStatus(`تم فتح SmPC لـ «${doc.title}» في نافذة منبثقة.`, false);
   } catch (error) {
     setSmpcStatus(error.message, true);
   }
@@ -1762,24 +1791,25 @@ async function openSmpcDocument(docId) {
 
 async function translateActiveSmpc() {
   if (!activeSmpcDoc?.sections?.length) {
-    setSmpcStatus("افتح نشرة SmPC أولاً قبل الترجمة.", true);
+    setSmpcViewerStatus("افتح نشرة SmPC أولاً قبل الترجمة.", true);
     return;
   }
   smpcTranslateBtn.disabled = true;
   try {
     const arabic = await translateSmpcSections(activeSmpcDoc.sections, {
-      onStatus: (message) => setSmpcStatus(message),
+      onStatus: (message) => setSmpcViewerStatus(message),
     });
     activeSmpcArabicSections = arabic;
     if (smpcViewerAr) {
       smpcViewerAr.innerHTML = renderSmpcDocument(activeSmpcDoc, { arabicSections: arabic });
       smpcViewerAr.classList.remove("hidden");
     }
+    smpcViewer?.classList.add("has-arabic");
     if (smpcDownloadArBtn) smpcDownloadArBtn.disabled = false;
     if (smpcDownloadBothBtn) smpcDownloadBothBtn.disabled = false;
-    setSmpcStatus("اكتملت الترجمة إلى العربية. يمكنك تنزيل EN و AR كملفات DOCX.", false);
+    setSmpcViewerStatus("اكتملت الترجمة إلى العربية. يمكنك تنزيل EN و AR كملفات DOCX.", false);
   } catch (error) {
-    setSmpcStatus(error.message, true);
+    setSmpcViewerStatus(error.message, true);
   } finally {
     smpcTranslateBtn.disabled = false;
   }
@@ -1795,11 +1825,11 @@ function smpcMeta() {
 
 async function downloadActiveSmpc(mode) {
   if (!activeSmpcDoc?.sections?.length) {
-    setSmpcStatus("لا توجد نشرة SmPC مفتوحة للتنزيل.", true);
+    setSmpcViewerStatus("لا توجد نشرة SmPC مفتوحة للتنزيل.", true);
     return;
   }
   try {
-    setSmpcStatus("جارٍ تجهيز ملف DOCX…");
+    setSmpcViewerStatus("جارٍ تجهيز ملف DOCX…");
     const payload = {
       title: activeSmpcDoc.title,
       meta: smpcMeta(),
@@ -1809,15 +1839,15 @@ async function downloadActiveSmpc(mode) {
     if (mode === "en" || mode === "both") payload.englishSections = activeSmpcDoc.sections;
     if (mode === "ar" || mode === "both") {
       if (!activeSmpcArabicSections?.length) {
-        setSmpcStatus("ترجم النشرة إلى العربية أولاً.", true);
+        setSmpcViewerStatus("ترجم النشرة إلى العربية أولاً.", true);
         return;
       }
       payload.arabicSections = activeSmpcArabicSections;
     }
     await downloadSmpcDocxPair(payload);
-    setSmpcStatus("تم تنزيل الملف/الملفات.", false);
+    setSmpcViewerStatus("تم تنزيل الملف/الملفات.", false);
   } catch (error) {
-    setSmpcStatus(error.message, true);
+    setSmpcViewerStatus(error.message, true);
   }
 }
 
@@ -2902,6 +2932,12 @@ smpcDownloadEnBtn?.addEventListener("click", () => downloadActiveSmpc("en"));
 smpcDownloadArBtn?.addEventListener("click", () => downloadActiveSmpc("ar"));
 smpcDownloadBothBtn?.addEventListener("click", () => downloadActiveSmpc("both"));
 smpcViewerClose?.addEventListener("click", () => closeSmpcViewer());
+smpcViewerBackdrop?.addEventListener("click", () => closeSmpcViewer());
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (!smpcViewerModal || smpcViewerModal.classList.contains("hidden")) return;
+  closeSmpcViewer();
+});
 document.addEventListener("click", (event) => {
   if (
     pharmaSuggestMenu &&

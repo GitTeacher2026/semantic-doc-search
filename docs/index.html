@@ -480,18 +480,6 @@
           </div>
           <p id="smpc-search-status" class="muted smpc-search-status hidden" role="status"></p>
           <div id="smpc-search-results" class="results smpc-results"></div>
-
-          <div id="smpc-viewer" class="smpc-viewer hidden">
-            <div class="smpc-viewer-toolbar">
-              <button id="smpc-translate-btn" class="btn primary small" type="button">ترجمة إلى العربية</button>
-              <button id="smpc-download-en-btn" class="btn ghost small" type="button">تنزيل EN DOCX</button>
-              <button id="smpc-download-ar-btn" class="btn ghost small" type="button" disabled>تنزيل AR DOCX</button>
-              <button id="smpc-download-both-btn" class="btn ghost small" type="button" disabled>تنزيل EN + AR</button>
-              <button id="smpc-viewer-close" class="btn ghost small" type="button">إغلاق</button>
-            </div>
-            <div id="smpc-viewer-en" class="smpc-viewer-pane smpc-viewer-en" dir="ltr" lang="en"></div>
-            <div id="smpc-viewer-ar" class="smpc-viewer-pane smpc-viewer-ar hidden" dir="rtl" lang="ar"></div>
-          </div>
         </section>
       </main>
     </div>
@@ -514,6 +502,30 @@
         <div id="trash-list" class="trash-list"></div>
         <button id="trash-back-btn" class="btn ghost" type="button">العودة إلى المكتبة</button>
       </section>
+    </div>
+  </div>
+
+  <div id="smpc-viewer-modal" class="smpc-viewer-modal hidden" role="dialog" aria-modal="true" aria-labelledby="smpc-viewer-title">
+    <div class="smpc-viewer-backdrop" id="smpc-viewer-backdrop"></div>
+    <div class="smpc-viewer-shell">
+      <header class="smpc-viewer-header">
+        <div class="smpc-viewer-header-text">
+          <h2 id="smpc-viewer-title">نشرة خصائص المنتج (SmPC)</h2>
+          <p id="smpc-viewer-subtitle" class="muted"></p>
+        </div>
+        <div class="smpc-viewer-toolbar">
+          <button id="smpc-translate-btn" class="btn primary small" type="button">ترجمة إلى العربية</button>
+          <button id="smpc-download-en-btn" class="btn ghost small" type="button">تنزيل EN DOCX</button>
+          <button id="smpc-download-ar-btn" class="btn ghost small" type="button" disabled>تنزيل AR DOCX</button>
+          <button id="smpc-download-both-btn" class="btn ghost small" type="button" disabled>تنزيل EN + AR</button>
+          <button id="smpc-viewer-close" class="btn ghost small" type="button" aria-label="إغلاق">إغلاق</button>
+        </div>
+      </header>
+      <p id="smpc-viewer-status" class="muted smpc-viewer-status hidden" role="status"></p>
+      <div id="smpc-viewer" class="smpc-viewer-body">
+        <div id="smpc-viewer-en" class="smpc-viewer-pane smpc-viewer-en" dir="ltr" lang="en"></div>
+        <div id="smpc-viewer-ar" class="smpc-viewer-pane smpc-viewer-ar hidden" dir="rtl" lang="ar"></div>
+      </div>
     </div>
   </div>
 
@@ -838,6 +850,6 @@
 
   <iframe id="credential-catcher" name="credential-catcher" title="" tabindex="-1" aria-hidden="true" hidden></iframe>
 
-  <script type="module" src="js/main.js?v=20260908c"></script>
+  <script type="module" src="js/main.js?v=20260908d"></script>
 </body>
 </html>
