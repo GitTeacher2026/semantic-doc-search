@@ -106,6 +106,15 @@ import {
   PHARMA_CATEGORY,
   syncPharmacopoeiaFolderFromDrive,
 } from "./drive-leech.js";
+import {
+  bindSmpcSearchResults,
+  hydrateDailyMedLabel,
+  renderSmpcDocument,
+  renderSmpcSearchResults,
+  searchSmpc,
+} from "./smpc.js";
+import { translateSmpcSections } from "./smpc-translate.js";
+import { downloadSmpcDocxPair } from "./smpc-docx.js";
 import { isMegaConnected, ensureMegaAutoLogin, getMegaEmail, getLastMegaAuthError, loginToMega, logoutMega, needsMegaAuthRecovery, markMegaAuthFailed } from "./mega-auth.js";
 import {
   downloadMegaFile,
@@ -259,8 +268,10 @@ const resultCount = document.getElementById("result-count");
 const resultCountLabel = document.getElementById("result-count-label");
 const searchModeLibraryBtn = document.getElementById("search-mode-library");
 const searchModePharmaBtn = document.getElementById("search-mode-pharma");
+const searchModeSmpcBtn = document.getElementById("search-mode-smpc");
 const librarySearchPanel = document.getElementById("library-search-panel");
 const pharmaSearchPanel = document.getElementById("pharma-search-panel");
+const smpcSearchPanel = document.getElementById("smpc-search-panel");
 const pharmaSearchQuery = document.getElementById("pharma-search-query");
 const pharmaSourceFilter = document.getElementById("pharma-source-filter");
 const pharmaResultCount = document.getElementById("pharma-result-count");
@@ -271,10 +282,28 @@ const pharmaClearBtn = document.getElementById("pharma-clear-btn");
 const pharmaSearchStatus = document.getElementById("pharma-search-status");
 const pharmaSearchResults = document.getElementById("pharma-search-results");
 const pharmaSuggestMenu = document.getElementById("pharma-suggest-menu");
+const smpcSearchQuery = document.getElementById("smpc-search-query");
+const smpcResultCount = document.getElementById("smpc-result-count");
+const smpcResultCountLabel = document.getElementById("smpc-result-count-label");
+const smpcSearchBtn = document.getElementById("smpc-search-btn");
+const smpcClearBtn = document.getElementById("smpc-clear-btn");
+const smpcSearchStatus = document.getElementById("smpc-search-status");
+const smpcSearchResults = document.getElementById("smpc-search-results");
+const smpcViewer = document.getElementById("smpc-viewer");
+const smpcViewerEn = document.getElementById("smpc-viewer-en");
+const smpcViewerAr = document.getElementById("smpc-viewer-ar");
+const smpcTranslateBtn = document.getElementById("smpc-translate-btn");
+const smpcDownloadEnBtn = document.getElementById("smpc-download-en-btn");
+const smpcDownloadArBtn = document.getElementById("smpc-download-ar-btn");
+const smpcDownloadBothBtn = document.getElementById("smpc-download-both-btn");
+const smpcViewerClose = document.getElementById("smpc-viewer-close");
 const statusBanner = document.getElementById("status-banner");
 
 let searchMode = "library";
 let pharmaCatalogReady = false;
+let smpcResultsCache = [];
+let activeSmpcDoc = null;
+let activeSmpcArabicSections = null;
 
 const deleteDialog = document.getElementById("delete-dialog");
 const deleteDialogTitle = document.getElementById("delete-dialog-title");
@@ -1480,13 +1509,16 @@ function switchAppPage(page) {
 }
 
 function setSearchMode(mode) {
-  searchMode = mode === "pharma" ? "pharma" : "library";
+  searchMode = mode === "pharma" ? "pharma" : mode === "smpc" ? "smpc" : "library";
   librarySearchPanel?.classList.toggle("hidden", searchMode !== "library");
   pharmaSearchPanel?.classList.toggle("hidden", searchMode !== "pharma");
+  smpcSearchPanel?.classList.toggle("hidden", searchMode !== "smpc");
   searchModeLibraryBtn?.classList.toggle("is-active", searchMode === "library");
   searchModePharmaBtn?.classList.toggle("is-active", searchMode === "pharma");
+  searchModeSmpcBtn?.classList.toggle("is-active", searchMode === "smpc");
   searchModeLibraryBtn?.setAttribute("aria-selected", String(searchMode === "library"));
   searchModePharmaBtn?.setAttribute("aria-selected", String(searchMode === "pharma"));
+  searchModeSmpcBtn?.setAttribute("aria-selected", String(searchMode === "smpc"));
 }
 
 function setPharmaStatus(message, isError = false) {
@@ -1645,6 +1677,147 @@ async function handlePharmacopoeiaLeech(item) {
     setPharmaStatus(error.message, true);
   } finally {
     if (button) button.disabled = false;
+  }
+}
+
+function setSmpcStatus(message, isError = false) {
+  if (!smpcSearchStatus) return;
+  if (!message) {
+    smpcSearchStatus.textContent = "";
+    smpcSearchStatus.classList.add("hidden");
+    smpcSearchStatus.classList.remove("is-error");
+    return;
+  }
+  smpcSearchStatus.textContent = message;
+  smpcSearchStatus.classList.remove("hidden");
+  smpcSearchStatus.classList.toggle("is-error", Boolean(isError));
+}
+
+function closeSmpcViewer() {
+  smpcViewer?.classList.add("hidden");
+  smpcViewerAr?.classList.add("hidden");
+  if (smpcViewerEn) smpcViewerEn.innerHTML = "";
+  if (smpcViewerAr) smpcViewerAr.innerHTML = "";
+  activeSmpcDoc = null;
+  activeSmpcArabicSections = null;
+  if (smpcDownloadArBtn) smpcDownloadArBtn.disabled = true;
+  if (smpcDownloadBothBtn) smpcDownloadBothBtn.disabled = true;
+}
+
+async function runSmpcSearch() {
+  const query = smpcSearchQuery?.value.trim() || "";
+  if (!query) {
+    setSmpcStatus("أدخل اسم المادة الفعّالة أو الاسم التجاري أو الشكل الصيدلاني.", true);
+    return;
+  }
+
+  smpcSearchBtn.disabled = true;
+  setSmpcStatus(`جارٍ البحث عن SmPC لـ «${query}» عبر OpenFDA / DailyMed…`);
+  closeSmpcViewer();
+  try {
+    const limit = Number(smpcResultCount?.value || 8);
+    smpcResultsCache = await searchSmpc(query, { limit });
+    if (smpcSearchResults) {
+      smpcSearchResults.innerHTML = renderSmpcSearchResults(smpcResultsCache);
+      bindSmpcSearchResults(smpcSearchResults, { onOpen: openSmpcDocument });
+    }
+    if (smpcClearBtn) smpcClearBtn.disabled = !smpcResultsCache.length;
+    setSmpcStatus(
+      smpcResultsCache.length
+        ? `عُثر على ${smpcResultsCache.length} منتجاً. افتح النتيجة لعرض SmPC أو انتقل للمواقع المرجعية.`
+        : "لا نتائج — جرّب اسماً عاماً (API) أو اسماً تجارياً إنجليزياً.",
+      !smpcResultsCache.length
+    );
+  } catch (error) {
+    setSmpcStatus(error.message, true);
+  } finally {
+    smpcSearchBtn.disabled = false;
+  }
+}
+
+async function openSmpcDocument(docId) {
+  let doc = smpcResultsCache.find((item) => item.id === docId);
+  if (!doc) return;
+
+  setSmpcStatus("جارٍ تحميل نشرة خصائص المنتج…");
+  try {
+    doc = await hydrateDailyMedLabel(doc);
+    smpcResultsCache = smpcResultsCache.map((item) => (item.id === docId ? doc : item));
+    activeSmpcDoc = doc;
+    activeSmpcArabicSections = null;
+    if (smpcViewerEn) smpcViewerEn.innerHTML = renderSmpcDocument(doc);
+    if (smpcViewerAr) {
+      smpcViewerAr.innerHTML = "";
+      smpcViewerAr.classList.add("hidden");
+    }
+    smpcViewer?.classList.remove("hidden");
+    if (smpcDownloadArBtn) smpcDownloadArBtn.disabled = true;
+    if (smpcDownloadBothBtn) smpcDownloadBothBtn.disabled = true;
+    smpcViewer?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setSmpcStatus(`تم عرض SmPC لـ «${doc.title}». يمكنك الترجمة والتنزيل كـ DOCX.`, false);
+  } catch (error) {
+    setSmpcStatus(error.message, true);
+  }
+}
+
+async function translateActiveSmpc() {
+  if (!activeSmpcDoc?.sections?.length) {
+    setSmpcStatus("افتح نشرة SmPC أولاً قبل الترجمة.", true);
+    return;
+  }
+  smpcTranslateBtn.disabled = true;
+  try {
+    const arabic = await translateSmpcSections(activeSmpcDoc.sections, {
+      onStatus: (message) => setSmpcStatus(message),
+    });
+    activeSmpcArabicSections = arabic;
+    if (smpcViewerAr) {
+      smpcViewerAr.innerHTML = renderSmpcDocument(activeSmpcDoc, { arabicSections: arabic });
+      smpcViewerAr.classList.remove("hidden");
+    }
+    if (smpcDownloadArBtn) smpcDownloadArBtn.disabled = false;
+    if (smpcDownloadBothBtn) smpcDownloadBothBtn.disabled = false;
+    setSmpcStatus("اكتملت الترجمة إلى العربية. يمكنك تنزيل EN و AR كملفات DOCX.", false);
+  } catch (error) {
+    setSmpcStatus(error.message, true);
+  } finally {
+    smpcTranslateBtn.disabled = false;
+  }
+}
+
+function smpcMeta() {
+  return {
+    api: activeSmpcDoc?.api || "",
+    formulation: activeSmpcDoc?.formulation || "",
+    source: activeSmpcDoc?.sourceLabel || "",
+  };
+}
+
+async function downloadActiveSmpc(mode) {
+  if (!activeSmpcDoc?.sections?.length) {
+    setSmpcStatus("لا توجد نشرة SmPC مفتوحة للتنزيل.", true);
+    return;
+  }
+  try {
+    setSmpcStatus("جارٍ تجهيز ملف DOCX…");
+    const payload = {
+      title: activeSmpcDoc.title,
+      meta: smpcMeta(),
+      englishSections: null,
+      arabicSections: null,
+    };
+    if (mode === "en" || mode === "both") payload.englishSections = activeSmpcDoc.sections;
+    if (mode === "ar" || mode === "both") {
+      if (!activeSmpcArabicSections?.length) {
+        setSmpcStatus("ترجم النشرة إلى العربية أولاً.", true);
+        return;
+      }
+      payload.arabicSections = activeSmpcArabicSections;
+    }
+    await downloadSmpcDocxPair(payload);
+    setSmpcStatus("تم تنزيل الملف/الملفات.", false);
+  } catch (error) {
+    setSmpcStatus(error.message, true);
   }
 }
 
@@ -2679,6 +2852,7 @@ searchModePharmaBtn?.addEventListener("click", () => {
   setSearchMode("pharma");
   ensurePharmacopoeiaCatalog();
 });
+searchModeSmpcBtn?.addEventListener("click", () => setSearchMode("smpc"));
 pharmaSearchBtn?.addEventListener("click", async () => {
   await ensurePharmacopoeiaCatalog();
   runPharmacopoeiaSearch();
@@ -2706,6 +2880,28 @@ pharmaSearchQuery?.addEventListener("keydown", async (event) => {
     hidePharmaSuggestions();
   }
 });
+smpcSearchBtn?.addEventListener("click", () => runSmpcSearch());
+smpcClearBtn?.addEventListener("click", () => {
+  if (smpcSearchResults) smpcSearchResults.innerHTML = "";
+  if (smpcSearchQuery) smpcSearchQuery.value = "";
+  if (smpcClearBtn) smpcClearBtn.disabled = true;
+  closeSmpcViewer();
+  setSmpcStatus("");
+});
+smpcResultCount?.addEventListener("input", () => {
+  if (smpcResultCountLabel) smpcResultCountLabel.textContent = smpcResultCount.value;
+});
+smpcSearchQuery?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    runSmpcSearch();
+  }
+});
+smpcTranslateBtn?.addEventListener("click", () => translateActiveSmpc());
+smpcDownloadEnBtn?.addEventListener("click", () => downloadActiveSmpc("en"));
+smpcDownloadArBtn?.addEventListener("click", () => downloadActiveSmpc("ar"));
+smpcDownloadBothBtn?.addEventListener("click", () => downloadActiveSmpc("both"));
+smpcViewerClose?.addEventListener("click", () => closeSmpcViewer());
 document.addEventListener("click", (event) => {
   if (
     pharmaSuggestMenu &&

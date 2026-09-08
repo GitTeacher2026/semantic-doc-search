@@ -3280,3 +3280,110 @@ html[data-theme="dark"] .fb-card:hover {
   border: 0;
   background: #fff;
 }
+
+/* —— SmPC search —— */
+.smpc-search-intro {
+  line-height: 1.55;
+}
+
+.smpc-search-status.is-error {
+  color: #b91c1c;
+}
+
+.smpc-results-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.smpc-result-card {
+  border: 1px solid var(--line);
+  border-inline-start: 4px solid #0f6e56;
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  background: var(--panel);
+}
+
+.smpc-result-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.35rem;
+}
+
+.smpc-rank {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.smpc-source-chip {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.smpc-result-title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.smpc-result-meta {
+  margin: 0.35rem 0 0.55rem;
+  font-size: 0.9rem;
+}
+
+.smpc-ext-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.55rem;
+}
+
+.smpc-viewer {
+  margin-top: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.85rem;
+  background: var(--surface-muted);
+}
+
+.smpc-viewer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.85rem;
+}
+
+.smpc-document-header h3 {
+  margin: 0 0 0.25rem;
+}
+
+.smpc-document-source {
+  font-size: 0.85rem;
+}
+
+.smpc-section {
+  margin-top: 0.9rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--line);
+}
+
+.smpc-section h4 {
+  margin: 0 0 0.4rem;
+  font-size: 0.98rem;
+}
+
+.smpc-section-body {
+  font-size: 0.92rem;
+  line-height: 1.55;
+  white-space: normal;
+}
+
+.smpc-viewer-pane + .smpc-viewer-pane {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 2px dashed var(--line);
+}
