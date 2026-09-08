@@ -9,6 +9,8 @@ uploads/*
 !uploads/.gitkeep
 data/*
 !data/.gitkeep
+!data/users.json
+!data/site-changelog.json
 *.faiss
 .DS_Store
 .cache/
