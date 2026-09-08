@@ -139,6 +139,7 @@ import {
   resendPendingSignupEmails,
 } from "./auth-service.js";
 import { initAdminMembers } from "./admin-members.js";
+import { initAdminChangelog } from "./admin-changelog.js";
 import { getVaultPassword } from "./auth-page.js";
 import { initPasswordToggles } from "./password-toggle.js";
 import {
@@ -204,6 +205,7 @@ let pendingMoveTargetCategory = null;
 let authApi = null;
 let currentUser = null;
 let adminMembersApi = null;
+let adminChangelogApi = null;
 
 const appView = document.getElementById("app-view");
 const logoutBtn = document.getElementById("logout-btn");
@@ -3197,6 +3199,13 @@ export async function startApp({ user, auth }) {
     getActor: () => currentUser,
     onStatus: setStatus,
     isAdmin: () => authApi?.isAdmin?.(),
+  });
+
+  adminChangelogApi = initAdminChangelog({
+    getActor: () => currentUser,
+    onStatus: setStatus,
+    isAdmin: () => authApi?.isAdmin?.(),
+    isMember: () => Boolean(currentUser),
   });
 
   try {

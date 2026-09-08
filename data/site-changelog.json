@@ -1,0 +1,60 @@
+{
+  "settings": {
+    "enabled": true,
+    "visibleTo": "all",
+    "maxVisible": 6,
+    "title": "تحديثات الموقع",
+    "language": "ar",
+    "tone": "brief",
+    "includeCategories": {
+      "feature": true,
+      "fix": true,
+      "ui": true,
+      "smpc": true,
+      "auth": false,
+      "storage": false,
+      "other": true
+    },
+    "includeFileList": false,
+    "includeCommitHash": false,
+    "autoPublish": true,
+    "requireAdminApproval": false,
+    "template": "{{title}}\n{{body}}",
+    "agentInstructions": "اكتب ملاحظة قصيرة بالعربية موجّهة للمستخدم النهائي: ماذا تغيّر وكيف يستفيد منه. لا تذكر مسارات ملفات أو تفاصيل تقنية إلا إذا فعّل المسؤول «إظهار قائمة الملفات». لا تكتب ملاحظات لفئات معطّلة في لوحة التحكم."
+  },
+  "entries": [
+    {
+      "id": "note-changelog-admin-20260908",
+      "createdAt": "2026-09-08T14:20:00.000Z",
+      "updatedAt": "2026-09-08T14:20:00.000Z",
+      "author": "cursor",
+      "category": "feature",
+      "title": "لوحة تحكم ملاحظات التحديث",
+      "body": "للمسؤولين: زر «ملاحظات التحديث» يتيح التحكم بما يُعرض على الموقع وبسياسة الكتابة لـ Cursor (اللغة، التفصيل، الفئات، النشر التلقائي، والتعليمات).",
+      "published": true,
+      "source": "cursor"
+    },
+    {
+      "id": "note-smpc-filters-20260908",
+      "createdAt": "2026-09-08T14:10:00.000Z",
+      "updatedAt": "2026-09-08T14:10:00.000Z",
+      "author": "cursor",
+      "category": "smpc",
+      "title": "بحث SmPC مخصص",
+      "body": "أُضيفت فلاتر متقدمة في تبويب SmPC: الشكل الصيدلاني، المصنّع، نوع التعبئة وعدد الوحدات، مجموعة ATC/الفئة الدوائية، طريق الإعطاء، التركيز، ونوع المنتج (Rx/OTC).",
+      "published": true,
+      "source": "cursor"
+    },
+    {
+      "id": "note-smpc-sources-20260908",
+      "createdAt": "2026-09-08T09:00:00.000Z",
+      "updatedAt": "2026-09-08T09:00:00.000Z",
+      "author": "cursor",
+      "category": "smpc",
+      "title": "مصادر SmPC الكاملة",
+      "body": "يمكن اختيار DailyMed أو eMC أو drugs.com وعرض النشرة الكاملة مع ترجمة عربية في نافذة منبثقة.",
+      "published": true,
+      "source": "cursor"
+    }
+  ]
+}

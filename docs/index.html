@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&family=Noto+Serif+Arabic:wght@600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/styles.css?v=20260908i" />
   <link rel="stylesheet" href="css/auth.css" />
 </head>
 <body class="auth-body">
@@ -262,12 +262,21 @@
             طلبات التسجيل
             <span id="pending-count-badge" class="pending-badge hidden">0</span>
           </button>
+          <button id="open-changelog-btn" class="btn ghost small" type="button">ملاحظات التحديث</button>
         </div>
         <button id="logout-btn" class="btn ghost" type="button">تسجيل الخروج</button>
       </div>
     </header>
 
     <div id="status-banner" class="status hidden"></div>
+
+    <section id="site-changelog" class="site-changelog hidden" aria-labelledby="site-changelog-title">
+      <div class="site-changelog-header">
+        <h2 id="site-changelog-title">تحديثات الموقع</h2>
+        <button id="site-changelog-toggle" class="btn ghost small" type="button" aria-expanded="true">طيّ</button>
+      </div>
+      <div id="site-changelog-body" class="site-changelog-body"></div>
+    </section>
 
     <nav class="app-nav" aria-label="تنقل التطبيق">
       <button id="nav-library-btn" class="app-nav-btn active" type="button">الرفع</button>
@@ -668,6 +677,135 @@
     </div>
   </div>
 
+  <div id="changelog-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="changelog-dialog-title">
+    <div class="modal-backdrop" id="changelog-dialog-backdrop"></div>
+    <div class="modal-card changelog-dialog-card">
+      <div class="changelog-dialog-header">
+        <div>
+          <h2 id="changelog-dialog-title">لوحة ملاحظات التحديث</h2>
+          <p class="muted">تحكّم بما يُعرض على الموقع وما يجب أن يكتبه Cursor عند كل تعديل.</p>
+        </div>
+        <button id="changelog-close-btn" class="btn ghost small" type="button">إغلاق</button>
+      </div>
+
+      <div class="changelog-admin-scroll">
+        <section class="changelog-admin-section">
+          <h3>العرض على الموقع</h3>
+          <div class="changelog-admin-grid">
+            <label class="changelog-inline-check">
+              <input id="changelog-enabled" type="checkbox" checked />
+              إظهار شريط التحديثات للمستخدمين
+            </label>
+            <label>
+              من يرى التحديثات
+              <select id="changelog-visible-to">
+                <option value="all">الجميع (مسجّل الدخول)</option>
+                <option value="members">الأعضاء والمسؤولون</option>
+                <option value="admin">المسؤولون فقط</option>
+              </select>
+            </label>
+            <label>
+              أقصى عدد معروض
+              <input id="changelog-max-visible" type="number" min="1" max="30" value="6" />
+            </label>
+            <label>
+              عنوان الشريط
+              <input id="changelog-feed-title" type="text" value="تحديثات الموقع" />
+            </label>
+          </div>
+        </section>
+
+        <section class="changelog-admin-section">
+          <h3>سياسة الكتابة (Cursor / الملاحظات الآلية)</h3>
+          <div class="changelog-admin-grid">
+            <label>
+              اللغة
+              <select id="changelog-language">
+                <option value="ar">العربية</option>
+                <option value="en">English</option>
+                <option value="both">عربي + إنجليزي</option>
+              </select>
+            </label>
+            <label>
+              مستوى التفصيل
+              <select id="changelog-tone">
+                <option value="brief">مختصر (جملة أو جملتان)</option>
+                <option value="detailed">مفصّل</option>
+              </select>
+            </label>
+            <label class="changelog-inline-check">
+              <input id="changelog-auto-publish" type="checkbox" checked />
+              نشر تلقائي عند الإضافة
+            </label>
+            <label class="changelog-inline-check">
+              <input id="changelog-require-approval" type="checkbox" />
+              تتطلب موافقة المسؤول قبل الظهور
+            </label>
+            <label class="changelog-inline-check">
+              <input id="changelog-include-files" type="checkbox" />
+              إظهار قائمة الملفات في الملاحظة
+            </label>
+            <label class="changelog-inline-check">
+              <input id="changelog-include-commit" type="checkbox" />
+              إظهار رقم الـ commit
+            </label>
+          </div>
+          <fieldset class="changelog-categories">
+            <legend>الفئات المسموح بنشرها</legend>
+            <label><input id="changelog-cat-feature" type="checkbox" checked /> ميزة جديدة</label>
+            <label><input id="changelog-cat-fix" type="checkbox" checked /> إصلاح</label>
+            <label><input id="changelog-cat-ui" type="checkbox" checked /> واجهة</label>
+            <label><input id="changelog-cat-smpc" type="checkbox" checked /> SmPC</label>
+            <label><input id="changelog-cat-auth" type="checkbox" /> حسابات / صلاحيات</label>
+            <label><input id="changelog-cat-storage" type="checkbox" /> تخزين</label>
+            <label><input id="changelog-cat-other" type="checkbox" checked /> أخرى</label>
+          </fieldset>
+          <label>
+            قالب الملاحظة
+            <textarea id="changelog-template" rows="2" placeholder="{{title}}&#10;{{body}}"></textarea>
+          </label>
+          <label>
+            تعليمات لـ Cursor (ما يجب كتابته)
+            <textarea id="changelog-agent-instructions" rows="4" placeholder="اكتب ملاحظة قصيرة بالعربية…"></textarea>
+          </label>
+          <button id="changelog-save-settings-btn" class="btn primary" type="button">حفظ السياسة</button>
+        </section>
+
+        <section class="changelog-admin-section">
+          <h3>إضافة ملاحظة يدوياً</h3>
+          <div class="changelog-admin-grid">
+            <label>
+              العنوان
+              <input id="changelog-new-title" type="text" placeholder="مثال: تحسين بحث SmPC" />
+            </label>
+            <label>
+              الفئة
+              <select id="changelog-new-category">
+                <option value="feature">ميزة جديدة</option>
+                <option value="fix">إصلاح</option>
+                <option value="ui">واجهة</option>
+                <option value="smpc">SmPC</option>
+                <option value="auth">حسابات / صلاحيات</option>
+                <option value="storage">تخزين</option>
+                <option value="other" selected>أخرى</option>
+              </select>
+            </label>
+          </div>
+          <label>
+            النص
+            <textarea id="changelog-new-body" rows="3" placeholder="ماذا تغيّر للمستخدم؟"></textarea>
+          </label>
+          <button id="changelog-add-entry-btn" class="btn primary" type="button">إضافة الملاحظة</button>
+        </section>
+
+        <section class="changelog-admin-section">
+          <h3>الملاحظات الحالية</h3>
+          <div id="changelog-entries-admin" class="changelog-entries-admin"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <div id="rename-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="rename-dialog-title">
     <div class="modal-backdrop" id="rename-dialog-backdrop"></div>
     <div class="modal-card">
@@ -960,6 +1098,6 @@
 
   <iframe id="credential-catcher" name="credential-catcher" title="" tabindex="-1" aria-hidden="true" hidden></iframe>
 
-  <script type="module" src="js/main.js?v=20260908h"></script>
+  <script type="module" src="js/main.js?v=20260908i"></script>
 </body>
 </html>
