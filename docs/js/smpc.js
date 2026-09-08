@@ -127,13 +127,121 @@ async function fetchJina(url, { format = "markdown", timeout = 45, waitFor = "" 
 }
 
 function isBlockedOrMissing(text) {
-  const sample = String(text || "").slice(0, 1200);
+  const sample = String(text || "").slice(0, 1500);
   return (
     /Access Denied/i.test(sample) ||
     /Page Not Found \(404\)/i.test(sample) ||
     /HTTP Error 403/i.test(sample) ||
-    /could not find the page/i.test(sample)
+    /could not find the page/i.test(sample) ||
+    /Sorry, we couldn't find that page/i.test(sample) ||
+    (/Title:\s*Access Denied/i.test(sample) && sample.length < 2000)
   );
+}
+
+function scoreLabelSections(sections) {
+  if (!sections?.length) return 0;
+  const chars = sections.reduce((n, s) => n + String(s.text || "").length, 0);
+  const clinical = sections.filter((s) =>
+    /indication|dosage|warning|adverse|interaction|contraindic|pharmacolog|overdose|description|clinical|composition|posology/i.test(
+      s.title
+    )
+  ).length;
+  return sections.length * 10 + Math.min(chars, 200000) / 200 + clinical * 25;
+}
+
+function finalizeDailyMedDoc(doc, sections, sourceNote) {
+  return {
+    ...doc,
+    sourceLabel: sourceNote || "DailyMed",
+    sections,
+    englishText: sections.map((s) => `${s.title}\n${s.text}`).join("\n\n"),
+    hydrated: true,
+    needsFullLabel: false,
+    url:
+      doc.setId
+        ? `https://dailymed.nlm.nih.gov/dailymed/fda/fdaDrugXsl.cfm?setid=${doc.setId}&type=display`
+        : doc.url,
+  };
+}
+
+async function hydrateDailyMedFull(doc) {
+  if (!doc?.setId) return doc;
+
+  const urls = [
+    {
+      url: `https://dailymed.nlm.nih.gov/dailymed/fda/fdaDrugXsl.cfm?setid=${doc.setId}&type=display`,
+      label: "DailyMed (XSL / print-style)",
+      preferNumbered: false,
+    },
+    {
+      url: `https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=${doc.setId}&type=print`,
+      label: "DailyMed (print)",
+      preferNumbered: true,
+    },
+    {
+      url: `https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=${doc.setId}`,
+      label: "DailyMed",
+      preferNumbered: true,
+    },
+  ];
+
+  let best = null;
+
+  for (const candidate of urls) {
+    try {
+      const markdown = await fetchJina(candidate.url, { format: "markdown", timeout: 70 });
+      if (isBlockedOrMissing(markdown) || markdown.length < 1500) continue;
+
+      let sections = parseMarkdownSections(markdown, {
+        minBody: 25,
+        requireNumbered: candidate.preferNumbered,
+      });
+      if (sections.length < 6) {
+        sections = parseMarkdownSections(markdown, { minBody: 25, requireNumbered: false });
+      }
+      sections = sections.filter(
+        (section) =>
+          section.text.length >= 50 ||
+          /^\d+(?:\.\d+)*\b/.test(section.title) ||
+          /indication|dosage|warning|adverse|interaction|description|clinical|contraindic|overdose|how supplied|storage|pregnancy|nursing|pediatric|geriatric|active ingredient|purpose|uses|directions|highlights|boxed/i.test(
+            section.title
+          )
+      );
+
+      const score = scoreLabelSections(sections);
+      if (!best || score > best.score) {
+        best = { sections, score, label: candidate.label, url: candidate.url };
+      }
+      // Good enough full label
+      if (sections.length >= 12 && score > 800) break;
+    } catch {
+      /* try next URL */
+    }
+  }
+
+  if (best?.sections?.length >= 3) {
+    return finalizeDailyMedDoc(
+      { ...doc, url: best.url },
+      best.sections,
+      best.label
+    );
+  }
+
+  try {
+    const results = await fetchOpenFda(`set_id:"${doc.setId}"`, 1);
+    if (results.length) {
+      const full = normalizeOpenFda(results[0]);
+      return {
+        ...full,
+        title: doc.title || full.title,
+        hydrated: true,
+        needsFullLabel: false,
+      };
+    }
+  } catch {
+    /* keep original */
+  }
+  return doc;
 }
 
 function parseMarkdownSections(markdown, { minBody = 12, requireNumbered = false } = {}) {
@@ -568,8 +676,16 @@ async function searchDrugsComSource(query, { limit = 8 } = {}) {
     if (candidates.size >= limit * 2) break;
   }
 
-  // Prefer shorter / exact slugs first
-  const ordered = [...candidates.values()].sort((a, b) => a.slug.length - b.slug.length);
+  // Prefer exact query / short INN-like slugs; deprioritize long store-brand labels
+  const ordered = [...candidates.values()].sort((a, b) => {
+    const exactA = a.slug === slugify(q) ? 0 : 1;
+    const exactB = b.slug === slugify(q) ? 0 : 1;
+    if (exactA !== exactB) return exactA - exactB;
+    const junkA = /care-one|topcare|leader|good-sense|equaline|kirkland|up-and-up|infant/i.test(a.slug) ? 1 : 0;
+    const junkB = /care-one|topcare|leader|good-sense|equaline|kirkland|up-and-up|infant/i.test(b.slug) ? 1 : 0;
+    if (junkA !== junkB) return junkA - junkB;
+    return a.slug.length - b.slug.length;
+  });
   return ordered.slice(0, limit);
 }
 
@@ -581,60 +697,6 @@ export async function searchSmpc(query, { limit = 8, source = "dailymed" } = {})
   if (src === "emc") return searchEmcSource(q, { limit });
   if (src === "drugs") return searchDrugsComSource(q, { limit });
   return searchDailyMedSource(q, { limit });
-}
-
-async function hydrateDailyMedFull(doc) {
-  if (!doc?.setId) return doc;
-
-  try {
-    const markdown = await fetchJina(
-      `https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=${doc.setId}`,
-      { format: "markdown", timeout: 60 }
-    );
-    if (!isBlockedOrMissing(markdown)) {
-      let sections = parseMarkdownSections(markdown, { minBody: 20, requireNumbered: true });
-      if (sections.length < 5) {
-        sections = parseMarkdownSections(markdown, { minBody: 20, requireNumbered: false });
-      }
-      // Keep substantive clinical/label sections; drop tiny chrome leftovers
-      sections = sections.filter(
-        (section) =>
-          section.text.length >= 40 ||
-          /^\d+(?:\.\d+)*\b/.test(section.title) ||
-          /indication|dosage|warning|adverse|interaction|description|clinical|contraindic|overdose|how supplied|storage|pregnancy|nursing|pediatric|geriatric|active ingredient|purpose|uses|directions/i.test(
-            section.title
-          )
-      );
-      if (sections.length >= 3) {
-        return {
-          ...doc,
-          sourceLabel: "DailyMed",
-          sections,
-          englishText: sections.map((s) => `${s.title}\n${s.text}`).join("\n\n"),
-          hydrated: true,
-          needsFullLabel: false,
-        };
-      }
-    }
-  } catch {
-    /* fall through */
-  }
-
-  try {
-    const results = await fetchOpenFda(`set_id:"${doc.setId}"`, 1);
-    if (results.length) {
-      const full = normalizeOpenFda(results[0]);
-      return {
-        ...full,
-        title: doc.title || full.title,
-        hydrated: true,
-        needsFullLabel: false,
-      };
-    }
-  } catch {
-    /* keep original */
-  }
-  return doc;
 }
 
 async function hydrateEmcFull(doc) {
@@ -682,43 +744,54 @@ async function hydrateDrugsComFull(doc) {
     slugify(doc.title),
     slugify(doc.api),
     slugify(String(doc.api || "").split(",")[0]),
-    slugify(String(doc.title || "").split(/\s+/)[0]),
-  ].filter(Boolean))];
+    slugify(String(doc.title || "").split(/[\/,(]/)[0]),
+  ].filter((s) => s && s.length >= 3))];
+
+  const urlPatternsFor = (slug) => [
+    `https://www.drugs.com/pro/${slug}.html`,
+    `https://www.drugs.com/mtm/${slug}.html`,
+    `https://www.drugs.com/${slug}.html`,
+    `https://www.drugs.com/ppa/${slug}.html`,
+  ];
 
   let lastError = null;
   for (const slug of slugCandidates) {
-    const url = `https://www.drugs.com/pro/${slug}.html`;
-    try {
-      const markdown = await fetchJina(url, { format: "markdown", timeout: 60 });
-      if (isBlockedOrMissing(markdown)) {
-        lastError = new Error(`لا توجد نشرة drugs.com/pro لـ ${slug}`);
-        continue;
+    for (const url of urlPatternsFor(slug)) {
+      try {
+        const markdown = await fetchJina(url, { format: "markdown", timeout: 70 });
+        if (isBlockedOrMissing(markdown) || markdown.length < 800) {
+          lastError = new Error(`تعذّر فتح ${url}`);
+          continue;
+        }
+        const sections = parseDrugsComMarkdown(markdown);
+        if (sections.length < 3) {
+          lastError = new Error(`تعذّر استخراج أقسام كافية من ${url}`);
+          continue;
+        }
+        const titleMatch = markdown.match(/^Title:\s*(.+)$/m);
+        const title = titleMatch
+          ? titleMatch[1]
+              .replace(/\s*:\s*Package Insert.*$/i, "")
+              .replace(/\s*Uses, Dosage.*$/i, "")
+              .trim()
+          : doc.title;
+        return {
+          ...doc,
+          title: title || doc.title,
+          slug,
+          sourceLabel: "drugs.com",
+          url,
+          sections,
+          englishText: sections.map((s) => `${s.title}\n${s.text}`).join("\n\n"),
+          hydrated: true,
+          needsFullLabel: false,
+        };
+      } catch (error) {
+        lastError = error;
       }
-      const sections = parseDrugsComMarkdown(markdown);
-      if (!sections.length) {
-        lastError = new Error("تعذّر استخراج أقسام نشرة drugs.com.");
-        continue;
-      }
-      const titleMatch = markdown.match(/^Title:\s*(.+)$/m);
-      const title = titleMatch
-        ? titleMatch[1].replace(/\s*:\s*Package Insert.*$/i, "").trim()
-        : doc.title;
-      return {
-        ...doc,
-        title: title || doc.title,
-        slug,
-        sourceLabel: "drugs.com",
-        url,
-        sections,
-        englishText: sections.map((s) => `${s.title}\n${s.text}`).join("\n\n"),
-        hydrated: true,
-        needsFullLabel: false,
-      };
-    } catch (error) {
-      lastError = error;
     }
   }
-  throw lastError || new Error("لا توجد نشرة drugs.com/pro لهذه التسمية، أو الصفحة محجوبة.");
+  throw lastError || new Error("لم يُعثر على نشرة drugs.com لهذا الدواء. جرّب الاسم العلمي الإنجليزي (مثل ibuprofen).");
 }
 
 export async function hydrateSmpcDocument(doc, { onStatus } = {}) {
