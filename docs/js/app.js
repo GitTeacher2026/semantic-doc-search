@@ -93,6 +93,19 @@ import {
   logoutGoogleDrive,
 } from "./drive-auth.js";
 import { downloadDriveFile, renameDriveFile, uploadDocumentFile as uploadDriveDocumentFile } from "./drive-storage.js";
+import {
+  bindPharmacopoeiaResults,
+  loadPharmacopoeiaCatalog,
+  renderPharmacopoeiaResults,
+  renderPharmacopoeiaSuggestions,
+  searchPharmacopoeia,
+  suggestPharmacopoeia,
+} from "./pharmacopoeia.js";
+import {
+  leechDriveFileToMega,
+  PHARMA_CATEGORY,
+  syncPharmacopoeiaFolderFromDrive,
+} from "./drive-leech.js";
 import { isMegaConnected, ensureMegaAutoLogin, getMegaEmail, getLastMegaAuthError, loginToMega, logoutMega, needsMegaAuthRecovery, markMegaAuthFailed } from "./mega-auth.js";
 import {
   downloadMegaFile,
@@ -227,9 +240,11 @@ const trashMeta = document.getElementById("trash-meta");
 const trashList = document.getElementById("trash-list");
 const libraryPage = document.getElementById("library-page");
 const filesPage = document.getElementById("files-page");
+const searchPage = document.getElementById("search-page");
 const trashPage = document.getElementById("trash-page");
 const navLibraryBtn = document.getElementById("nav-library-btn");
 const navFilesBtn = document.getElementById("nav-files-btn");
+const navSearchBtn = document.getElementById("nav-search-btn");
 const navTrashBtn = document.getElementById("nav-trash-btn");
 const trashBackBtn = document.getElementById("trash-back-btn");
 const purgeAllTrashBtn = document.getElementById("purge-all-trash-btn");
@@ -242,7 +257,24 @@ const clearSearchBtn = document.getElementById("clear-search-btn");
 const searchResults = document.getElementById("search-results");
 const resultCount = document.getElementById("result-count");
 const resultCountLabel = document.getElementById("result-count-label");
+const searchModeLibraryBtn = document.getElementById("search-mode-library");
+const searchModePharmaBtn = document.getElementById("search-mode-pharma");
+const librarySearchPanel = document.getElementById("library-search-panel");
+const pharmaSearchPanel = document.getElementById("pharma-search-panel");
+const pharmaSearchQuery = document.getElementById("pharma-search-query");
+const pharmaSourceFilter = document.getElementById("pharma-source-filter");
+const pharmaResultCount = document.getElementById("pharma-result-count");
+const pharmaResultCountLabel = document.getElementById("pharma-result-count-label");
+const pharmaSearchBtn = document.getElementById("pharma-search-btn");
+const pharmaSyncBtn = document.getElementById("pharma-sync-btn");
+const pharmaClearBtn = document.getElementById("pharma-clear-btn");
+const pharmaSearchStatus = document.getElementById("pharma-search-status");
+const pharmaSearchResults = document.getElementById("pharma-search-results");
+const pharmaSuggestMenu = document.getElementById("pharma-suggest-menu");
 const statusBanner = document.getElementById("status-banner");
+
+let searchMode = "library";
+let pharmaCatalogReady = false;
 
 const deleteDialog = document.getElementById("delete-dialog");
 const deleteDialogTitle = document.getElementById("delete-dialog-title");
@@ -1433,14 +1465,187 @@ function switchAppPage(page) {
   currentAppPage = page;
   const isTrash = page === "trash";
   const isFiles = page === "files";
-  libraryPage?.classList.toggle("hidden", isTrash || isFiles);
+  const isSearch = page === "search";
+  libraryPage?.classList.toggle("hidden", isTrash || isFiles || isSearch);
   filesPage?.classList.toggle("hidden", !isFiles);
+  searchPage?.classList.toggle("hidden", !isSearch);
   trashPage?.classList.toggle("hidden", !isTrash);
   navLibraryBtn?.classList.toggle("active", page === "library");
   navFilesBtn?.classList.toggle("active", isFiles);
+  navSearchBtn?.classList.toggle("active", isSearch);
   navTrashBtn?.classList.toggle("active", isTrash);
   if (isTrash) renderTrash();
   if (isFiles) renderFilesPage();
+  if (isSearch) ensurePharmacopoeiaCatalog();
+}
+
+function setSearchMode(mode) {
+  searchMode = mode === "pharma" ? "pharma" : "library";
+  librarySearchPanel?.classList.toggle("hidden", searchMode !== "library");
+  pharmaSearchPanel?.classList.toggle("hidden", searchMode !== "pharma");
+  searchModeLibraryBtn?.classList.toggle("is-active", searchMode === "library");
+  searchModePharmaBtn?.classList.toggle("is-active", searchMode === "pharma");
+  searchModeLibraryBtn?.setAttribute("aria-selected", String(searchMode === "library"));
+  searchModePharmaBtn?.setAttribute("aria-selected", String(searchMode === "pharma"));
+}
+
+function setPharmaStatus(message, isError = false) {
+  if (!pharmaSearchStatus) return;
+  if (!message) {
+    pharmaSearchStatus.textContent = "";
+    pharmaSearchStatus.classList.add("hidden");
+    pharmaSearchStatus.classList.remove("is-error");
+    return;
+  }
+  pharmaSearchStatus.textContent = message;
+  pharmaSearchStatus.classList.remove("hidden");
+  pharmaSearchStatus.classList.toggle("is-error", Boolean(isError));
+}
+
+async function ensurePharmacopoeiaCatalog() {
+  if (pharmaCatalogReady) return;
+  try {
+    setPharmaStatus("جارٍ تحميل فهرس monographs (Web of Pharma)…");
+    const loaded = await loadPharmacopoeiaCatalog();
+    pharmaCatalogReady = true;
+    setPharmaStatus(
+      `جاهز — ${(loaded.meta?.count || loaded.items?.length || 0).toLocaleString("ar-EG")} monograph مفهرس.`,
+      false
+    );
+  } catch (error) {
+    setPharmaStatus(error.message, true);
+  }
+}
+
+function runPharmacopoeiaSearch() {
+  const query = pharmaSearchQuery?.value.trim() || "";
+  const source = pharmaSourceFilter?.value || "";
+  const limit = Number(pharmaResultCount?.value || 12);
+  const hits = searchPharmacopoeia(query, { source, limit });
+  hidePharmaSuggestions();
+  if (pharmaSearchResults) {
+    pharmaSearchResults.innerHTML = renderPharmacopoeiaResults(hits, query);
+    bindPharmacopoeiaResults(pharmaSearchResults, { onLeech: handlePharmacopoeiaLeech });
+  }
+  if (pharmaClearBtn) pharmaClearBtn.disabled = !hits.length;
+  setPharmaStatus(
+    hits.length
+      ? `عُثر على ${hits.length} monograph${query ? ` لـ «${query}»` : ""}.`
+      : "لا نتائج — جرّب اسماً آخر أو مزامنة مجلد Drive إضافي.",
+    !hits.length
+  );
+}
+
+function hidePharmaSuggestions() {
+  pharmaSuggestMenu?.classList.add("hidden");
+  if (pharmaSuggestMenu) pharmaSuggestMenu.innerHTML = "";
+}
+
+function updatePharmaSuggestions() {
+  const query = pharmaSearchQuery?.value.trim() || "";
+  if (!pharmaCatalogReady || query.length < 2) {
+    hidePharmaSuggestions();
+    return;
+  }
+  const hits = suggestPharmacopoeia(query, { limit: 12 });
+  if (!hits.length || !pharmaSuggestMenu) {
+    hidePharmaSuggestions();
+    return;
+  }
+  pharmaSuggestMenu.innerHTML = renderPharmacopoeiaSuggestions(hits);
+  pharmaSuggestMenu.classList.remove("hidden");
+  pharmaSuggestMenu.querySelectorAll(".pharma-suggest-item").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (pharmaSearchQuery) pharmaSearchQuery.value = btn.dataset.title || "";
+      hidePharmaSuggestions();
+      runPharmacopoeiaSearch();
+    });
+  });
+}
+
+async function handlePharmacopoeiaSync() {
+  try {
+    setPharmaStatus("جارٍ مزامنة فهرس monographs من Google Drive…");
+    pharmaSyncBtn.disabled = true;
+    const catalog = await syncPharmacopoeiaFolderFromDrive();
+    pharmaCatalogReady = true;
+    setPharmaStatus(`تمت مزامنة ${(catalog.monographs || []).length} ملفاً من Drive.`, false);
+    runPharmacopoeiaSearch();
+  } catch (error) {
+    setPharmaStatus(error.message, true);
+  } finally {
+    pharmaSyncBtn.disabled = false;
+  }
+}
+
+async function handlePharmacopoeiaLeech(item) {
+  if (!item?.driveFileId) {
+    setPharmaStatus("لا يوجد معرّف Drive لهذا الملف.", true);
+    return;
+  }
+  if (!isMegaConnected()) {
+    setPharmaStatus("اتصل بـ MEGA من صفحة الرفع قبل السحب إلى الخادم.", true);
+    updateMegaConnectPanel();
+    switchAppPage("library");
+    return;
+  }
+
+  const button = item.button;
+  if (button) button.disabled = true;
+  try {
+    setPharmaStatus(`Leech: جارٍ سحب «${item.title || item.filename}» من Drive إلى MEGA…`);
+    const leeched = await leechDriveFileToMega({
+      driveFileId: item.driveFileId,
+      filename: item.filename,
+      category: PHARMA_CATEGORY,
+      onStatus: (message) => setPharmaStatus(message),
+    });
+
+    if (hasDuplicateFilename(leeched.filename)) {
+      setPharmaStatus(`الملف موجود مسبقاً في المكتبة باسم «${leeched.filename}».`, true);
+      return;
+    }
+
+    let text = "";
+    try {
+      setPharmaStatus("جارٍ فهرسة النص من PDF…");
+      text = (await extractPdfTextLayer(await leeched.blob.arrayBuffer()))?.trim() || "";
+    } catch {
+      text = "";
+    }
+
+    state.folders = ensureFolderRecord(state.folders, PHARMA_CATEGORY);
+    state.documents.push({
+      id: crypto.randomUUID(),
+      filename: leeched.filename,
+      category: PHARMA_CATEGORY,
+      ownerId: currentUser?.id,
+      fileGroup: fileGroup(leeched.filename),
+      extension: fileExtension(leeched.filename),
+      charCount: text.length,
+      preview: text ? text.replace(/\s+/g, " ").slice(0, 280) : "Monograph — تم السحب من Google Drive إلى MEGA",
+      fileData: null,
+      megaFileId: leeched.megaFileId,
+      driveFileId: leeched.driveFileId,
+      onedriveFileId: null,
+      storageBackend: STORAGE_BACKENDS.MEGA,
+      chunks: text ? chunkText(text).map((content) => ({ content })) : [],
+      ocrExtracted: false,
+      isLocked: false,
+      lockHash: null,
+      source: "pharmacopoeia-leech",
+    });
+
+    await persistState();
+    renderLibrary();
+    setPharmaStatus(`تم السحب إلى MEGA وفهرسة «${leeched.filename}» في مجلد «${PHARMA_CATEGORY}».`, false);
+    setStatus(`تم Leech monograph إلى MEGA: ${leeched.filename}`, true);
+    setTimeout(() => setStatus("", false), 2500);
+  } catch (error) {
+    setPharmaStatus(error.message, true);
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function updateTrashBadge() {
@@ -1456,6 +1661,7 @@ function updateTrashBadge() {
 
 navLibraryBtn?.addEventListener("click", () => switchAppPage("library"));
 navFilesBtn?.addEventListener("click", () => switchAppPage("files"));
+navSearchBtn?.addEventListener("click", () => switchAppPage("search"));
 navTrashBtn?.addEventListener("click", () => switchAppPage("trash"));
 gotoFilesBtn?.addEventListener("click", () => switchAppPage("files"));
 trashBackBtn?.addEventListener("click", () => switchAppPage("library"));
@@ -2466,6 +2672,48 @@ searchQuery?.addEventListener("keydown", (event) => {
 });
 resultCount.addEventListener("input", () => {
   resultCountLabel.textContent = resultCount.value;
+});
+
+searchModeLibraryBtn?.addEventListener("click", () => setSearchMode("library"));
+searchModePharmaBtn?.addEventListener("click", () => {
+  setSearchMode("pharma");
+  ensurePharmacopoeiaCatalog();
+});
+pharmaSearchBtn?.addEventListener("click", async () => {
+  await ensurePharmacopoeiaCatalog();
+  runPharmacopoeiaSearch();
+});
+pharmaClearBtn?.addEventListener("click", () => {
+  if (pharmaSearchResults) pharmaSearchResults.innerHTML = "";
+  if (pharmaSearchQuery) pharmaSearchQuery.value = "";
+  if (pharmaClearBtn) pharmaClearBtn.disabled = true;
+  hidePharmaSuggestions();
+  setPharmaStatus("");
+});
+pharmaSyncBtn?.addEventListener("click", () => handlePharmacopoeiaSync());
+pharmaResultCount?.addEventListener("input", () => {
+  if (pharmaResultCountLabel) pharmaResultCountLabel.textContent = pharmaResultCount.value;
+});
+pharmaSearchQuery?.addEventListener("input", () => {
+  if (pharmaCatalogReady) updatePharmaSuggestions();
+});
+pharmaSearchQuery?.addEventListener("keydown", async (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    await ensurePharmacopoeiaCatalog();
+    runPharmacopoeiaSearch();
+  } else if (event.key === "Escape") {
+    hidePharmaSuggestions();
+  }
+});
+document.addEventListener("click", (event) => {
+  if (
+    pharmaSuggestMenu &&
+    !pharmaSuggestMenu.contains(event.target) &&
+    event.target !== pharmaSearchQuery
+  ) {
+    hidePharmaSuggestions();
+  }
 });
 
 if (deleteConfirmBtn) deleteConfirmBtn.addEventListener("click", confirmDelete);

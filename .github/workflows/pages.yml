@@ -40,6 +40,7 @@ jobs:
           ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
           GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
           PUTER_AUTH_TOKEN: ${{ secrets.PUTER_AUTH_TOKEN }}
+          PHARMACOPOEIA_DRIVE_FOLDER_ID: ${{ secrets.PHARMACOPOEIA_DRIVE_FOLDER_ID }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           node <<'NODE'
@@ -52,6 +53,7 @@ jobs:
           const googleClientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
           const oneDriveClientId = (process.env.ONEDRIVE_CLIENT_ID || "").trim();
           const githubOAuthClientId = (process.env.GITHUB_OAUTH_CLIENT_ID || "").trim();
+          const pharmaFolderId = (process.env.PHARMACOPOEIA_DRIVE_FOLDER_ID || "").trim();
           let puterAuthToken = (process.env.PUTER_AUTH_TOKEN || "").trim();
           if (!puterAuthToken && fs.existsSync("docs/js/config.js")) {
             const existingConfig = fs.readFileSync("docs/js/config.js", "utf8");
@@ -77,6 +79,7 @@ jobs:
           export const PUTER_AUTH_TOKEN = ${JSON.stringify(puterAuthToken)};
           export const MEGA_EMAIL = ${JSON.stringify(megaEmail)};
           export const MEGA_PASSWORD = ${JSON.stringify(megaPassword)};
+          export const PHARMACOPOEIA_DRIVE_FOLDER_ID = ${JSON.stringify(pharmaFolderId)};
           `;
           fs.writeFileSync("docs/js/config.js", config);
           NODE

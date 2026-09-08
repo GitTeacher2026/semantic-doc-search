@@ -16,4 +16,6 @@ export const MEGA_PASSWORD = "pk94?S6.Jfz0";
 export const GITHUB_OAUTH_CLIENT_ID = "";
 export const PUTER_AUTH_TOKEN =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InYyIn0.eyJ0IjoidCIsInYiOiIyIiwidG9rZW5fdWlkIjoiNzhmZjM5NzEtNzM5YS00YTJhLTg1YTItNTMwYzk5YThjNjYwIiwidXUiOiJjcjBxbkxpalRLZW9aMjN6aFhSdHR3PT0iLCJzdSI6IkVTdVpoSXdzVHRLdTB3enFKUG43RHc9PSIsImFpIjoiY3IwcW5MaWpUS2VvWjIzemhYUnR0dz09IiwiZnVsbF9hY2Nlc3MiOnRydWUsImlhdCI6MTc4ODI0NjUwMX0.AXkjr-EdLropKgdWUEi5MY7C3-tA8avDf1C_k0Dd9yk";
+/** Google Drive folder ID that holds pharmacopoeia monograph PDFs (optional). */
+export const PHARMACOPOEIA_DRIVE_FOLDER_ID = "";
 

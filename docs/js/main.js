@@ -8,7 +8,7 @@ import {
 } from "./auth-page.js";
 import { initTheme } from "./theme.js";
 
-const APP_MODULE_URL = "./app.js?v=20260901zd";
+const APP_MODULE_URL = "./app.js?v=20260908a";
 
 initTheme();
 

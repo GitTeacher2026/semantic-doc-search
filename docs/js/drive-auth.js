@@ -5,6 +5,7 @@ const TOKEN_EXPIRY_KEY = "docshelf_drive_expiry";
 const CLIENT_ID_PATTERN = /^[\w-]+\.apps\.googleusercontent\.com$/;
 
 const DRIVE_SCOPES = [
+  "https://www.googleapis.com/auth/drive.readonly",
   "https://www.googleapis.com/auth/drive.file",
   "https://www.googleapis.com/auth/userinfo.email",
 ].join(" ");

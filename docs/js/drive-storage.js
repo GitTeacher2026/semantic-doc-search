@@ -160,6 +160,38 @@ export async function downloadDriveFile(fileId) {
   return res.arrayBuffer();
 }
 
+export async function getDriveFileMeta(fileId) {
+  return driveJson(
+    `/files/${encodeURIComponent(fileId)}?fields=id,name,mimeType,size,webViewLink,webContentLink`
+  );
+}
+
+export async function listDriveFolderFiles(folderId, { pageSize = 200 } = {}) {
+  const parentId = String(folderId || "").trim();
+  if (!parentId) throw new Error("معرّف مجلد Drive مطلوب.");
+
+  const files = [];
+  let pageToken = "";
+  do {
+    const q = [`'${escapeDriveQuery(parentId)}' in parents`, "trashed=false"].join(" and ");
+    const params = new URLSearchParams({
+      q,
+      fields: "nextPageToken,files(id,name,mimeType,size,webViewLink)",
+      pageSize: String(pageSize),
+      orderBy: "name",
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+    const data = await driveJson(`/files?${params.toString()}`);
+    for (const file of data.files || []) {
+      if (file.mimeType === "application/vnd.google-apps.folder") continue;
+      files.push(file);
+    }
+    pageToken = data.nextPageToken || "";
+  } while (pageToken);
+
+  return files;
+}
+
 export async function renameDriveFile(fileId, newName) {
   const safeName = String(newName || "document").replace(/[\\/:*?"<>|]/g, "_").trim();
   if (!safeName) {

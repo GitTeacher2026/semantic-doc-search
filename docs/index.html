@@ -270,11 +270,12 @@
     <div id="status-banner" class="status hidden"></div>
 
     <nav class="app-nav" aria-label="تنقل التطبيق">
-      <button id="nav-library-btn" class="app-nav-btn active" type="button">الرفع والبحث</button>
+      <button id="nav-library-btn" class="app-nav-btn active" type="button">الرفع</button>
       <button id="nav-files-btn" class="app-nav-btn" type="button">
         الملفات
         <span id="files-count-badge" class="files-count-badge hidden">0</span>
       </button>
+      <button id="nav-search-btn" class="app-nav-btn" type="button">البحث</button>
       <button id="nav-trash-btn" class="app-nav-btn" type="button">
         سلة المهملات
         <span id="trash-count-badge" class="trash-count-badge hidden">0</span>
@@ -370,7 +371,20 @@
           </div>
         </section>
 
-        <section class="panel">
+        </section>
+      </main>
+    </div>
+
+    <div id="search-page" class="app-page hidden">
+      <main class="grid search-page-grid">
+        <section class="panel search-mode-panel">
+          <div class="search-mode-tabs" role="tablist" aria-label="نوع البحث">
+            <button id="search-mode-library" class="search-mode-tab is-active" type="button" role="tab" aria-selected="true" data-mode="library">مكتبة المستندات</button>
+            <button id="search-mode-pharma" class="search-mode-tab" type="button" role="tab" aria-selected="false" data-mode="pharma">دساتير الأدوية / Monographs</button>
+          </div>
+        </section>
+
+        <section id="library-search-panel" class="panel">
           <h2>البحث الذكي (فوري)</h2>
           <label for="search-query">ابحث في محتوى المستندات</label>
           <input id="search-query" type="search" placeholder="مثال: جدول زمني لمشروع ترميم الجسر" />
@@ -409,6 +423,36 @@
             <button id="clear-search-btn" class="btn ghost" type="button" disabled>مسح النتائج</button>
           </div>
           <div id="search-results" class="results"></div>
+        </section>
+
+        <section id="pharma-search-panel" class="panel hidden">
+          <h2>بحث monographs — دساتير الأدوية</h2>
+          <p class="muted pharma-search-intro">النتائج روابط Google Drive. يمكنك فتح الملف مباشرة أو سحبه (Leech) إلى خادم MEGA وإضافته للمكتبة.</p>
+          <label for="pharma-search-query">ابحث عن مادة / monograph</label>
+          <div class="pharma-suggest-wrap">
+            <input id="pharma-search-query" type="search" placeholder="Search chapters… مثال: Tramadol, Levofloxacin" autocomplete="off" />
+            <div id="pharma-suggest-menu" class="pharma-suggest-menu hidden" role="listbox"></div>
+          </div>
+          <label for="pharma-source-filter">الدستور</label>
+          <select id="pharma-source-filter">
+            <option value="">كل الدساتير</option>
+            <option value="USP">USP–NF</option>
+            <option value="BP">British Pharmacopoeia</option>
+            <option value="EP">European Pharmacopoeia</option>
+            <option value="JP">Japanese Pharmacopoeia</option>
+            <option value="CP">Chinese Pharmacopoeia</option>
+            <option value="IPh">International Pharmacopoeia</option>
+          </select>
+          <label for="pharma-result-count">عدد النتائج: <span id="pharma-result-count-label">12</span></label>
+          <input id="pharma-result-count" type="range" min="5" max="40" value="12" />
+          <div class="search-actions">
+            <button id="pharma-search-btn" class="btn primary" type="button">بحث monographs</button>
+            <button id="pharma-sync-btn" class="btn ghost" type="button" title="مزامنة فهرس مجلد إضافي من Google Drive">مزامنة مجلد Drive</button>
+            <button id="pharma-clear-btn" class="btn ghost" type="button" disabled>مسح النتائج</button>
+          </div>
+          <p class="muted pharma-search-credit">الفهرس مأخوذ من <a href="https://www.webofpharma.com/2025/08/pharmacopoeia-search-engine.html" target="_blank" rel="noopener noreferrer">Web of Pharma Pharmacopoeia Search Engine</a> — النتائج روابط Google Drive مع خيار Leech إلى MEGA.</p>
+          <p id="pharma-search-status" class="muted pharma-search-status hidden" role="status"></p>
+          <div id="pharma-search-results" class="results pharma-results"></div>
         </section>
       </main>
     </div>
@@ -755,6 +799,6 @@
 
   <iframe id="credential-catcher" name="credential-catcher" title="" tabindex="-1" aria-hidden="true" hidden></iframe>
 
-  <script type="module" src="js/main.js?v=20260901zd"></script>
+  <script type="module" src="js/main.js?v=20260908a"></script>
 </body>
 </html>
