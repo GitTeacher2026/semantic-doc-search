@@ -12,8 +12,14 @@ const OPENFDA_NDC = "https://api.fda.gov/drug/ndc.json";
 const DAILYMED_SPLS = "https://dailymed.nlm.nih.gov/dailymed/services/v2/spls.json";
 const JINA_PREFIX = "https://r.jina.ai/";
 const ALLORIGINS_RAW = "https://api.allorigins.win/raw?url=";
+const PROXY_PREF_KEY = "smpc_proxy_pref_v3";
 
 export const SMPC_SOURCE_OPTIONS = [
+  {
+    id: "all",
+    label: "الكل",
+    hint: "بحث في DailyMed + eMC + drugs.com",
+  },
   {
     id: "dailymed",
     label: "DailyMed",
@@ -112,65 +118,145 @@ function sectionKey(title, index) {
   return `${index + 1}-${slug}`;
 }
 
+async function fetchWithTimeout(url, { timeoutMs = 28000, signal } = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const onOuterAbort = () => ctrl.abort();
+  if (signal) {
+    if (signal.aborted) ctrl.abort();
+    else signal.addEventListener("abort", onOuterAbort, { once: true });
+  }
+  try {
+    const response = await fetch(url, { signal: ctrl.signal, cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.text();
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error(`timeout ${timeoutMs}ms`);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener?.("abort", onOuterAbort);
+  }
+}
+
+function rememberProxy(name) {
+  try {
+    sessionStorage.setItem(PROXY_PREF_KEY, name);
+  } catch {
+    /* ignore */
+  }
+}
+
+function preferredProxyName() {
+  try {
+    return sessionStorage.getItem(PROXY_PREF_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function buildJinaTargets(target) {
+  const out = [];
+  const push = (value) => {
+    const next = String(value || "").trim();
+    if (next && !out.includes(next)) out.push(next);
+  };
+  push(target);
+  if (target.startsWith("https://")) push(`http://${target.slice("https://".length)}`);
+  if (target.startsWith("http://")) push(`https://${target.slice("http://".length)}`);
+  try {
+    const u = new URL(target);
+    if (u.hostname.startsWith("www.")) {
+      u.hostname = u.hostname.slice(4);
+      push(u.toString());
+      if (u.protocol === "https:") {
+        u.protocol = "http:";
+        push(u.toString());
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return out;
+}
+
+function buildProxyAttempts(target) {
+  const attempts = [];
+  for (const variant of buildJinaTargets(target)) {
+    attempts.push({
+      name: "jina",
+      timeoutMs: 32000,
+      run: () => fetchWithTimeout(`${JINA_PREFIX}${variant}`, { timeoutMs: 32000 }),
+    });
+  }
+  // Short timeouts — allorigins is often down (5xx) and should not block the UX.
+  attempts.push({
+    name: "allorigins",
+    timeoutMs: 10000,
+    run: () => fetchWithTimeout(`${ALLORIGINS_RAW}${encodeURIComponent(target)}`, { timeoutMs: 10000 }),
+  });
+  attempts.push({
+    name: "allorigins-json",
+    timeoutMs: 10000,
+    run: async () => {
+      const raw = await fetchWithTimeout(
+        `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`,
+        { timeoutMs: 10000 }
+      );
+      const data = JSON.parse(raw);
+      if (!data?.contents) throw new Error("empty");
+      return String(data.contents);
+    },
+  });
+  attempts.push({
+    name: "corsproxy-org",
+    timeoutMs: 14000,
+    run: () =>
+      fetchWithTimeout(`https://corsproxy.org/?${encodeURIComponent(target)}`, {
+        timeoutMs: 14000,
+      }),
+  });
+  return attempts;
+}
+
 async function fetchRemotePage(url, { preferHtml = false } = {}) {
   const target = String(url || "").trim();
   if (!target) throw new Error("رابط المصدر فارغ.");
 
-  const errors = [];
-  const attempts = [];
+  // preferHtml is retained for callers, but we never send custom headers:
+  // browser CORS preflight on X-Return-Format was a common "Failed to fetch" cause.
+  void preferHtml;
 
-  // 1) Jina without custom headers (avoids CORS preflight failures)
-  attempts.push({
-    name: "jina",
-    run: async () => {
-      const response = await fetch(`${JINA_PREFIX}${target}`);
-      if (!response.ok) throw new Error(`jina (${response.status})`);
-      return response.text();
-    },
-  });
-
-  // 2) Jina HTML mode (may require preflight; useful when available)
-  if (preferHtml) {
-    attempts.push({
-      name: "jina-html",
-      run: async () => {
-        const response = await fetch(`${JINA_PREFIX}${target}`, {
-          headers: {
-            "X-Return-Format": "html",
-            "X-Timeout": "45",
-          },
-        });
-        if (!response.ok) throw new Error(`jina-html (${response.status})`);
-        return response.text();
-      },
-    });
+  const attempts = buildProxyAttempts(target);
+  const pref = preferredProxyName();
+  if (pref) {
+    attempts.sort((a, b) => Number(b.name.startsWith(pref)) - Number(a.name.startsWith(pref)));
   }
 
-  // 3) allorigins raw proxy
-  attempts.push({
-    name: "allorigins",
-    run: async () => {
-      const response = await fetch(`${ALLORIGINS_RAW}${encodeURIComponent(target)}`);
-      if (!response.ok) throw new Error(`allorigins (${response.status})`);
-      return response.text();
-    },
-  });
+  const errors = [];
 
-  // 4) allorigins JSON envelope
-  attempts.push({
-    name: "allorigins-json",
-    run: async () => {
-      const response = await fetch(
-        `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`
+  // Race the first two Jina variants — usually enough and faster than serial waits.
+  const jinaAttempts = attempts.filter((item) => item.name === "jina").slice(0, 2);
+  if (jinaAttempts.length) {
+    try {
+      const text = await Promise.any(
+        jinaAttempts.map(async (attempt) => {
+          const value = await attempt.run();
+          if (!value || value.length < 80) throw new Error("empty");
+          if (isBlockedOrMissing(value)) throw new Error("blocked");
+          return value;
+        })
       );
-      if (!response.ok) throw new Error(`allorigins-json (${response.status})`);
-      const data = await response.json();
-      if (!data?.contents) throw new Error("allorigins-json empty");
-      return String(data.contents);
-    },
-  });
+      rememberProxy("jina");
+      return { text, via: "jina" };
+    } catch (error) {
+      const details = error?.errors?.map((e) => e?.message || e).join(", ") || error?.message || "race failed";
+      errors.push(`jina-race: ${details}`);
+    }
+  }
 
   for (const attempt of attempts) {
+    if (attempt.name === "jina" && jinaAttempts.includes(attempt)) continue;
     try {
       const text = await attempt.run();
       if (!text || text.length < 80) {
@@ -181,6 +267,7 @@ async function fetchRemotePage(url, { preferHtml = false } = {}) {
         errors.push(`${attempt.name}: blocked`);
         continue;
       }
+      rememberProxy(attempt.name);
       return { text, via: attempt.name };
     } catch (error) {
       errors.push(`${attempt.name}: ${error?.message || error}`);
@@ -188,32 +275,13 @@ async function fetchRemotePage(url, { preferHtml = false } = {}) {
   }
 
   throw new Error(
-    `تعذّر جلب الصفحة (Failed to fetch). المحاولات: ${errors.slice(0, 4).join(" · ")}`
+    `تعذّر جلب الصفحة عبر كل الوسطاء. جرّب مصدراً آخر أو أعد المحاولة بعد قليل. التفاصيل: ${errors.slice(0, 5).join(" · ")}`
   );
 }
 
 /** @deprecated use fetchRemotePage */
-async function fetchJina(url, { format = "markdown", timeout = 45, waitFor = "" } = {}) {
-  const preferHtml = format === "html";
-  // Prefer simple jina first; only use header mode when HTML explicitly requested
-  if (preferHtml) {
-    try {
-      const response = await fetch(`${JINA_PREFIX}${url}`, {
-        headers: {
-          "X-Return-Format": "html",
-          "X-Timeout": String(timeout),
-          ...(waitFor ? { "X-Wait-For-Selector": waitFor } : {}),
-        },
-      });
-      if (response.ok) {
-        const text = await response.text();
-        if (text && !isBlockedOrMissing(text) && text.length > 80) return text;
-      }
-    } catch {
-      /* fall through */
-    }
-  }
-  const { text } = await fetchRemotePage(url, { preferHtml });
+async function fetchJina(url, { format = "markdown" } = {}) {
+  const { text } = await fetchRemotePage(url, { preferHtml: format === "html" });
   return text;
 }
 
@@ -255,8 +323,65 @@ function finalizeDailyMedDoc(doc, sections, sourceNote) {
   };
 }
 
+async function hydrateFromOpenFdaSetId(doc) {
+  const setId = String(doc?.setId || "").trim();
+  if (!setId) return null;
+  try {
+    const results = await fetchOpenFda(`set_id:"${setId}"`, 1);
+    if (!results.length) return null;
+    const full = normalizeOpenFda(results[0]);
+    if (!full.sections?.length) return null;
+    return {
+      ...full,
+      id: doc.id || full.id,
+      source: doc.source || "dailymed",
+      sourceLabel: doc.source === "drugs" ? "drugs.com ≈ OpenFDA label" : "DailyMed / OpenFDA",
+      title: doc.title || full.title,
+      url: doc.url || full.url,
+      hydrated: true,
+      needsFullLabel: false,
+      fetchVia: "openfda",
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function hydrateDailyMedFull(doc) {
-  if (!doc?.setId) return doc;
+  if (!doc?.setId && !doc?.title && !doc?.api) return doc;
+
+  // 1) OpenFDA first — CORS * and no proxy required.
+  const fromFda = await hydrateFromOpenFdaSetId(doc);
+  if (fromFda?.sections?.length >= 5) return fromFda;
+
+  if (!doc?.setId) {
+    // Try resolving a set id via OpenFDA name search, then hydrate.
+    const hints = [doc.title, doc.api, doc.slug?.replace(/-/g, " ")].filter(Boolean);
+    for (const hint of hints) {
+      for (const expr of buildQueryVariants(hint).slice(0, 2)) {
+        try {
+          const batch = await fetchOpenFda(expr, 1);
+          if (!batch.length) continue;
+          const full = normalizeOpenFda(batch[0]);
+          if (full.sections?.length >= 5) {
+            return {
+              ...full,
+              id: doc.id || full.id,
+              source: doc.source || "dailymed",
+              title: doc.title || full.title,
+              url: doc.url || full.url,
+              hydrated: true,
+              needsFullLabel: false,
+              fetchVia: "openfda",
+            };
+          }
+        } catch {
+          /* next */
+        }
+      }
+    }
+    return fromFda || doc;
+  }
 
   const urls = [
     {
@@ -303,7 +428,6 @@ async function hydrateDailyMedFull(doc) {
       if (!best || score > best.score) {
         best = { sections, score, label: candidate.label, url: candidate.url };
       }
-      // Good enough full label
       if (sections.length >= 12 && score > 800) break;
     } catch {
       /* try next URL */
@@ -311,27 +435,10 @@ async function hydrateDailyMedFull(doc) {
   }
 
   if (best?.sections?.length >= 3) {
-    return finalizeDailyMedDoc(
-      { ...doc, url: best.url },
-      best.sections,
-      best.label
-    );
+    return finalizeDailyMedDoc({ ...doc, url: best.url }, best.sections, best.label);
   }
 
-  try {
-    const results = await fetchOpenFda(`set_id:"${doc.setId}"`, 1);
-    if (results.length) {
-      const full = normalizeOpenFda(results[0]);
-      return {
-        ...full,
-        title: doc.title || full.title,
-        hydrated: true,
-        needsFullLabel: false,
-      };
-    }
-  } catch {
-    /* keep original */
-  }
+  if (fromFda?.sections?.length) return fromFda;
   return doc;
 }
 
@@ -940,15 +1047,29 @@ async function searchEmcSource(query, { limit = 8, filters = {} } = {}) {
   const searchQ = appendFilterKeywords(query, f);
   if (!searchQ) return [];
 
-  const searchUrl = `https://www.medicines.org.uk/emc/search?q=${encodeURIComponent(searchQ)}&docType=smpc`;
-  const { text: payload } = await fetchRemotePage(searchUrl, { preferHtml: true });
-  const results = parseEmcSearch(payload, { limit: Math.max(limit * 2, 12) }).filter((doc) =>
-    matchesClientFilters(doc, f)
-  );
-  if (!results.length) {
-    throw new Error("لا نتائج eMC — جرّب اسماً إنجليزياً مثل ibuprofen أو خفّف الفلاتر.");
+  const searchUrls = [
+    `https://www.medicines.org.uk/emc/search?q=${encodeURIComponent(searchQ)}&docType=smpc`,
+    `https://www.medicines.org.uk/emc/search?q=${encodeURIComponent(searchQ)}`,
+    `https://medicines.org.uk/emc/search?q=${encodeURIComponent(searchQ)}&docType=smpc`,
+  ];
+
+  const errors = [];
+  for (const searchUrl of searchUrls) {
+    try {
+      const { text: payload } = await fetchRemotePage(searchUrl, { preferHtml: false });
+      const results = parseEmcSearch(payload, { limit: Math.max(limit * 2, 12) }).filter((doc) =>
+        matchesClientFilters(doc, f)
+      );
+      if (results.length) return results.slice(0, limit);
+      errors.push(`${searchUrl}: no parseable products`);
+    } catch (error) {
+      errors.push(error?.message || String(error));
+    }
   }
-  return results.slice(0, limit);
+
+  throw new Error(
+    `تعذّر بحث eMC حالياً (الوسطاء غير متاحين أو لا نتائج). جرّب مصدر DailyMed أو «الكل». ${errors[0] ? `· ${errors[0]}` : ""}`
+  );
 }
 
 async function searchDrugsComSource(query, { limit = 8, filters = {} } = {}) {
@@ -1036,6 +1157,35 @@ export async function searchSmpc(query, { limit = 8, source = "dailymed", filter
   const src = SMPC_SOURCE_OPTIONS.some((item) => item.id === source) ? source : "dailymed";
   if (!q && !hasActiveSmpcFilters(f)) return [];
 
+  if (src === "all") {
+    const perSource = Math.max(3, Math.ceil(limit / 2));
+    const tasks = [
+      searchDailyMedSource(q, { limit: perSource, filters: f }).catch(() => []),
+      searchDrugsComSource(q, { limit: perSource, filters: f }).catch(() => []),
+      searchEmcSource(q, { limit: perSource, filters: f }).catch(() => []),
+    ];
+    const batches = await Promise.all(tasks);
+    const seen = new Set();
+    const merged = [];
+    // Interleave sources so the top of the list is diverse.
+    const maxLen = Math.max(...batches.map((batch) => batch.length), 0);
+    for (let i = 0; i < maxLen; i += 1) {
+      for (const batch of batches) {
+        const item = batch[i];
+        if (!item) continue;
+        const key = `${item.source}:${item.setId || item.productId || item.slug || item.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(item);
+        if (merged.length >= limit) return merged;
+      }
+    }
+    if (!merged.length) {
+      throw new Error("لا نتائج من أي مصدر. جرّب اسماً إنجليزياً أو خفّف الفلاتر.");
+    }
+    return merged;
+  }
+
   // Filtered NDC search is richest for DailyMed / drugs.com
   if ((src === "dailymed" || src === "drugs") && hasActiveSmpcFilters(f)) {
     const filtered = await searchByNdcFilters(q || f.atc || f.formulation || f.manufacturer, {
@@ -1067,44 +1217,63 @@ async function hydrateEmcFull(doc) {
   const url = doc.url || (doc.productId ? `https://www.medicines.org.uk/emc/product/${doc.productId}/smpc` : "");
   if (!url) return doc;
 
-  const { text, via } = await fetchRemotePage(url, { preferHtml: true });
-  if (isBlockedOrMissing(text)) {
-    throw new Error("تعذّر تحميل SmPC من eMC.");
-  }
-
-  let sections = [];
-  if (/<details[\s>]/i.test(text) || /spcWrapper/i.test(text)) {
-    sections = parseEmcHtml(text);
-  }
-  if (sections.length < 3) {
-    sections = parseEmcMarkdownSections(text);
-  }
-  if (!sections.length) {
-    throw new Error("لم يُعثر على أقسام SmPC في صفحة eMC.");
-  }
-
-  const titleMatch =
-    text.match(/<title>([^<]+)<\/title>/i) || text.match(/^Title:\s*(.+)$/m);
-  let title = doc.title;
-  if (titleMatch) {
-    title =
-      stripTags(titleMatch[1])
-        .replace(/\s*-\s*Summary of Product Characteristics.*$/i, "")
-        .replace(/\s*\|\s*\d+\s*$/i, "")
-        .trim() || title;
-  }
-
-  return {
-    ...doc,
-    title,
-    sourceLabel: "eMC (medicines.org.uk)",
+  const urls = [
     url,
-    sections,
-    englishText: sections.map((s) => `${s.title}\n${s.text}`).join("\n\n"),
-    hydrated: true,
-    needsFullLabel: false,
-    fetchVia: via,
-  };
+    url.replace("https://www.medicines.org.uk", "https://medicines.org.uk"),
+    url.replace("https://www.", "http://www."),
+  ].filter((value, index, arr) => value && arr.indexOf(value) === index);
+
+  let lastError = null;
+  for (const candidate of urls) {
+    try {
+      const { text, via } = await fetchRemotePage(candidate, { preferHtml: false });
+      if (isBlockedOrMissing(text)) {
+        lastError = new Error("blocked");
+        continue;
+      }
+
+      let sections = [];
+      if (/<details[\s>]/i.test(text) || /spcWrapper/i.test(text)) {
+        sections = parseEmcHtml(text);
+      }
+      if (sections.length < 3) {
+        sections = parseEmcMarkdownSections(text);
+      }
+      if (!sections.length) {
+        lastError = new Error("no sections");
+        continue;
+      }
+
+      const titleMatch =
+        text.match(/<title>([^<]+)<\/title>/i) || text.match(/^Title:\s*(.+)$/m);
+      let title = doc.title;
+      if (titleMatch) {
+        title =
+          stripTags(titleMatch[1])
+            .replace(/\s*-\s*Summary of Product Characteristics.*$/i, "")
+            .replace(/\s*\|\s*\d+\s*$/i, "")
+            .trim() || title;
+      }
+
+      return {
+        ...doc,
+        title,
+        sourceLabel: "eMC (medicines.org.uk)",
+        url: candidate.startsWith("http") ? candidate.replace(/^http:/, "https:") : url,
+        sections,
+        englishText: sections.map((s) => `${s.title}\n${s.text}`).join("\n\n"),
+        hydrated: true,
+        needsFullLabel: false,
+        fetchVia: via,
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw new Error(
+    `تعذّر تحميل SmPC من eMC. ${lastError?.message || ""}`.trim()
+  );
 }
 
 async function hydrateDrugsComFull(doc) {

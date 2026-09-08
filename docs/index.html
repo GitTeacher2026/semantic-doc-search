@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&family=Noto+Serif+Arabic:wght@600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/styles.css?v=20260908i" />
+  <link rel="stylesheet" href="css/styles.css?v=20260908j" />
   <link rel="stylesheet" href="css/auth.css" />
 </head>
 <body class="auth-body">
@@ -475,7 +475,14 @@
             <legend>مصدر النشرة</legend>
             <div class="smpc-source-tabs" role="radiogroup" aria-label="مصدر SmPC">
               <label class="smpc-source-option">
-                <input type="radio" name="smpc-source" value="dailymed" checked />
+                <input type="radio" name="smpc-source" value="all" checked />
+                <span class="smpc-source-card">
+                  <strong>الكل</strong>
+                  <small>كل المصادر معاً</small>
+                </span>
+              </label>
+              <label class="smpc-source-option">
+                <input type="radio" name="smpc-source" value="dailymed" />
                 <span class="smpc-source-card">
                   <strong>DailyMed</strong>
                   <small>FDA / SPL كامل</small>
@@ -1098,6 +1105,6 @@
 
   <iframe id="credential-catcher" name="credential-catcher" title="" tabindex="-1" aria-hidden="true" hidden></iframe>
 
-  <script type="module" src="js/main.js?v=20260908i"></script>
+  <script type="module" src="js/main.js?v=20260908j"></script>
 </body>
 </html>

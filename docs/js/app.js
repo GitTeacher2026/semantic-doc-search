@@ -1741,10 +1741,11 @@ function closeSmpcViewer() {
 
 function getSelectedSmpcSource() {
   const selected = smpcSourceInputs.find((input) => input.checked);
-  return selected?.value || "dailymed";
+  return selected?.value || "all";
 }
 
 function smpcSourceLabel(source = getSelectedSmpcSource()) {
+  if (source === "all") return "كل المصادر";
   if (source === "emc") return "eMC (medicines.org.uk)";
   if (source === "drugs") return "drugs.com";
   return "DailyMed";
