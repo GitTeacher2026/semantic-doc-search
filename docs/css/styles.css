@@ -3302,7 +3302,7 @@ html[data-theme="dark"] .fb-card:hover {
 
 .smpc-source-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.55rem;
 }
 
@@ -3349,6 +3349,12 @@ html[data-theme="dark"] .fb-card:hover {
 .smpc-source-option input:focus-visible + .smpc-source-card {
   outline: 2px solid #0f6e56;
   outline-offset: 2px;
+}
+
+@media (max-width: 900px) {
+  .smpc-source-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 700px) {
@@ -3656,7 +3662,168 @@ body.smpc-viewer-open {
   overflow: hidden;
 }
 
-/* —— Site changelog / admin change notes —— */
+/* —— Certification search —— */
+.cert-search-intro {
+  margin: 0 0 1rem;
+  line-height: 1.55;
+}
+
+.cert-standards-fieldset,
+.cert-bodies-fieldset {
+  margin: 0.9rem 0;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.cert-standards-fieldset legend,
+.cert-bodies-fieldset legend {
+  padding-inline: 0.35rem;
+  font-weight: 600;
+}
+
+.cert-bodies-toolbar {
+  display: flex;
+  gap: 0.45rem;
+  margin-bottom: 0.65rem;
+}
+
+.cert-check-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem 0.75rem;
+}
+
+.cert-check-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.cert-check-option small {
+  display: block;
+  color: var(--muted, #667);
+  font-size: 0.78rem;
+}
+
+.cert-search-status.is-error {
+  color: #b42318;
+}
+
+.cert-section-title {
+  margin: 1.25rem 0 0.35rem;
+  font-size: 1.05rem;
+}
+
+.cert-section-hint {
+  margin: 0 0 0.75rem;
+}
+
+.cert-results-grid,
+.cert-portal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+
+.cert-result-card,
+.cert-portal-card {
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel, #fff) 94%, #ecfeff);
+}
+
+.cert-result-card.is-live {
+  border-color: color-mix(in srgb, #0f766e 45%, var(--line));
+}
+
+.cert-result-head,
+.cert-portal-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.55rem;
+  align-items: center;
+  margin-bottom: 0.45rem;
+}
+
+.cert-rank {
+  font-weight: 700;
+  color: var(--muted, #667);
+  font-size: 0.82rem;
+}
+
+.cert-body-chip,
+.cert-source-chip {
+  display: inline-flex;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: #ccfbf1;
+  color: #115e59;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.cert-source-chip {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.cert-result-title {
+  margin: 0 0 0.3rem;
+  font-size: 1rem;
+}
+
+.cert-result-meta,
+.cert-result-snippet {
+  margin: 0 0 0.45rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.cert-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.cert-errors {
+  margin-top: 0.85rem;
+}
+
+html[data-theme="dark"] .cert-result-card,
+html[data-theme="dark"] .cert-portal-card {
+  background: rgba(15, 23, 42, 0.45);
+}
+
+html[data-theme="dark"] .cert-body-chip {
+  background: rgba(20, 184, 166, 0.2);
+  color: #99f6e4;
+}
+
+html[data-theme="dark"] .cert-source-chip {
+  background: rgba(99, 102, 241, 0.22);
+  color: #c7d2fe;
+}
+
+@media (max-width: 720px) {
+  .cert-check-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.smpc-source-tabs {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+  .smpc-source-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .site-changelog {
   margin: 0 0 1rem;
   padding: 0.9rem 1rem 1rem;

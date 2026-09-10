@@ -24,6 +24,17 @@
   },
   "entries": [
     {
+      "id": "note-cert-search-20260910",
+      "createdAt": "2026-09-10T09:05:00.000Z",
+      "updatedAt": "2026-09-10T09:05:00.000Z",
+      "author": "cursor",
+      "category": "feature",
+      "title": "بحث شهادات ISO عبر هيئات التصديق",
+      "body": "تبويب بحث جديد للشهادات: اختيار هيئات شائعة (SGS، BSI، TÜV، UKAS…) والبحث عن الشركات ذات اعتماد ISO مع نتائج مباشرة من SGS وروابط تحقق رسمية لباقي الجهات.",
+      "published": true,
+      "source": "cursor"
+    },
+    {
       "id": "note-smpc-proxy-20260908",
       "createdAt": "2026-09-08T14:35:00.000Z",
       "updatedAt": "2026-09-08T14:35:00.000Z",

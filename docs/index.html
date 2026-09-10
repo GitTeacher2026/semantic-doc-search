@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&family=Noto+Serif+Arabic:wght@600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/styles.css?v=20260908j" />
+  <link rel="stylesheet" href="css/styles.css?v=20260910a" />
   <link rel="stylesheet" href="css/auth.css" />
 </head>
 <body class="auth-body">
@@ -391,6 +391,7 @@
             <button id="search-mode-library" class="search-mode-tab is-active" type="button" role="tab" aria-selected="true" data-mode="library">مكتبة المستندات</button>
             <button id="search-mode-pharma" class="search-mode-tab" type="button" role="tab" aria-selected="false" data-mode="pharma">دساتير الأدوية / Monographs</button>
             <button id="search-mode-smpc" class="search-mode-tab" type="button" role="tab" aria-selected="false" data-mode="smpc">SmPC / نشرة خصائص المنتج</button>
+            <button id="search-mode-cert" class="search-mode-tab" type="button" role="tab" aria-selected="false" data-mode="cert">شهادات ISO / Certification</button>
           </div>
         </section>
 
@@ -606,6 +607,45 @@
           </div>
           <p id="smpc-search-status" class="muted smpc-search-status hidden" role="status"></p>
           <div id="smpc-search-results" class="results smpc-results"></div>
+        </section>
+
+        <section id="cert-search-panel" class="panel hidden">
+          <h2>بحث شهادات ISO / اعتماد الشركات</h2>
+          <p class="muted cert-search-intro">
+            بديل عملي لـ IAF CertSearch المحدود مجاناً: ابحث مباشرة عبر أشهر هيئات التصديق
+            (SGS، BSI، Bureau Veritas، TÜV، Intertek، DNV، LRQA، DEKRA، UKAS CertCheck).
+            النتائج المباشرة تُجلب من واجهات عامة متاحة، مع روابط رسمية للتحقق داخل موقع كل هيئة.
+          </p>
+
+          <label for="cert-company-query">اسم الشركة</label>
+          <input id="cert-company-query" type="search" placeholder="مثال: Siemens, Nestle, Pfizer" />
+
+          <label for="cert-number-query">رقم الشهادة (اختياري)</label>
+          <input id="cert-number-query" type="search" placeholder="مثال: CRS13705 أو رقم شهادة ISO" />
+
+          <fieldset class="cert-standards-fieldset">
+            <legend>معايير ISO (اختياري)</legend>
+            <div id="cert-standards-grid" class="cert-check-grid"></div>
+          </fieldset>
+
+          <fieldset class="cert-bodies-fieldset">
+            <legend>هيئات التصديق</legend>
+            <div class="cert-bodies-toolbar">
+              <button id="cert-bodies-all" class="btn ghost small" type="button">تحديد الكل</button>
+              <button id="cert-bodies-none" class="btn ghost small" type="button">إلغاء الكل</button>
+            </div>
+            <div id="cert-bodies-grid" class="cert-check-grid"></div>
+          </fieldset>
+
+          <label for="cert-result-count">عدد النتائج المباشرة: <span id="cert-result-count-label">12</span></label>
+          <input id="cert-result-count" type="range" min="5" max="30" value="12" />
+
+          <div class="search-actions">
+            <button id="cert-search-btn" class="btn primary" type="button">بحث الشهادات</button>
+            <button id="cert-clear-btn" class="btn ghost" type="button" disabled>مسح</button>
+          </div>
+          <p id="cert-search-status" class="muted cert-search-status hidden" role="status"></p>
+          <div id="cert-search-results" class="results cert-results"></div>
         </section>
       </main>
     </div>
@@ -1105,6 +1145,6 @@
 
   <iframe id="credential-catcher" name="credential-catcher" title="" tabindex="-1" aria-hidden="true" hidden></iframe>
 
-  <script type="module" src="js/main.js?v=20260908j"></script>
+  <script type="module" src="js/main.js?v=20260910a"></script>
 </body>
 </html>

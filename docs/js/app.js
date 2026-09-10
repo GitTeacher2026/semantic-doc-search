@@ -115,6 +115,13 @@ import {
 } from "./smpc.js";
 import { translateSmpcSections } from "./smpc-translate.js";
 import { downloadSmpcDocxPair } from "./smpc-docx.js";
+import {
+  CERT_BODIES,
+  ISO_STANDARDS,
+  bindCertificationResults,
+  renderCertificationResults,
+  searchCertifications,
+} from "./certification.js";
 import { isMegaConnected, ensureMegaAutoLogin, getMegaEmail, getLastMegaAuthError, loginToMega, logoutMega, needsMegaAuthRecovery, markMegaAuthFailed } from "./mega-auth.js";
 import {
   downloadMegaFile,
@@ -271,9 +278,11 @@ const resultCountLabel = document.getElementById("result-count-label");
 const searchModeLibraryBtn = document.getElementById("search-mode-library");
 const searchModePharmaBtn = document.getElementById("search-mode-pharma");
 const searchModeSmpcBtn = document.getElementById("search-mode-smpc");
+const searchModeCertBtn = document.getElementById("search-mode-cert");
 const librarySearchPanel = document.getElementById("library-search-panel");
 const pharmaSearchPanel = document.getElementById("pharma-search-panel");
 const smpcSearchPanel = document.getElementById("smpc-search-panel");
+const certSearchPanel = document.getElementById("cert-search-panel");
 const pharmaSearchQuery = document.getElementById("pharma-search-query");
 const pharmaSourceFilter = document.getElementById("pharma-source-filter");
 const pharmaResultCount = document.getElementById("pharma-result-count");
@@ -301,6 +310,18 @@ const smpcFilterRoute = document.getElementById("smpc-filter-route");
 const smpcFilterStrength = document.getElementById("smpc-filter-strength");
 const smpcFilterProductType = document.getElementById("smpc-filter-product-type");
 const smpcFiltersPanel = document.getElementById("smpc-filters");
+const certCompanyQuery = document.getElementById("cert-company-query");
+const certNumberQuery = document.getElementById("cert-number-query");
+const certStandardsGrid = document.getElementById("cert-standards-grid");
+const certBodiesGrid = document.getElementById("cert-bodies-grid");
+const certBodiesAllBtn = document.getElementById("cert-bodies-all");
+const certBodiesNoneBtn = document.getElementById("cert-bodies-none");
+const certResultCount = document.getElementById("cert-result-count");
+const certResultCountLabel = document.getElementById("cert-result-count-label");
+const certSearchBtn = document.getElementById("cert-search-btn");
+const certClearBtn = document.getElementById("cert-clear-btn");
+const certSearchStatus = document.getElementById("cert-search-status");
+const certSearchResults = document.getElementById("cert-search-results");
 const smpcViewerModal = document.getElementById("smpc-viewer-modal");
 const smpcViewerBackdrop = document.getElementById("smpc-viewer-backdrop");
 const smpcViewer = document.getElementById("smpc-viewer");
@@ -1526,16 +1547,21 @@ function switchAppPage(page) {
 }
 
 function setSearchMode(mode) {
-  searchMode = mode === "pharma" ? "pharma" : mode === "smpc" ? "smpc" : "library";
+  searchMode =
+    mode === "pharma" ? "pharma" : mode === "smpc" ? "smpc" : mode === "cert" ? "cert" : "library";
   librarySearchPanel?.classList.toggle("hidden", searchMode !== "library");
   pharmaSearchPanel?.classList.toggle("hidden", searchMode !== "pharma");
   smpcSearchPanel?.classList.toggle("hidden", searchMode !== "smpc");
+  certSearchPanel?.classList.toggle("hidden", searchMode !== "cert");
   searchModeLibraryBtn?.classList.toggle("is-active", searchMode === "library");
   searchModePharmaBtn?.classList.toggle("is-active", searchMode === "pharma");
   searchModeSmpcBtn?.classList.toggle("is-active", searchMode === "smpc");
+  searchModeCertBtn?.classList.toggle("is-active", searchMode === "cert");
   searchModeLibraryBtn?.setAttribute("aria-selected", String(searchMode === "library"));
   searchModePharmaBtn?.setAttribute("aria-selected", String(searchMode === "pharma"));
   searchModeSmpcBtn?.setAttribute("aria-selected", String(searchMode === "smpc"));
+  searchModeCertBtn?.setAttribute("aria-selected", String(searchMode === "cert"));
+  if (searchMode === "cert") ensureCertSearchForm();
 }
 
 function setPharmaStatus(message, isError = false) {
@@ -1708,6 +1734,100 @@ function setSmpcStatus(message, isError = false) {
   smpcSearchStatus.textContent = message;
   smpcSearchStatus.classList.remove("hidden");
   smpcSearchStatus.classList.toggle("is-error", Boolean(isError));
+}
+
+function setCertStatus(message, isError = false) {
+  if (!certSearchStatus) return;
+  if (!message) {
+    certSearchStatus.textContent = "";
+    certSearchStatus.classList.add("hidden");
+    certSearchStatus.classList.remove("is-error");
+    return;
+  }
+  certSearchStatus.textContent = message;
+  certSearchStatus.classList.remove("hidden");
+  certSearchStatus.classList.toggle("is-error", Boolean(isError));
+}
+
+let certFormReady = false;
+
+function ensureCertSearchForm() {
+  if (certFormReady) return;
+  if (certStandardsGrid) {
+    certStandardsGrid.innerHTML = ISO_STANDARDS.map(
+      (item) => `
+      <label class="cert-check-option">
+        <input type="checkbox" name="cert-standard" value="${item.id}" />
+        <span>${item.label}</span>
+      </label>`
+    ).join("");
+  }
+  if (certBodiesGrid) {
+    certBodiesGrid.innerHTML = CERT_BODIES.map(
+      (body) => `
+      <label class="cert-check-option">
+        <input type="checkbox" name="cert-body" value="${body.id}" checked />
+        <span>
+          <strong>${body.label}</strong>
+          <small>${body.region} — ${body.hint}</small>
+        </span>
+      </label>`
+    ).join("");
+  }
+  certFormReady = true;
+}
+
+function collectCertStandards() {
+  return [...document.querySelectorAll('input[name="cert-standard"]:checked')].map((input) => input.value);
+}
+
+function collectCertBodies() {
+  return [...document.querySelectorAll('input[name="cert-body"]:checked')].map((input) => input.value);
+}
+
+async function runCertificationSearch() {
+  ensureCertSearchForm();
+  const company = certCompanyQuery?.value.trim() || "";
+  const certNumber = certNumberQuery?.value.trim() || "";
+  const standards = collectCertStandards();
+  const bodyIds = collectCertBodies();
+  if (!company && !certNumber) {
+    setCertStatus("أدخل اسم الشركة أو رقم الشهادة.", true);
+    return;
+  }
+  if (!bodyIds.length) {
+    setCertStatus("حدّد هيئة تصديق واحدة على الأقل.", true);
+    return;
+  }
+
+  certSearchBtn.disabled = true;
+  setCertStatus(`جارٍ البحث في ${bodyIds.length} هيئة تصديق…`);
+  try {
+    const limit = Number(certResultCount?.value || 12);
+    const payload = await searchCertifications({
+      company,
+      certNumber,
+      standards,
+      bodyIds,
+      limit,
+    });
+    if (certSearchResults) {
+      certSearchResults.innerHTML = renderCertificationResults(payload);
+      bindCertificationResults(certSearchResults);
+    }
+    if (certClearBtn) certClearBtn.disabled = false;
+    const live = payload.liveCount || 0;
+    setCertStatus(
+      live
+        ? `عُثر على ${live} نتيجة مباشرة، مع ${payload.portalCount} رابط دليل رسمي.`
+        : `لا نتائج مباشرة من الواجهات المتاحة. فُتحت ${payload.portalCount} أدلة رسمية للبحث اليدوي داخل مواقع الهيئات.`,
+      false
+    );
+  } catch (error) {
+    setCertStatus(error.message, true);
+  } finally {
+    certSearchBtn.disabled = false;
+  }
 }
 
 function setSmpcViewerStatus(message, isError = false) {
@@ -2977,6 +3097,44 @@ searchModePharmaBtn?.addEventListener("click", () => {
   ensurePharmacopoeiaCatalog();
 });
 searchModeSmpcBtn?.addEventListener("click", () => setSearchMode("smpc"));
+searchModeCertBtn?.addEventListener("click", () => setSearchMode("cert"));
+certSearchBtn?.addEventListener("click", () => runCertificationSearch());
+certClearBtn?.addEventListener("click", () => {
+  if (certSearchResults) certSearchResults.innerHTML = "";
+  if (certCompanyQuery) certCompanyQuery.value = "";
+  if (certNumberQuery) certNumberQuery.value = "";
+  document.querySelectorAll('input[name="cert-standard"]').forEach((input) => {
+    input.checked = false;
+  });
+  document.querySelectorAll('input[name="cert-body"]').forEach((input) => {
+    input.checked = true;
+  });
+  if (certClearBtn) certClearBtn.disabled = true;
+  setCertStatus("");
+});
+certBodiesAllBtn?.addEventListener("click", () => {
+  ensureCertSearchForm();
+  document.querySelectorAll('input[name="cert-body"]').forEach((input) => {
+    input.checked = true;
+  });
+});
+certBodiesNoneBtn?.addEventListener("click", () => {
+  ensureCertSearchForm();
+  document.querySelectorAll('input[name="cert-body"]').forEach((input) => {
+    input.checked = false;
+  });
+});
+certResultCount?.addEventListener("input", () => {
+  if (certResultCountLabel) certResultCountLabel.textContent = certResultCount.value;
+});
+[certCompanyQuery, certNumberQuery].forEach((input) => {
+  input?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      runCertificationSearch();
+    }
+  });
+});
 pharmaSearchBtn?.addEventListener("click", async () => {
   await ensurePharmacopoeiaCatalog();
   runPharmacopoeiaSearch();
