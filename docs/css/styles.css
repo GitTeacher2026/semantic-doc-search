@@ -3793,6 +3793,123 @@ body.smpc-viewer-open {
   margin-top: 0.85rem;
 }
 
+.cert-source-chip.is-pdf {
+  background: rgba(180, 83, 9, 0.15);
+  color: #9a3412;
+}
+
+.cert-viewer-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+}
+
+.cert-viewer-modal.hidden {
+  display: none;
+}
+
+.cert-viewer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(12, 18, 28, 0.55);
+}
+
+.cert-viewer-shell {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: min(980px, 100%);
+  max-height: min(92vh, 920px);
+  margin: 1rem;
+  background: var(--panel, #fff);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+}
+
+.cert-viewer-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel, #fff) 92%, #0f766e 8%);
+}
+
+.cert-viewer-header-text h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.cert-viewer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.cert-viewer-status {
+  margin: 0.55rem 1rem 0;
+}
+
+.cert-viewer-status.is-error {
+  color: #b42318;
+}
+
+.cert-viewer-body {
+  flex: 1;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.cert-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.65rem 1rem;
+  margin: 0 0 1rem;
+}
+
+.cert-detail-grid dt {
+  font-size: 0.78rem;
+  color: var(--muted, #667);
+  margin: 0;
+}
+
+.cert-detail-grid dd {
+  margin: 0.15rem 0 0;
+  font-weight: 600;
+}
+
+.cert-pdf-frame {
+  width: 100%;
+  min-height: 65vh;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.cert-detail-preview {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #f7f4ef;
+}
+
+.cert-detail-preview iframe,
+.cert-detail-preview > html {
+  width: 100%;
+}
+
+body.cert-viewer-open {
+  overflow: hidden;
+}
+
 html[data-theme="dark"] .cert-result-card,
 html[data-theme="dark"] .cert-portal-card {
   background: rgba(15, 23, 42, 0.45);
@@ -3808,9 +3925,20 @@ html[data-theme="dark"] .cert-source-chip {
   color: #c7d2fe;
 }
 
+html[data-theme="dark"] .cert-source-chip.is-pdf {
+  background: rgba(251, 191, 36, 0.18);
+  color: #fcd34d;
+}
+
 @media (max-width: 720px) {
   .cert-check-grid {
     grid-template-columns: 1fr;
+  }
+
+  .cert-viewer-shell {
+    margin: 0;
+    max-height: 100vh;
+    border-radius: 0;
   }
 }
 

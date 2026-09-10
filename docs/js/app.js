@@ -121,7 +121,10 @@ import {
   bindCertificationResults,
   renderCertificationResults,
   searchCertifications,
-} from "./certification.js?v=20260910d";
+  downloadCertificateCard,
+  downloadCertificatePdf,
+  renderCertificateDetail,
+} from "./certification.js?v=20260910e";
 import { isMegaConnected, ensureMegaAutoLogin, getMegaEmail, getLastMegaAuthError, loginToMega, logoutMega, needsMegaAuthRecovery, markMegaAuthFailed } from "./mega-auth.js";
 import {
   downloadMegaFile,
@@ -322,6 +325,18 @@ const certSearchBtn = document.getElementById("cert-search-btn");
 const certClearBtn = document.getElementById("cert-clear-btn");
 const certSearchStatus = document.getElementById("cert-search-status");
 const certSearchResults = document.getElementById("cert-search-results");
+const certViewerModal = document.getElementById("cert-viewer-modal");
+const certViewerBackdrop = document.getElementById("cert-viewer-backdrop");
+const certViewerTitle = document.getElementById("cert-viewer-title");
+const certViewerSubtitle = document.getElementById("cert-viewer-subtitle");
+const certViewerBody = document.getElementById("cert-viewer-body");
+const certViewerStatus = document.getElementById("cert-viewer-status");
+const certViewerClose = document.getElementById("cert-viewer-close");
+const certDownloadPdfBtn = document.getElementById("cert-download-pdf-btn");
+const certDownloadCardBtn = document.getElementById("cert-download-card-btn");
+const certPrintBtn = document.getElementById("cert-print-btn");
+const certSourceLink = document.getElementById("cert-source-link");
+let activeCertResult = null;
 const smpcViewerModal = document.getElementById("smpc-viewer-modal");
 const smpcViewerBackdrop = document.getElementById("smpc-viewer-backdrop");
 const smpcViewer = document.getElementById("smpc-viewer");
@@ -1785,6 +1800,59 @@ function collectCertBodies() {
   return [...document.querySelectorAll('input[name="cert-body"]:checked')].map((input) => input.value);
 }
 
+function setCertViewerStatus(message, isError = false) {
+  if (!certViewerStatus) return;
+  if (!message) {
+    certViewerStatus.textContent = "";
+    certViewerStatus.classList.add("hidden");
+    certViewerStatus.classList.remove("is-error");
+    return;
+  }
+  certViewerStatus.textContent = message;
+  certViewerStatus.classList.remove("hidden");
+  certViewerStatus.classList.toggle("is-error", Boolean(isError));
+}
+
+function closeCertViewer() {
+  certViewerModal?.classList.add("hidden");
+  document.body.classList.remove("cert-viewer-open");
+  activeCertResult = null;
+  if (certViewerBody) certViewerBody.innerHTML = "";
+  if (certViewerSubtitle) certViewerSubtitle.textContent = "";
+  setCertViewerStatus("");
+}
+
+function openCertViewer(item) {
+  activeCertResult = item;
+  if (!certViewerModal || !item) return;
+  if (certViewerTitle) {
+    certViewerTitle.textContent = item.certificateNo
+      ? `شهادة ${item.certificateNo}`
+      : "عرض الشهادة";
+  }
+  if (certViewerSubtitle) {
+    certViewerSubtitle.textContent = [item.bodyLabel, item.company, item.standard]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  if (certViewerBody) certViewerBody.innerHTML = renderCertificateDetail(item);
+  if (certDownloadPdfBtn) {
+    certDownloadPdfBtn.disabled = !item.pdfUrl;
+    certDownloadPdfBtn.title = item.pdfUrl ? "" : "لا يتوفر PDF أصلي لهذه النتيجة — استخدم تنزيل البطاقة";
+  }
+  if (certSourceLink) {
+    if (item.url) {
+      certSourceLink.href = item.url;
+      certSourceLink.classList.remove("hidden");
+    } else {
+      certSourceLink.classList.add("hidden");
+    }
+  }
+  setCertViewerStatus("");
+  certViewerModal.classList.remove("hidden");
+  document.body.classList.add("cert-viewer-open");
+}
+
 async function runCertificationSearch() {
   ensureCertSearchForm();
   const company = certCompanyQuery?.value.trim() || "";
@@ -1813,14 +1881,20 @@ async function runCertificationSearch() {
     });
     if (certSearchResults) {
       certSearchResults.innerHTML = renderCertificationResults(payload);
-      bindCertificationResults(certSearchResults);
+      bindCertificationResults(certSearchResults, {
+        onView: openCertViewer,
+        onError: (error) => setCertStatus(error?.message || String(error), true),
+      });
     }
     if (certClearBtn) certClearBtn.disabled = false;
     const live = payload.liveCount || 0;
+    const bodiesHit = new Set(
+      (payload.results || []).filter((item) => item.source === "live").map((item) => item.bodyLabel)
+    );
     setCertStatus(
       live
-        ? `عُثر على ${live} نتيجة مباشرة، مع ${payload.portalCount} رابط دليل رسمي.`
-        : `لا نتائج مباشرة من الواجهات المتاحة. فُتحت ${payload.portalCount} أدلة رسمية للبحث اليدوي داخل مواقع الهيئات.`,
+        ? `عُثر على ${live} نتيجة مباشرة من ${bodiesHit.size} هيئة (${[...bodiesHit].join("، ")}). يمكنك العرض أو التنزيل من كل بطاقة.`
+        : `لا نتائج مباشرة من الواجهات المتاحة. فُتحت ${payload.portalCount} أدلة رسمية — بعض الهيئات تفرض CAPTCHA على البحث العام.`,
       false
     );
   } catch (error) {
@@ -3111,6 +3185,47 @@ certClearBtn?.addEventListener("click", () => {
   });
   if (certClearBtn) certClearBtn.disabled = true;
   setCertStatus("");
+  closeCertViewer();
+});
+certViewerClose?.addEventListener("click", () => closeCertViewer());
+certViewerBackdrop?.addEventListener("click", () => closeCertViewer());
+certDownloadCardBtn?.addEventListener("click", () => {
+  if (!activeCertResult) return;
+  downloadCertificateCard(activeCertResult);
+});
+certDownloadPdfBtn?.addEventListener("click", async () => {
+  if (!activeCertResult?.pdfUrl) {
+    setCertViewerStatus("لا يتوفر PDF أصلي — تم تنزيل بطاقة HTML بدلًا منه.", false);
+    if (activeCertResult) downloadCertificateCard(activeCertResult);
+    return;
+  }
+  try {
+    setCertViewerStatus("جارٍ تنزيل ملف PDF…");
+    await downloadCertificatePdf(activeCertResult);
+    setCertViewerStatus("تم تنزيل PDF.");
+  } catch (error) {
+    setCertViewerStatus(error?.message || "تعذّر تنزيل PDF", true);
+  }
+});
+certPrintBtn?.addEventListener("click", () => {
+  if (!activeCertResult) return;
+  const html = renderCertificateDetail(activeCertResult);
+  const win = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
+  if (!win) {
+    setCertViewerStatus("حظر المتصفح نافذة الطباعة.", true);
+    return;
+  }
+  win.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>طباعة شهادة</title>
+    <style>body{font-family:Segoe UI,Tahoma,sans-serif;padding:1.5rem} dt{font-weight:600} dd{margin:0 0 .75rem} iframe{width:100%;min-height:70vh;border:1px solid #ccc}</style>
+    </head><body>${html}</body></html>`);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 400);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && certViewerModal && !certViewerModal.classList.contains("hidden")) {
+    closeCertViewer();
+  }
 });
 certBodiesAllBtn?.addEventListener("click", () => {
   ensureCertSearchForm();

@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&family=Noto+Serif+Arabic:wght@600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/styles.css?v=20260910d" />
+  <link rel="stylesheet" href="css/styles.css?v=20260910e" />
   <link rel="stylesheet" href="css/auth.css" />
 </head>
 <body class="auth-body">
@@ -613,8 +613,9 @@
           <h2>بحث شهادات ISO / اعتماد الشركات</h2>
           <p class="muted cert-search-intro">
             بديل عملي لـ IAF CertSearch المحدود مجاناً: ابحث مباشرة عبر أشهر هيئات التصديق
-            (SGS، BSI، Bureau Veritas، TÜV، Intertek، DNV، LRQA، DEKRA، UKAS CertCheck).
-            النتائج المباشرة تُجلب من واجهات عامة متاحة، مع روابط رسمية للتحقق داخل موقع كل هيئة.
+            (SGS، TÜV Rheinland/Certipedia، Bureau Veritas، Intertek، BSI، TÜV SÜD، DNV، LRQA، DEKRA، UKAS).
+            النتائج الحية تُعرض داخل الموقع مع إمكانية <strong>عرض الشهادة</strong> و<strong>تنزيل PDF أو بطاقة الشهادة</strong>.
+            بعض الهيئات تفرض CAPTCHA على البحث العام فيبقى رابط الدليل الرسمي كاحتياط.
           </p>
 
           <label for="cert-company-query">اسم الشركة</label>
@@ -668,6 +669,27 @@
         <div id="trash-list" class="trash-list"></div>
         <button id="trash-back-btn" class="btn ghost" type="button">العودة إلى المكتبة</button>
       </section>
+    </div>
+  </div>
+
+  <div id="cert-viewer-modal" class="cert-viewer-modal hidden" role="dialog" aria-modal="true" aria-labelledby="cert-viewer-title">
+    <div class="cert-viewer-backdrop" id="cert-viewer-backdrop"></div>
+    <div class="cert-viewer-shell">
+      <header class="cert-viewer-header">
+        <div class="cert-viewer-header-text">
+          <h2 id="cert-viewer-title">عرض الشهادة</h2>
+          <p id="cert-viewer-subtitle" class="muted"></p>
+        </div>
+        <div class="cert-viewer-toolbar">
+          <button id="cert-download-pdf-btn" class="btn primary small" type="button">تنزيل PDF</button>
+          <button id="cert-download-card-btn" class="btn ghost small" type="button">تنزيل البطاقة</button>
+          <button id="cert-print-btn" class="btn ghost small" type="button">طباعة</button>
+          <a id="cert-source-link" class="btn ghost small" href="#" target="_blank" rel="noopener noreferrer">المصدر</a>
+          <button id="cert-viewer-close" class="btn ghost small" type="button" aria-label="إغلاق">إغلاق</button>
+        </div>
+      </header>
+      <p id="cert-viewer-status" class="muted cert-viewer-status hidden" role="status"></p>
+      <div id="cert-viewer-body" class="cert-viewer-body"></div>
     </div>
   </div>
 
@@ -1145,6 +1167,6 @@
 
   <iframe id="credential-catcher" name="credential-catcher" title="" tabindex="-1" aria-hidden="true" hidden></iframe>
 
-  <script type="module" src="js/main.js?v=20260910d"></script>
+  <script type="module" src="js/main.js?v=20260910e"></script>
 </body>
 </html>

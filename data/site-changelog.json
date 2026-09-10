@@ -24,6 +24,17 @@
   },
   "entries": [
     {
+      "id": "note-multi-cb-live-20260910",
+      "createdAt": "2026-09-10T15:30:00.000Z",
+      "updatedAt": "2026-09-10T15:30:00.000Z",
+      "author": "cursor",
+      "category": "feature",
+      "title": "نتائج مباشرة من عدة هيئات + عرض/تنزيل الشهادة",
+      "body": "بحث الشهادات يجلب الآن نتائج مباشرة من SGS وTÜV Rheinland (Certipedia) وBureau Veritas وIntertek داخل الموقع، مع أزرار عرض الشهادة وتنزيل PDF أو بطاقة HTML. الهيئات المحمية بـ CAPTCHA (مثل BSI وDNV وUKAS) تبقى عبر الدليل الرسمي.",
+      "published": true,
+      "source": "cursor"
+    },
+    {
       "id": "note-sgs-puter-fetch-20260910",
       "createdAt": "2026-09-10T12:45:00.000Z",
       "updatedAt": "2026-09-10T12:45:00.000Z",
