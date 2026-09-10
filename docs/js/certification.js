@@ -5,6 +5,8 @@
  */
 
 const JINA_PREFIX = "https://r.jina.ai/";
+const ALLORIGINS_RAW = "https://api.allorigins.win/raw?url=";
+const PROXY_PREF_KEY = "cert_proxy_pref_v1";
 
 export const ISO_STANDARDS = [
   { id: "9001", label: "ISO 9001 (Quality)" },
@@ -126,36 +128,144 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-async function fetchViaJina(url, { timeoutMs = 35000 } = {}) {
-  const target = String(url || "").trim();
-  if (!target) throw new Error("Empty URL");
+async function fetchWithTimeout(url, { timeoutMs = 28000 } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const variants = [target];
-    if (target.startsWith("https://")) variants.push(`http://${target.slice(8)}`);
-    let lastError = null;
-    for (const variant of variants) {
-      try {
-        const response = await fetch(`${JINA_PREFIX}${variant}`, {
-          signal: ctrl.signal,
-          cache: "no-store",
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const text = await response.text();
-        if (!text || text.length < 20) throw new Error("empty");
-        if (/captcha|just a moment|access denied/i.test(text.slice(0, 500)) && text.length < 800) {
-          throw new Error("blocked");
-        }
-        return text;
-      } catch (error) {
-        lastError = error;
-      }
+    const response = await fetch(url, {
+      signal: ctrl.signal,
+      cache: "no-store",
+      mode: "cors",
+      credentials: "omit",
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.text();
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error(`timeout ${timeoutMs}ms`);
+    const message = String(error?.message || error || "");
+    if (/failed to fetch|networkerror|load failed/i.test(message)) {
+      throw new Error("Failed to fetch");
     }
-    throw lastError || new Error("fetch failed");
+    throw error instanceof Error ? error : new Error(message);
   } finally {
     clearTimeout(timer);
   }
+}
+
+function rememberProxy(name) {
+  try {
+    sessionStorage.setItem(PROXY_PREF_KEY, name);
+  } catch {
+    /* ignore */
+  }
+}
+
+function preferredProxyName() {
+  try {
+    return sessionStorage.getItem(PROXY_PREF_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function jinaProxyUrls(target) {
+  const urls = [];
+  const push = (value) => {
+    const next = String(value || "").trim();
+    if (next && !urls.includes(next)) urls.push(next);
+  };
+  push(`${JINA_PREFIX}${target}`);
+  if (target.startsWith("https://")) {
+    push(`${JINA_PREFIX}http://${target.slice("https://".length)}`);
+  } else if (target.startsWith("http://")) {
+    push(`${JINA_PREFIX}https://${target.slice("http://".length)}`);
+  }
+  return urls;
+}
+
+/**
+ * Browser-safe remote fetch for CB APIs (no CORS on SGS).
+ * Races Jina variants first, then short-timeout fallbacks.
+ */
+async function fetchCertRemote(url, { timeoutMs = 32000 } = {}) {
+  const target = String(url || "").trim();
+  if (!target) throw new Error("Empty URL");
+
+  const attempts = [];
+  for (const proxyUrl of jinaProxyUrls(target)) {
+    attempts.push({
+      name: "jina",
+      timeoutMs,
+      run: () => fetchWithTimeout(proxyUrl, { timeoutMs }),
+    });
+  }
+  attempts.push({
+    name: "allorigins",
+    timeoutMs: 10000,
+    run: () => fetchWithTimeout(`${ALLORIGINS_RAW}${encodeURIComponent(target)}`, { timeoutMs: 10000 }),
+  });
+  attempts.push({
+    name: "allorigins-json",
+    timeoutMs: 10000,
+    run: async () => {
+      const raw = await fetchWithTimeout(
+        `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`,
+        { timeoutMs: 10000 }
+      );
+      const data = JSON.parse(raw);
+      if (!data?.contents) throw new Error("empty");
+      return String(data.contents);
+    },
+  });
+
+  const pref = preferredProxyName();
+  if (pref) {
+    attempts.sort((a, b) => Number(b.name.startsWith(pref)) - Number(a.name.startsWith(pref)));
+  }
+
+  const errors = [];
+  const jinaAttempts = attempts.filter((item) => item.name === "jina").slice(0, 2);
+  if (jinaAttempts.length) {
+    try {
+      const text = await Promise.any(
+        jinaAttempts.map(async (attempt) => {
+          const value = await attempt.run();
+          if (!value || value.length < 20) throw new Error("empty");
+          if (/captcha|just a moment/i.test(value.slice(0, 400)) && value.length < 800) {
+            throw new Error("blocked");
+          }
+          return value;
+        })
+      );
+      rememberProxy("jina");
+      return text;
+    } catch (error) {
+      const details =
+        error?.errors?.map((item) => item?.message || item).join(", ") || error?.message || "race failed";
+      errors.push(`jina-race: ${details}`);
+    }
+  }
+
+  for (const attempt of attempts) {
+    if (attempt.name === "jina" && jinaAttempts.includes(attempt)) continue;
+    try {
+      const text = await attempt.run();
+      if (!text || text.length < 20) {
+        errors.push(`${attempt.name}: empty`);
+        continue;
+      }
+      if (/captcha|just a moment/i.test(text.slice(0, 400)) && text.length < 800) {
+        errors.push(`${attempt.name}: blocked`);
+        continue;
+      }
+      rememberProxy(attempt.name);
+      return text;
+    } catch (error) {
+      errors.push(`${attempt.name}: ${error?.message || error}`);
+    }
+  }
+
+  throw new Error(`تعذّر جلب بيانات SGS عبر الوسطاء (${errors.slice(0, 3).join(" · ")})`);
 }
 
 function extractJsonBlob(text) {
@@ -233,9 +343,31 @@ async function searchSgsLive({ company, certNumber, standards = [], limit = 12 }
     CertificateNo: certNo,
     ContractNo: "",
   };
-  const query = `Type=2&json=${encodeURIComponent(JSON.stringify(payload))}&IP=0&_=${Date.now()}`;
-  const apiUrl = `https://procertportal.sgs.com/SearchCertificatesAPI/api/Job/GetCertData?${query}`;
-  const text = await fetchViaJina(apiUrl);
+
+  const buildApiUrl = () => {
+    const query = `Type=2&json=${encodeURIComponent(JSON.stringify(payload))}&IP=0&_=${Date.now()}`;
+    return `https://procertportal.sgs.com/SearchCertificatesAPI/api/Job/GetCertData?${query}`;
+  };
+
+  let text = "";
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      text = await fetchCertRemote(buildApiUrl(), { timeoutMs: 32000 });
+      if (text && (text.includes("CertInfo") || text.includes("CompanyName"))) break;
+      lastError = new Error("empty SGS payload");
+      text = "";
+    } catch (error) {
+      lastError = error;
+      text = "";
+      // brief pause before retry (helps with flaky reader caches)
+      await new Promise((resolve) => setTimeout(resolve, 400 + attempt * 400));
+    }
+  }
+  if (!text) {
+    throw lastError || new Error("تعذّر الاتصال بـ SGS");
+  }
+
   const data = extractJsonBlob(text);
   const rows = Array.isArray(data?.CertInfo) ? data.CertInfo : [];
   const out = [];
@@ -355,7 +487,11 @@ export async function searchCertifications({
         });
         live.push(...rows);
       } catch (error) {
-        errors.push(`${body.label}: ${error?.message || error}`);
+        const raw = String(error?.message || error || "");
+        const friendly = /failed to fetch|timeout|تعذّر/i.test(raw)
+          ? "تعذّر الجلب المباشر حالياً — استخدم زر الدليل الرسمي أدناه"
+          : raw;
+        errors.push(`${body.label}: ${friendly}`);
       }
     })
   );
