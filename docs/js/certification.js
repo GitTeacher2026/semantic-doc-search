@@ -6,7 +6,7 @@
 
 const JINA_PREFIX = "https://r.jina.ai/";
 const ALLORIGINS_RAW = "https://api.allorigins.win/raw?url=";
-const PROXY_PREF_KEY = "cert_proxy_pref_v1";
+const PROXY_PREF_KEY = "cert_proxy_pref_v2";
 
 export const ISO_STANDARDS = [
   { id: "9001", label: "ISO 9001 (Quality)" },
@@ -170,119 +170,112 @@ function preferredProxyName() {
 
 function looksLikeSgsPayload(text) {
   const sample = String(text || "");
-  if (sample.length < 20) return false;
-  if (/captcha|just a moment|access denied/i.test(sample.slice(0, 500)) && sample.length < 1000) {
+  if (sample.length < 10) return false;
+  if (/captcha|just a moment|access denied|error code:\s*5\d\d/i.test(sample.slice(0, 500)) && sample.length < 1200) {
     return false;
   }
   return /CertInfo|CompanyName|CertificateNo/.test(sample);
 }
 
-/** First successful promise; works even when Promise.any is missing. */
-function firstSuccessful(tasks) {
-  return new Promise((resolve, reject) => {
-    let pending = tasks.length;
-    const errors = [];
-    if (!pending) {
-      reject(new Error("no attempts"));
-      return;
-    }
-    tasks.forEach((task, index) => {
-      Promise.resolve()
-        .then(task)
-        .then(resolve)
-        .catch((error) => {
-          errors[index] = error;
-          pending -= 1;
-          if (pending === 0) {
-            const err = new Error(errors.map((item) => item?.message || item).join(" · "));
-            err.errors = errors;
-            reject(err);
-          }
-        });
+/**
+ * Direct SGS fetch via Puter networking (bypasses browser CORS).
+ * Uses the site's existing Puter token; never opens a login popup.
+ */
+async function fetchViaPuter(url, timeoutMs = 28000) {
+  const { loadPuter } = await import("./puter-auth.js");
+  const puter = await loadPuter();
+  if (!puter?.net?.fetch) throw new Error("puter.net unavailable");
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const response = await puter.net.fetch(url, {
+      method: "GET",
+      signal: ctrl.signal,
+      headers: { Accept: "application/json,text/plain,*/*" },
     });
-  });
+    if (!response?.ok) throw new Error(`HTTP ${response?.status || "?"}`);
+    const text = await response.text();
+    if (!looksLikeSgsPayload(text)) throw new Error("puter: bad payload");
+    return text;
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error(`timeout ${timeoutMs}ms`);
+    throw error instanceof Error ? error : new Error(String(error));
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function buildSgsProxyAttempts(target, timeoutMs = 32000) {
-  const attempts = [];
-
-  // Prefer fully-encoded target so browser URL parsers don't steal ?query from SGS.
-  attempts.push({
-    name: "jina-enc",
-    run: () => fetchWithTimeout(`${JINA_PREFIX}${encodeURIComponent(target)}`, { timeoutMs }),
-  });
-  attempts.push({
-    name: "jina",
-    run: () => fetchWithTimeout(`${JINA_PREFIX}${target}`, { timeoutMs }),
-  });
-  if (target.startsWith("https://")) {
-    const httpTarget = `http://${target.slice("https://".length)}`;
-    attempts.push({
-      name: "jina-http-enc",
-      run: () => fetchWithTimeout(`${JINA_PREFIX}${encodeURIComponent(httpTarget)}`, { timeoutMs }),
-    });
-  }
-
-  // allorigins currently returns CORS * and raw SGS JSON — race it with Jina.
-  attempts.push({
-    name: "allorigins",
-    run: () =>
-      fetchWithTimeout(`${ALLORIGINS_RAW}${encodeURIComponent(target)}`, {
-        timeoutMs: Math.min(timeoutMs, 20000),
-      }),
-  });
-  attempts.push({
-    name: "allorigins-json",
-    run: async () => {
-      const raw = await fetchWithTimeout(
-        `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`,
-        { timeoutMs: Math.min(timeoutMs, 20000) }
-      );
-      const data = JSON.parse(raw);
-      if (!data?.contents) throw new Error("empty");
-      return String(data.contents);
+  const shortMs = Math.min(timeoutMs, 18000);
+  return [
+    {
+      name: "jina-enc",
+      // Fully-encoded so browser URL parsers don't steal ?query from SGS.
+      run: () => fetchWithTimeout(`${JINA_PREFIX}${encodeURIComponent(target)}`, { timeoutMs }),
     },
-  });
-
-  return attempts;
+    {
+      name: "jina-http-enc",
+      run: () => {
+        const httpTarget = target.startsWith("https://")
+          ? `http://${target.slice("https://".length)}`
+          : target;
+        return fetchWithTimeout(`${JINA_PREFIX}${encodeURIComponent(httpTarget)}`, { timeoutMs });
+      },
+    },
+    {
+      name: "allorigins-json",
+      run: async () => {
+        const raw = await fetchWithTimeout(
+          `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`,
+          { timeoutMs: shortMs }
+        );
+        const data = JSON.parse(raw);
+        if (!data?.contents) throw new Error("empty");
+        return String(data.contents);
+      },
+    },
+    {
+      name: "allorigins",
+      run: () =>
+        fetchWithTimeout(`${ALLORIGINS_RAW}${encodeURIComponent(target)}`, { timeoutMs: shortMs }),
+    },
+  ];
 }
 
 /**
- * Browser-safe remote fetch for CB APIs (SGS has no CORS).
- * Races Jina + allorigins; remembers the last working proxy.
+ * Browser-safe remote fetch for SGS (no CORS on ProCert API).
+ * Order: Puter.net (direct) → Jina reader → allorigins. Serial to avoid rate limits.
  */
 async function fetchCertRemote(url, { timeoutMs = 32000 } = {}) {
   const target = String(url || "").trim();
   if (!target) throw new Error("Empty URL");
 
-  let attempts = buildSgsProxyAttempts(target, timeoutMs);
+  const errors = [];
   const pref = preferredProxyName();
-  if (pref) {
+
+  // 1) Puter CORS-free path (best for production custom domains).
+  if (typeof document !== "undefined" && pref !== "skip-puter") {
+    try {
+      const text = await fetchViaPuter(target, Math.min(timeoutMs, 28000));
+      rememberProxy("puter");
+      return text;
+    } catch (error) {
+      errors.push(`puter: ${error?.message || error}`);
+    }
+  }
+
+  let attempts = buildSgsProxyAttempts(target, timeoutMs);
+  if (pref && pref !== "puter") {
     attempts = [
       ...attempts.filter((item) => item.name.startsWith(pref)),
       ...attempts.filter((item) => !item.name.startsWith(pref)),
     ];
+  } else if (pref === "puter") {
+    // Puter worked before — keep jina first among fallbacks.
   }
 
-  // Race the top 3 attempts for speed/reliability.
-  const raced = attempts.slice(0, 3);
-  try {
-    const text = await firstSuccessful(
-      raced.map((attempt) => async () => {
-        const value = await attempt.run();
-        if (!looksLikeSgsPayload(value)) throw new Error(`${attempt.name}: bad payload`);
-        rememberProxy(attempt.name.split("-")[0]);
-        return value;
-      })
-    );
-    return text;
-  } catch (error) {
-    /* fall through to remaining attempts */
-    void error;
-  }
-
-  const errors = [];
-  for (const attempt of attempts.slice(3)) {
+  for (const attempt of attempts) {
     try {
       const text = await attempt.run();
       if (!looksLikeSgsPayload(text)) {
@@ -296,75 +289,58 @@ async function fetchCertRemote(url, { timeoutMs = 32000 } = {}) {
     }
   }
 
-  // Final serial retry of raced attempts (sometimes a raced peer aborted early).
-  for (const attempt of raced) {
+  throw new Error(`تعذّر جلب بيانات SGS (${errors.slice(0, 3).join(" · ")})`);
+}
+
+/** Unwrap nested JSON / jina markdown / allorigins envelopes into an object. */
+function unwrapJsonValue(value, depth = 0) {
+  if (depth > 5 || value == null) return value;
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return value;
+  let text = value.trim();
+  if (!text) return null;
+  if (
+    (text.startsWith('"') && text.endsWith('"')) ||
+    (text.startsWith("'") && text.endsWith("'")) ||
+    text.startsWith("{") ||
+    text.startsWith("[")
+  ) {
     try {
-      const text = await attempt.run();
-      if (!looksLikeSgsPayload(text)) {
-        errors.push(`${attempt.name}: bad payload`);
-        continue;
-      }
-      rememberProxy(attempt.name.split("-")[0]);
-      return text;
-    } catch (error) {
-      errors.push(`${attempt.name}: ${error?.message || error}`);
+      return unwrapJsonValue(JSON.parse(text), depth + 1);
+    } catch {
+      /* keep scanning */
     }
   }
-
-  throw new Error(`تعذّر جلب بيانات SGS عبر الوسطاء (${errors.slice(0, 4).join(" · ")})`);
+  return text;
 }
 
 function extractJsonBlob(text) {
   let body = String(text || "").trim();
 
-  // allorigins /get envelope or jina markdown wrapper
-  if (/^\s*\{/.test(body) && /"contents"\s*:/.test(body.slice(0, 200))) {
+  // allorigins /get envelope
+  if (/^\s*\{/.test(body) && /"contents"\s*:/.test(body.slice(0, 240))) {
     try {
       const envelope = JSON.parse(body);
       if (typeof envelope?.contents === "string") body = envelope.contents;
+      else if (envelope?.contents && typeof envelope.contents === "object") {
+        return envelope.contents;
+      }
     } catch {
-      /* continue with raw body */
+      /* continue */
     }
   }
 
   const mdIdx = body.search(/Markdown Content:\s*/i);
-  const region = mdIdx >= 0 ? body.slice(mdIdx) : body;
+  let region = mdIdx >= 0 ? body.slice(mdIdx).replace(/^Markdown Content:\s*/i, "").trim() : body;
 
-  // Direct quoted JSON string: "{\"CertInfo\":[...]}"
-  const quoted = region.trim();
-  if (quoted.startsWith('"') && /CertInfo/.test(quoted)) {
-    try {
-      const unquoted = JSON.parse(quoted);
-      if (typeof unquoted === "string") return JSON.parse(unquoted);
-      if (unquoted && typeof unquoted === "object") return unquoted;
-    } catch {
-      /* fall through */
-    }
-  }
+  const unwrapped = unwrapJsonValue(region);
+  if (unwrapped && typeof unwrapped === "object") return unwrapped;
 
   const start = region.indexOf("{");
   const end = region.lastIndexOf("}");
   if (start < 0 || end <= start) return null;
-  let raw = region.slice(start, end + 1).trim();
-  if (raw.startsWith('"') && raw.endsWith('"')) {
-    try {
-      raw = JSON.parse(raw);
-    } catch {
-      /* keep */
-    }
-  }
-  if (typeof raw === "string") {
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+  const sliced = unwrapJsonValue(region.slice(start, end + 1));
+  return sliced && typeof sliced === "object" ? sliced : null;
 }
 
 function standardMatchers(standards = []) {
@@ -556,8 +532,9 @@ export async function searchCertifications({
         live.push(...rows);
       } catch (error) {
         const raw = String(error?.message || error || "");
-        const friendly = /failed to fetch|timeout|تعذّر/i.test(raw)
-          ? "تعذّر الجلب المباشر حالياً — استخدم زر الدليل الرسمي أدناه"
+        // Soft note only — portal cards still cover manual verification.
+        const friendly = /failed to fetch|timeout|تعذّر|puter|jina|allorigins|HTTP /i.test(raw)
+          ? "الجلب المباشر غير متاح الآن — افتح الدليل الرسمي أدناه"
           : raw;
         errors.push(`${body.label}: ${friendly}`);
       }
