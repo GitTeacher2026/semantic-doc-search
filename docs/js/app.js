@@ -121,7 +121,7 @@ import {
   bindCertificationResults,
   renderCertificationResults,
   searchCertifications,
-} from "./certification.js?v=20260910b";
+} from "./certification.js?v=20260910c";
 import { isMegaConnected, ensureMegaAutoLogin, getMegaEmail, getLastMegaAuthError, loginToMega, logoutMega, needsMegaAuthRecovery, markMegaAuthFailed } from "./mega-auth.js";
 import {
   downloadMegaFile,

@@ -168,49 +168,75 @@ function preferredProxyName() {
   }
 }
 
-function jinaProxyUrls(target) {
-  const urls = [];
-  const push = (value) => {
-    const next = String(value || "").trim();
-    if (next && !urls.includes(next)) urls.push(next);
-  };
-  push(`${JINA_PREFIX}${target}`);
-  if (target.startsWith("https://")) {
-    push(`${JINA_PREFIX}http://${target.slice("https://".length)}`);
-  } else if (target.startsWith("http://")) {
-    push(`${JINA_PREFIX}https://${target.slice("http://".length)}`);
+function looksLikeSgsPayload(text) {
+  const sample = String(text || "");
+  if (sample.length < 20) return false;
+  if (/captcha|just a moment|access denied/i.test(sample.slice(0, 500)) && sample.length < 1000) {
+    return false;
   }
-  return urls;
+  return /CertInfo|CompanyName|CertificateNo/.test(sample);
 }
 
-/**
- * Browser-safe remote fetch for CB APIs (no CORS on SGS).
- * Races Jina variants first, then short-timeout fallbacks.
- */
-async function fetchCertRemote(url, { timeoutMs = 32000 } = {}) {
-  const target = String(url || "").trim();
-  if (!target) throw new Error("Empty URL");
+/** First successful promise; works even when Promise.any is missing. */
+function firstSuccessful(tasks) {
+  return new Promise((resolve, reject) => {
+    let pending = tasks.length;
+    const errors = [];
+    if (!pending) {
+      reject(new Error("no attempts"));
+      return;
+    }
+    tasks.forEach((task, index) => {
+      Promise.resolve()
+        .then(task)
+        .then(resolve)
+        .catch((error) => {
+          errors[index] = error;
+          pending -= 1;
+          if (pending === 0) {
+            const err = new Error(errors.map((item) => item?.message || item).join(" · "));
+            err.errors = errors;
+            reject(err);
+          }
+        });
+    });
+  });
+}
 
+function buildSgsProxyAttempts(target, timeoutMs = 32000) {
   const attempts = [];
-  for (const proxyUrl of jinaProxyUrls(target)) {
+
+  // Prefer fully-encoded target so browser URL parsers don't steal ?query from SGS.
+  attempts.push({
+    name: "jina-enc",
+    run: () => fetchWithTimeout(`${JINA_PREFIX}${encodeURIComponent(target)}`, { timeoutMs }),
+  });
+  attempts.push({
+    name: "jina",
+    run: () => fetchWithTimeout(`${JINA_PREFIX}${target}`, { timeoutMs }),
+  });
+  if (target.startsWith("https://")) {
+    const httpTarget = `http://${target.slice("https://".length)}`;
     attempts.push({
-      name: "jina",
-      timeoutMs,
-      run: () => fetchWithTimeout(proxyUrl, { timeoutMs }),
+      name: "jina-http-enc",
+      run: () => fetchWithTimeout(`${JINA_PREFIX}${encodeURIComponent(httpTarget)}`, { timeoutMs }),
     });
   }
+
+  // allorigins currently returns CORS * and raw SGS JSON — race it with Jina.
   attempts.push({
     name: "allorigins",
-    timeoutMs: 10000,
-    run: () => fetchWithTimeout(`${ALLORIGINS_RAW}${encodeURIComponent(target)}`, { timeoutMs: 10000 }),
+    run: () =>
+      fetchWithTimeout(`${ALLORIGINS_RAW}${encodeURIComponent(target)}`, {
+        timeoutMs: Math.min(timeoutMs, 20000),
+      }),
   });
   attempts.push({
     name: "allorigins-json",
-    timeoutMs: 10000,
     run: async () => {
       const raw = await fetchWithTimeout(
         `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`,
-        { timeoutMs: 10000 }
+        { timeoutMs: Math.min(timeoutMs, 20000) }
       );
       const data = JSON.parse(raw);
       if (!data?.contents) throw new Error("empty");
@@ -218,67 +244,109 @@ async function fetchCertRemote(url, { timeoutMs = 32000 } = {}) {
     },
   });
 
+  return attempts;
+}
+
+/**
+ * Browser-safe remote fetch for CB APIs (SGS has no CORS).
+ * Races Jina + allorigins; remembers the last working proxy.
+ */
+async function fetchCertRemote(url, { timeoutMs = 32000 } = {}) {
+  const target = String(url || "").trim();
+  if (!target) throw new Error("Empty URL");
+
+  let attempts = buildSgsProxyAttempts(target, timeoutMs);
   const pref = preferredProxyName();
   if (pref) {
-    attempts.sort((a, b) => Number(b.name.startsWith(pref)) - Number(a.name.startsWith(pref)));
+    attempts = [
+      ...attempts.filter((item) => item.name.startsWith(pref)),
+      ...attempts.filter((item) => !item.name.startsWith(pref)),
+    ];
+  }
+
+  // Race the top 3 attempts for speed/reliability.
+  const raced = attempts.slice(0, 3);
+  try {
+    const text = await firstSuccessful(
+      raced.map((attempt) => async () => {
+        const value = await attempt.run();
+        if (!looksLikeSgsPayload(value)) throw new Error(`${attempt.name}: bad payload`);
+        rememberProxy(attempt.name.split("-")[0]);
+        return value;
+      })
+    );
+    return text;
+  } catch (error) {
+    /* fall through to remaining attempts */
+    void error;
   }
 
   const errors = [];
-  const jinaAttempts = attempts.filter((item) => item.name === "jina").slice(0, 2);
-  if (jinaAttempts.length) {
-    try {
-      const text = await Promise.any(
-        jinaAttempts.map(async (attempt) => {
-          const value = await attempt.run();
-          if (!value || value.length < 20) throw new Error("empty");
-          if (/captcha|just a moment/i.test(value.slice(0, 400)) && value.length < 800) {
-            throw new Error("blocked");
-          }
-          return value;
-        })
-      );
-      rememberProxy("jina");
-      return text;
-    } catch (error) {
-      const details =
-        error?.errors?.map((item) => item?.message || item).join(", ") || error?.message || "race failed";
-      errors.push(`jina-race: ${details}`);
-    }
-  }
-
-  for (const attempt of attempts) {
-    if (attempt.name === "jina" && jinaAttempts.includes(attempt)) continue;
+  for (const attempt of attempts.slice(3)) {
     try {
       const text = await attempt.run();
-      if (!text || text.length < 20) {
-        errors.push(`${attempt.name}: empty`);
+      if (!looksLikeSgsPayload(text)) {
+        errors.push(`${attempt.name}: bad payload`);
         continue;
       }
-      if (/captcha|just a moment/i.test(text.slice(0, 400)) && text.length < 800) {
-        errors.push(`${attempt.name}: blocked`);
-        continue;
-      }
-      rememberProxy(attempt.name);
+      rememberProxy(attempt.name.split("-")[0]);
       return text;
     } catch (error) {
       errors.push(`${attempt.name}: ${error?.message || error}`);
     }
   }
 
-  throw new Error(`تعذّر جلب بيانات SGS عبر الوسطاء (${errors.slice(0, 3).join(" · ")})`);
+  // Final serial retry of raced attempts (sometimes a raced peer aborted early).
+  for (const attempt of raced) {
+    try {
+      const text = await attempt.run();
+      if (!looksLikeSgsPayload(text)) {
+        errors.push(`${attempt.name}: bad payload`);
+        continue;
+      }
+      rememberProxy(attempt.name.split("-")[0]);
+      return text;
+    } catch (error) {
+      errors.push(`${attempt.name}: ${error?.message || error}`);
+    }
+  }
+
+  throw new Error(`تعذّر جلب بيانات SGS عبر الوسطاء (${errors.slice(0, 4).join(" · ")})`);
 }
 
 function extractJsonBlob(text) {
-  const body = String(text || "");
-  // Prefer the Markdown Content payload when present.
+  let body = String(text || "").trim();
+
+  // allorigins /get envelope or jina markdown wrapper
+  if (/^\s*\{/.test(body) && /"contents"\s*:/.test(body.slice(0, 200))) {
+    try {
+      const envelope = JSON.parse(body);
+      if (typeof envelope?.contents === "string") body = envelope.contents;
+    } catch {
+      /* continue with raw body */
+    }
+  }
+
   const mdIdx = body.search(/Markdown Content:\s*/i);
-  const sliceFrom = mdIdx >= 0 ? mdIdx : 0;
-  const region = body.slice(sliceFrom);
+  const region = mdIdx >= 0 ? body.slice(mdIdx) : body;
+
+  // Direct quoted JSON string: "{\"CertInfo\":[...]}"
+  const quoted = region.trim();
+  if (quoted.startsWith('"') && /CertInfo/.test(quoted)) {
+    try {
+      const unquoted = JSON.parse(quoted);
+      if (typeof unquoted === "string") return JSON.parse(unquoted);
+      if (unquoted && typeof unquoted === "object") return unquoted;
+    } catch {
+      /* fall through */
+    }
+  }
+
   const start = region.indexOf("{");
   const end = region.lastIndexOf("}");
   if (start < 0 || end <= start) return null;
   let raw = region.slice(start, end + 1).trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || raw.startsWith('"{\\')) {
+  if (raw.startsWith('"') && raw.endsWith('"')) {
     try {
       raw = JSON.parse(raw);
     } catch {
