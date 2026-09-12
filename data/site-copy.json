@@ -10,8 +10,8 @@
     "pending-images-note": {
       "id": "pending-images-note",
       "text": "الصور تتطلب الاسم والمجلد. باقي الملفات يمكن تخصيصها اختيارياً. المجلدات المقفلة تتطلب كلمة المرور عند الإضافة أو التصفح.",
-      "visible": true,
-      "updatedAt": "2026-09-12T08:40:41.263Z",
+      "visible": false,
+      "updatedAt": "2026-09-12T08:40:43.059Z",
       "updatedBy": "admin"
     },
     "pharma-search-intro": {
