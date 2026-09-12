@@ -117,14 +117,13 @@ import { translateSmpcSections } from "./smpc-translate.js";
 import { downloadSmpcDocxPair } from "./smpc-docx.js";
 import {
   CERT_BODIES,
-  ISO_STANDARDS,
   bindCertificationResults,
   renderCertificationResults,
   searchCertifications,
   downloadCertificateCard,
   downloadCertificatePdf,
   renderCertificateDetail,
-} from "./certification.js?v=20260910e";
+} from "./certification.js?v=20260910g";
 import { isMegaConnected, ensureMegaAutoLogin, getMegaEmail, getLastMegaAuthError, loginToMega, logoutMega, needsMegaAuthRecovery, markMegaAuthFailed } from "./mega-auth.js";
 import {
   downloadMegaFile,
@@ -276,8 +275,10 @@ const searchQuery = document.getElementById("search-query");
 const searchBtn = document.getElementById("search-btn");
 const clearSearchBtn = document.getElementById("clear-search-btn");
 const searchResults = document.getElementById("search-results");
-const resultCount = document.getElementById("result-count");
-const resultCountLabel = document.getElementById("result-count-label");
+const DEFAULT_LIBRARY_RESULT_LIMIT = 8;
+const DEFAULT_PHARMA_RESULT_LIMIT = 12;
+const DEFAULT_SMPC_RESULT_LIMIT = 8;
+const DEFAULT_CERT_RESULT_LIMIT = 12;
 const searchModeLibraryBtn = document.getElementById("search-mode-library");
 const searchModePharmaBtn = document.getElementById("search-mode-pharma");
 const searchModeSmpcBtn = document.getElementById("search-mode-smpc");
@@ -288,8 +289,6 @@ const smpcSearchPanel = document.getElementById("smpc-search-panel");
 const certSearchPanel = document.getElementById("cert-search-panel");
 const pharmaSearchQuery = document.getElementById("pharma-search-query");
 const pharmaSourceFilter = document.getElementById("pharma-source-filter");
-const pharmaResultCount = document.getElementById("pharma-result-count");
-const pharmaResultCountLabel = document.getElementById("pharma-result-count-label");
 const pharmaSearchBtn = document.getElementById("pharma-search-btn");
 const pharmaSyncBtn = document.getElementById("pharma-sync-btn");
 const pharmaClearBtn = document.getElementById("pharma-clear-btn");
@@ -297,8 +296,6 @@ const pharmaSearchStatus = document.getElementById("pharma-search-status");
 const pharmaSearchResults = document.getElementById("pharma-search-results");
 const pharmaSuggestMenu = document.getElementById("pharma-suggest-menu");
 const smpcSearchQuery = document.getElementById("smpc-search-query");
-const smpcResultCount = document.getElementById("smpc-result-count");
-const smpcResultCountLabel = document.getElementById("smpc-result-count-label");
 const smpcSearchBtn = document.getElementById("smpc-search-btn");
 const smpcClearBtn = document.getElementById("smpc-clear-btn");
 const smpcSearchStatus = document.getElementById("smpc-search-status");
@@ -315,12 +312,9 @@ const smpcFilterProductType = document.getElementById("smpc-filter-product-type"
 const smpcFiltersPanel = document.getElementById("smpc-filters");
 const certCompanyQuery = document.getElementById("cert-company-query");
 const certNumberQuery = document.getElementById("cert-number-query");
-const certStandardsGrid = document.getElementById("cert-standards-grid");
 const certBodiesGrid = document.getElementById("cert-bodies-grid");
 const certBodiesAllBtn = document.getElementById("cert-bodies-all");
 const certBodiesNoneBtn = document.getElementById("cert-bodies-none");
-const certResultCount = document.getElementById("cert-result-count");
-const certResultCountLabel = document.getElementById("cert-result-count-label");
 const certSearchBtn = document.getElementById("cert-search-btn");
 const certClearBtn = document.getElementById("cert-clear-btn");
 const certSearchStatus = document.getElementById("cert-search-status");
@@ -1610,7 +1604,7 @@ async function ensurePharmacopoeiaCatalog() {
 function runPharmacopoeiaSearch() {
   const query = pharmaSearchQuery?.value.trim() || "";
   const source = pharmaSourceFilter?.value || "";
-  const limit = Number(pharmaResultCount?.value || 12);
+  const limit = DEFAULT_PHARMA_RESULT_LIMIT;
   const hits = searchPharmacopoeia(query, { source, limit });
   hidePharmaSuggestions();
   if (pharmaSearchResults) {
@@ -1768,15 +1762,6 @@ let certFormReady = false;
 
 function ensureCertSearchForm() {
   if (certFormReady) return;
-  if (certStandardsGrid) {
-    certStandardsGrid.innerHTML = ISO_STANDARDS.map(
-      (item) => `
-      <label class="cert-check-option">
-        <input type="checkbox" name="cert-standard" value="${item.id}" />
-        <span>${item.label}</span>
-      </label>`
-    ).join("");
-  }
   if (certBodiesGrid) {
     certBodiesGrid.innerHTML = CERT_BODIES.map(
       (body) => `
@@ -1790,10 +1775,6 @@ function ensureCertSearchForm() {
     ).join("");
   }
   certFormReady = true;
-}
-
-function collectCertStandards() {
-  return [...document.querySelectorAll('input[name="cert-standard"]:checked')].map((input) => input.value);
 }
 
 function collectCertBodies() {
@@ -1857,7 +1838,6 @@ async function runCertificationSearch() {
   ensureCertSearchForm();
   const company = certCompanyQuery?.value.trim() || "";
   const certNumber = certNumberQuery?.value.trim() || "";
-  const standards = collectCertStandards();
   const bodyIds = collectCertBodies();
   if (!company && !certNumber) {
     setCertStatus("أدخل اسم الشركة أو رقم الشهادة.", true);
@@ -1871,11 +1851,11 @@ async function runCertificationSearch() {
   certSearchBtn.disabled = true;
   setCertStatus(`جارٍ البحث في ${bodyIds.length} هيئة تصديق…`);
   try {
-    const limit = Number(certResultCount?.value || 12);
+    const limit = DEFAULT_CERT_RESULT_LIMIT;
     const payload = await searchCertifications({
       company,
       certNumber,
-      standards,
+      standards: [],
       bodyIds,
       limit,
     });
@@ -2017,7 +1997,7 @@ async function runSmpcSearch() {
   );
   closeSmpcViewer();
   try {
-    const limit = Number(smpcResultCount?.value || 8);
+    const limit = DEFAULT_SMPC_RESULT_LIMIT;
     smpcResultsCache = await searchSmpc(query, { limit, source, filters });
     if (smpcSearchResults) {
       smpcSearchResults.innerHTML = renderSmpcSearchResults(smpcResultsCache);
@@ -3106,7 +3086,7 @@ function runSearch() {
   searchBtn.disabled = true;
   try {
     const category = categoryFilter.value || null;
-    const k = Number(resultCount.value);
+    const k = DEFAULT_LIBRARY_RESULT_LIMIT;
     const top = advancedSearch(searchable, query, {
       ...searchOptions,
       category,
@@ -3161,9 +3141,6 @@ clearSearchBtn?.addEventListener("click", clearSearchResults);
 searchQuery?.addEventListener("keydown", (event) => {
   if (event.key === "Enter") runSearch();
 });
-resultCount.addEventListener("input", () => {
-  resultCountLabel.textContent = resultCount.value;
-});
 
 searchModeLibraryBtn?.addEventListener("click", () => setSearchMode("library"));
 searchModePharmaBtn?.addEventListener("click", () => {
@@ -3177,9 +3154,6 @@ certClearBtn?.addEventListener("click", () => {
   if (certSearchResults) certSearchResults.innerHTML = "";
   if (certCompanyQuery) certCompanyQuery.value = "";
   if (certNumberQuery) certNumberQuery.value = "";
-  document.querySelectorAll('input[name="cert-standard"]').forEach((input) => {
-    input.checked = false;
-  });
   document.querySelectorAll('input[name="cert-body"]').forEach((input) => {
     input.checked = true;
   });
@@ -3239,9 +3213,6 @@ certBodiesNoneBtn?.addEventListener("click", () => {
     input.checked = false;
   });
 });
-certResultCount?.addEventListener("input", () => {
-  if (certResultCountLabel) certResultCountLabel.textContent = certResultCount.value;
-});
 [certCompanyQuery, certNumberQuery].forEach((input) => {
   input?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -3262,9 +3233,6 @@ pharmaClearBtn?.addEventListener("click", () => {
   setPharmaStatus("");
 });
 pharmaSyncBtn?.addEventListener("click", () => handlePharmacopoeiaSync());
-pharmaResultCount?.addEventListener("input", () => {
-  if (pharmaResultCountLabel) pharmaResultCountLabel.textContent = pharmaResultCount.value;
-});
 pharmaSearchQuery?.addEventListener("input", () => {
   if (pharmaCatalogReady) updatePharmaSuggestions();
 });
@@ -3293,9 +3261,6 @@ smpcSourceInputs.forEach((input) => {
     closeSmpcViewer();
     setSmpcStatus(`المصدر: ${smpcSourceLabel()}. أدخل اسماً أو فلاتر مخصصة ثم ابحث.`);
   });
-});
-smpcResultCount?.addEventListener("input", () => {
-  if (smpcResultCountLabel) smpcResultCountLabel.textContent = smpcResultCount.value;
 });
 smpcSearchQuery?.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {

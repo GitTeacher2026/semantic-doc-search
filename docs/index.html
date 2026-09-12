@@ -427,8 +427,6 @@
           </details>
           <label for="category-filter">تصفية حسب المشروع / الموضوع</label>
           <select id="category-filter"></select>
-          <label for="result-count">عدد النتائج: <span id="result-count-label">5</span></label>
-          <input id="result-count" type="range" min="3" max="12" value="5" />
           <div class="search-actions">
             <button id="search-btn" class="btn primary" type="button">بحث</button>
             <button id="clear-search-btn" class="btn ghost" type="button" disabled>مسح النتائج</button>
@@ -454,8 +452,6 @@
             <option value="CP">Chinese Pharmacopoeia</option>
             <option value="IPh">International Pharmacopoeia</option>
           </select>
-          <label for="pharma-result-count">عدد النتائج: <span id="pharma-result-count-label">12</span></label>
-          <input id="pharma-result-count" type="range" min="5" max="40" value="12" />
           <div class="search-actions">
             <button id="pharma-search-btn" class="btn primary" type="button">بحث monographs</button>
             <button id="pharma-sync-btn" class="btn ghost" type="button" title="مزامنة فهرس مجلد إضافي من Google Drive">مزامنة مجلد Drive</button>
@@ -599,8 +595,6 @@
             </datalist>
           </details>
 
-          <label for="smpc-result-count">عدد النتائج: <span id="smpc-result-count-label">8</span></label>
-          <input id="smpc-result-count" type="range" min="3" max="15" value="8" />
           <div class="search-actions">
             <button id="smpc-search-btn" class="btn primary" type="button">بحث SmPC</button>
             <button id="smpc-clear-btn" class="btn ghost" type="button" disabled>مسح</button>
@@ -624,11 +618,6 @@
           <label for="cert-number-query">رقم الشهادة (اختياري)</label>
           <input id="cert-number-query" type="search" placeholder="مثال: CRS13705 أو رقم شهادة ISO" />
 
-          <fieldset class="cert-standards-fieldset">
-            <legend>معايير ISO (اختياري)</legend>
-            <div id="cert-standards-grid" class="cert-check-grid"></div>
-          </fieldset>
-
           <fieldset class="cert-bodies-fieldset">
             <legend>هيئات التصديق</legend>
             <div class="cert-bodies-toolbar">
@@ -637,9 +626,6 @@
             </div>
             <div id="cert-bodies-grid" class="cert-check-grid"></div>
           </fieldset>
-
-          <label for="cert-result-count">عدد النتائج المباشرة: <span id="cert-result-count-label">12</span></label>
-          <input id="cert-result-count" type="range" min="5" max="30" value="12" />
 
           <div class="search-actions">
             <button id="cert-search-btn" class="btn primary" type="button">بحث الشهادات</button>
