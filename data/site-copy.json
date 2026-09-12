@@ -1,5 +1,12 @@
 {
   "entries": {
+    "smpc-filters-hint": {
+      "id": "smpc-filters-hint",
+      "text": "",
+      "visible": true,
+      "updatedAt": "2026-09-12T08:39:47.505Z",
+      "updatedBy": "admin"
+    },
     "cert-search-intro": {
       "id": "cert-search-intro",
       "text": "ابحث مباشرة عبر أشهر هيئات التصديق (SGS، TÜV Rheinland/Certipedia، Bureau Veritas، Intertek، BSI، TÜV SÜD، DNV، LRQA، DEKRA، UKAS)",
