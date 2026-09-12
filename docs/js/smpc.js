@@ -332,37 +332,77 @@ function buildJinaTargets(target) {
   return out;
 }
 
-async function fetchViaPuter(url, { timeoutMs = 22000 } = {}) {
-  const run = async () => {
-    const { loadPuter } = await import("./puter-auth.js");
-    const puter = await loadPuter();
-    if (!puter?.net?.fetch) throw new Error("puter.net unavailable");
+function readResponseHeader(headers, name) {
+  if (!headers) return "";
+  const needle = String(name || "").toLowerCase();
+  if (typeof headers.get === "function") {
+    return (
+      headers.get(name) ||
+      headers.get(needle) ||
+      headers.get(String(name || "").toUpperCase()) ||
+      ""
+    );
+  }
+  if (typeof headers === "object") {
+    for (const [key, value] of Object.entries(headers)) {
+      if (String(key).toLowerCase() === needle && value != null) return String(value);
+    }
+  }
+  return "";
+}
 
+/** Low-level Puter fetch with manual redirect following (no queue). */
+async function fetchViaPuterRaw(url, { timeoutMs = 22000, followRedirects = true, puter } = {}) {
+  const client = puter || (await (await import("./puter-auth.js")).loadPuter());
+  if (!client?.net?.fetch) throw new Error("puter.net unavailable");
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    let current = String(url || "").trim();
+    let response = null;
+    for (let hop = 0; hop < 8; hop += 1) {
+      response = await client.net.fetch(current, {
+        method: "GET",
+        signal: ctrl.signal,
+        headers: { Accept: "*/*" },
+        redirect: "manual",
+      });
+      const status = Number(response?.status || 0);
+      if (!(followRedirects && status >= 300 && status < 400)) break;
+      let location = readResponseHeader(response.headers, "location");
+      if (!location && response?.url && String(response.url) !== current) {
+        location = String(response.url);
+      }
+      if (!location) throw new Error(`HTTP ${status}`);
+      current = new URL(location, current).toString();
+    }
+    if (!response?.ok) throw new Error(`HTTP ${response?.status || "?"}`);
+    const text = await response.text();
+    if (!text || text.length < 80) throw new Error("empty");
+    return text;
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error(`timeout ${timeoutMs}ms`);
+    throw error instanceof Error ? error : new Error(String(error));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchViaPuter(url, { timeoutMs = 22000, followRedirects = true } = {}) {
+  const run = async () => {
     let lastError = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
-        const response = await puter.net.fetch(url, {
-          method: "GET",
-          signal: ctrl.signal,
-          headers: { Accept: "*/*" },
-        });
-        if (!response?.ok) throw new Error(`HTTP ${response?.status || "?"}`);
-        const text = await response.text();
-        if (!text || text.length < 80) throw new Error("empty");
-        return text;
+        return await fetchViaPuterRaw(url, { timeoutMs, followRedirects });
       } catch (error) {
         lastError = error;
         const message = String(error?.message || error || "");
-        if (error?.name === "AbortError") throw new Error(`timeout ${timeoutMs}ms`);
         if (/CONNECTING|InvalidStateError|WebSocket|Socket errored/i.test(message) && attempt < 2) {
           await new Promise((resolve) => setTimeout(resolve, 400 + attempt * 350));
           continue;
         }
         throw error instanceof Error ? error : new Error(String(error));
-      } finally {
-        clearTimeout(timer);
       }
     }
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
@@ -387,7 +427,6 @@ function jinaReaderUrl(target) {
 
 function buildProxyAttempts(target) {
   const attempts = [];
-  // Browser → Jina (often blocked by extensions/CSP, but cheap to try).
   for (const variant of buildJinaTargets(target).slice(0, 2)) {
     attempts.push({
       name: "jina",
@@ -439,58 +478,107 @@ const waybackSnapshotCache = new Map();
 function toWaybackIdentityUrl(snapshotUrl) {
   return String(snapshotUrl || "")
     .replace(/^http:\/\//i, "https://")
+    .replace(/\/\/web\.archive\.org\b/i, "//web.archive.org")
+    .replace(/\/\/archive\.org\/web\b/i, "//web.archive.org/web")
     .replace(/\/web\/(\d{8,14})(?:[a-z]{1,3}_?)?\//i, "/web/$1id_/");
+}
+
+function waybackCandidateUrls(snapshotOrLiveUrl) {
+  const raw = String(snapshotOrLiveUrl || "").trim();
+  if (!raw) return [];
+  const https = raw.replace(/^http:\/\//i, "https://");
+  const identity = toWaybackIdentityUrl(https);
+  const plain = identity.replace(/\/web\/(\d{8,14})id_\//i, "/web/$1/");
+  const out = [];
+  for (const value of [identity, plain, https]) {
+    if (value && !out.includes(value)) out.push(value);
+  }
+  return out;
+}
+
+async function lookupWaybackClosest(url, { timeoutMs = 9000 } = {}) {
+  const target = String(url || "").trim();
+  if (!target) throw new Error("empty url");
+
+  const variants = [
+    target,
+    target.replace("https://www.", "https://"),
+    target.replace(/\/smpc\/?$/i, "/smpc/print"),
+    target.replace(/\/smpc\/print\/?$/i, "/smpc"),
+  ].filter((value, index, arr) => value && arr.indexOf(value) === index);
+
+  const endpointsFor = (value) => [
+    `https://archive.org/wayback/available?url=${encodeURIComponent(value)}`,
+    `https://web.archive.org/wayback/available?url=${encodeURIComponent(value)}`,
+  ];
+
+  const tryParse = (raw) => {
+    const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+    const snap = data?.archived_snapshots?.closest?.url;
+    if (!snap) throw new Error("no snapshot");
+    return toWaybackIdentityUrl(snap);
+  };
+
+  let lastError = null;
+
+  // Browser first (CORS *) — avoids nested Puter queue calls during hydration.
+  for (const value of variants) {
+    for (const endpoint of endpointsFor(value)) {
+      try {
+        const raw = await fetchWithTimeout(endpoint, { timeoutMs: Math.min(timeoutMs, 9000) });
+        return tryParse(raw);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+  }
+
+  // Puter fallback for availability JSON when browser→archive.org is blocked.
+  for (const value of variants) {
+    for (const endpoint of endpointsFor(value).slice(0, 1)) {
+      try {
+        const raw = await fetchViaPuter(endpoint, {
+          timeoutMs: Math.min(timeoutMs, 12000),
+          followRedirects: true,
+        });
+        return tryParse(raw);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError || "wayback lookup failed"));
 }
 
 /**
  * Resolve a Wayback Machine snapshot for a live URL.
- * archive.org/wayback/available supports browser CORS (*).
+ * Prefer an exact timestamped capture so Puter does not stop at HTTP 302.
  */
 async function resolveWaybackSnapshot(url, { timeoutMs = 9000 } = {}) {
   const target = String(url || "").trim();
   if (!target) throw new Error("empty url");
   if (waybackSnapshotCache.has(target)) return waybackSnapshotCache.get(target);
 
-  const endpoints = [
-    `https://archive.org/wayback/available?url=${encodeURIComponent(target)}`,
-    `https://archive.org/wayback/available?url=${encodeURIComponent(target.replace("https://www.", "https://"))}`,
-  ];
-
-  let lastError = null;
-  for (const endpoint of endpoints) {
-    try {
-      const raw = await fetchWithTimeout(endpoint, { timeoutMs });
-      const data = JSON.parse(raw);
-      const snap = data?.archived_snapshots?.closest?.url;
-      if (!snap) throw new Error("no snapshot");
-      const identity = toWaybackIdentityUrl(snap);
-      waybackSnapshotCache.set(target, identity);
-      return identity;
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  // Last resort: let Wayback redirect to the closest capture.
-  const fallback = `https://web.archive.org/web/${target}`;
-  waybackSnapshotCache.set(target, fallback);
-  if (lastError) {
-    /* still usable via redirect */
-  }
-  return fallback;
+  const identity = await lookupWaybackClosest(target, { timeoutMs });
+  waybackSnapshotCache.set(target, identity);
+  return identity;
 }
 
 async function fetchViaPuterWayback(target, { timeoutMs = 18000 } = {}) {
-  const snap = await resolveWaybackSnapshot(target, { timeoutMs: Math.min(9000, timeoutMs) });
-  return acceptRemoteText(await fetchViaPuter(snap, { timeoutMs }));
+  const errors = [];
+  const snap = await resolveWaybackSnapshot(target, { timeoutMs: Math.min(10000, timeoutMs) });
+
+  for (const candidate of waybackCandidateUrls(snap)) {
+    try {
+      return acceptRemoteText(await fetchViaPuter(candidate, { timeoutMs, followRedirects: true }));
+    } catch (error) {
+      errors.push(`${candidate.slice(0, 56)}:${error?.message || error}`);
+    }
+  }
+  throw new Error(errors.slice(0, 3).join(" · ") || "wayback fetch failed");
 }
 
-/**
- * Fetch a remote page without CORS.
- *
- * medicines.org.uk is unreachable from Puter and blocked (403) via Puter→Jina.
- * For UK eMC we fetch Wayback snapshots through Puter instead.
- */
 async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = {}) {
   const target = String(url || "").trim();
   if (!target) throw new Error("رابط المصدر فارغ.");
