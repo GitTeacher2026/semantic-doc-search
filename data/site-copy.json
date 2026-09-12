@@ -2,9 +2,9 @@
   "entries": {
     "pharma-search-intro": {
       "id": "pharma-search-intro",
-      "text": "",
-      "visible": true,
-      "updatedAt": "2026-09-12T08:40:15.703Z",
+      "text": "النتائج روابط Google Drive. يمكنك فتح الملف مباشرة أو سحبه (Leech) إلى خادم MEGA وإضافته للمكتبة.",
+      "visible": false,
+      "updatedAt": "2026-09-12T08:40:27.631Z",
       "updatedBy": "admin"
     },
     "pharma-search-credit": {
