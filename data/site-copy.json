@@ -9,9 +9,9 @@
     },
     "pharma-search-credit": {
       "id": "pharma-search-credit",
-      "text": "",
-      "visible": true,
-      "updatedAt": "2026-09-12T08:40:04.316Z",
+      "text": "الفهرس مأخوذ من Web of Pharma Pharmacopoeia Search Engine — النتائج روابط Google Drive مع خيار Leech إلى MEGA.",
+      "visible": false,
+      "updatedAt": "2026-09-12T08:40:23.826Z",
       "updatedBy": "admin"
     },
     "smpc-search-intro": {
