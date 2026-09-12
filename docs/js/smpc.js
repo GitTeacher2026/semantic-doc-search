@@ -1434,14 +1434,32 @@ function parseEmcSearch(markdownOrHtml, { limit = 8 } = {}) {
   return found;
 }
 
+function decodeMaybeUriComponent(value) {
+  let out = String(value || "").replace(/\+/g, " ");
+  for (let i = 0; i < 3; i += 1) {
+    try {
+      const next = decodeURIComponent(out);
+      if (next === out) break;
+      out = next;
+    } catch {
+      break;
+    }
+  }
+  return out;
+}
+
 function parseEmcHitsFromHtml(html, { limit = 8 } = {}) {
-  const text = String(html || "");
+  const text = String(html || "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&#x2F;/gi, "/")
+    .replace(/&#47;/gi, "/");
   const found = [];
   const seen = new Set();
 
   const pushHit = (productId, titleHint = "") => {
     if (!productId || seen.has(productId)) return;
     let title = stripTags(titleHint || "")
+      .replace(/^\d+\.\s*/, "")
       .replace(/\s+/g, " ")
       .replace(/https?:\/\/\S+/g, "")
       .trim();
@@ -1466,12 +1484,26 @@ function parseEmcHitsFromHtml(html, { limit = 8 } = {}) {
     });
   };
 
+  // Markdown / HTML: [Title](...uddg=...product/123...) — common in Jina reader output.
+  const mdUddgRe =
+    /\[([^\]]{3,200})\]\((?:https?:\/\/(?:duckduckgo\.com|lite\.duckduckgo\.com)[^)]*?uddg=([^)&\s]+)[^)]*)\)/gi;
+  let match;
+  while ((match = mdUddgRe.exec(text))) {
+    try {
+      const decoded = decodeMaybeUriComponent(match[2]);
+      const idMatch = decoded.match(/medicines\.org\.uk\/emc\/product\/(\d+)/i);
+      if (idMatch) pushHit(idMatch[1], match[1]);
+    } catch {
+      /* ignore */
+    }
+    if (found.length >= limit) return found;
+  }
+
   // DuckDuckGo redirect links: .../l/?uddg=https%3A%2F%2Fwww.medicines.org.uk%2Femc%2Fproduct%2F123...
   const uddgRe = /uddg=([^&"'<>\s]+)/gi;
-  let match;
   while ((match = uddgRe.exec(text))) {
     try {
-      const decoded = decodeURIComponent(match[1].replace(/\+/g, " "));
+      const decoded = decodeMaybeUriComponent(match[1]);
       const idMatch = decoded.match(/medicines\.org\.uk\/emc\/product\/(\d+)/i);
       if (idMatch) pushHit(idMatch[1]);
     } catch {
@@ -1488,6 +1520,13 @@ function parseEmcHitsFromHtml(html, { limit = 8 } = {}) {
     if (found.length >= limit) return found;
   }
 
+  // Bare host without scheme (Jina often prints www.medicines.org.uk/emc/product/123/smpc).
+  const bareRe = /(?:https?:\/\/)?(?:www\.)?medicines\.org\.uk\/emc\/product\/(\d+)/gi;
+  while ((match = bareRe.exec(text))) {
+    pushHit(match[1]);
+    if (found.length >= limit) return found;
+  }
+
   // Plain URL / markdown leftovers.
   for (const doc of parseEmcSearch(text, { limit })) {
     pushHit(doc.productId, doc.title);
@@ -1500,50 +1539,100 @@ async function fetchViaPuterText(url, timeoutMs = 16000) {
   return acceptRemoteText(await fetchViaPuter(url, { timeoutMs }));
 }
 
-/** eMC discovery via DuckDuckGo — Puter can reach DDG even when medicines.org.uk / Jina are blocked. */
+/**
+ * Fetch discovery pages for eMC.
+ * Puter → DuckDuckGo HTML often returns a bot/empty page with no product ids.
+ * Puter → Jina → DuckDuckGo reliably returns markdown with uddg= product links.
+ */
+async function fetchEmcDiscoveryPayload(targetUrl, { timeoutMs = 16000 } = {}) {
+  const errors = [];
+  const jinaVariants = buildJinaTargets(targetUrl).slice(0, 2);
+  const budget = Math.min(timeoutMs, 16000);
+
+  const tryAllorigins = async () => {
+    const raw = await fetchWithTimeout(
+      `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`,
+      { timeoutMs: Math.min(budget, 12000) }
+    );
+    if (/^\s*</.test(raw)) throw new Error("allorigins html error");
+    const data = JSON.parse(raw);
+    return acceptRemoteText(String(data?.contents || ""));
+  };
+
+  // Race Puter→Jina with browser allorigins — whichever returns parseable content first wins.
+  // Puter→DDG HTML alone often lacks product ids (bot/empty page).
+  const racers = [];
+  for (const variant of jinaVariants) {
+    racers.push(
+      fetchViaPuterText(jinaReaderUrl(variant), budget).then((text) => ({
+        text,
+        via: "puter-jina-ddg",
+      }))
+    );
+  }
+  racers.push(tryAllorigins().then((text) => ({ text, via: "allorigins-ddg" })));
+
+  try {
+    return await Promise.any(racers);
+  } catch (aggregate) {
+    const reasons = aggregate?.errors?.map((e) => e?.message || e) || [];
+    errors.push(...reasons.slice(0, 4));
+  }
+
+  try {
+    const text = await fetchViaPuterText(targetUrl, Math.min(budget, 12000));
+    return { text, via: "puter-ddg" };
+  } catch (error) {
+    errors.push(`puter:${error?.message || error}`);
+  }
+
+  for (const variant of jinaVariants) {
+    try {
+      const text = acceptRemoteText(
+        await fetchWithTimeout(jinaReaderUrl(variant), { timeoutMs: Math.min(budget, 10000) })
+      );
+      return { text, via: "jina-ddg" };
+    } catch (error) {
+      errors.push(`jina:${error?.message || error}`);
+    }
+  }
+
+  throw new Error(errors.slice(0, 3).join(" · ") || "discovery fetch failed");
+}
+
+/** eMC discovery via public search indexes that still list medicines.org.uk product URLs. */
 async function searchEmcViaDuckDuckGo(query, { limit = 8, filters = {} } = {}) {
   const f = normalizeSmpcFilters(filters);
   const q = appendFilterKeywords(query, f);
   if (!q) return [];
 
-  const queries = [
-    `site:medicines.org.uk/emc/product ${q} smpc`,
-    `site:www.medicines.org.uk/emc/product ${q} "Summary of Product Characteristics"`,
-    `${q} site:medicines.org.uk/emc/product/ smpc`,
+  const encoded = encodeURIComponent(`site:medicines.org.uk/emc/product ${q} smpc`);
+  const encodedAlt = encodeURIComponent(`${q} site:medicines.org.uk/emc/product smpc`);
+  const indexUrls = [
+    `https://lite.duckduckgo.com/lite/?q=${encoded}`,
+    `https://search.brave.com/search?q=${encoded}`,
+    `https://html.duckduckgo.com/html/?q=${encoded}`,
+    `https://lite.duckduckgo.com/lite/?q=${encodedAlt}`,
   ];
 
   const errors = [];
-  for (const searchQ of queries) {
-    const ddgUrls = [
-      `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(searchQ)}`,
-    ];
-    for (const ddgUrl of ddgUrls) {
-      try {
-        // IMPORTANT: call DuckDuckGo directly through Puter — do NOT wrap with Jina
-        // (Jina returns HTTP 403 for Puter's network).
-        let payload = "";
-        try {
-          payload = await fetchViaPuterText(ddgUrl, 16000);
-        } catch (puterErr) {
-          // Browser fetch may work for DDG in some environments.
-          const response = await fetchWithTimeout(ddgUrl, { timeoutMs: 12000 });
-          payload = acceptRemoteText(response);
-        }
-        const results = parseEmcHitsFromHtml(payload, { limit: Math.max(limit * 2, 12) }).filter((doc) =>
-          matchesClientFilters(doc, f)
-        );
-        if (results.length) {
-          rememberProxy("puter-ddg");
-          return results.slice(0, limit);
-        }
-        errors.push(`${ddgUrl}: no product ids`);
-      } catch (error) {
-        errors.push(`${ddgUrl}: ${error?.message || error}`);
+  for (const indexUrl of indexUrls) {
+    try {
+      const { text: payload, via } = await fetchEmcDiscoveryPayload(indexUrl, { timeoutMs: 14000 });
+      const results = parseEmcHitsFromHtml(payload, { limit: Math.max(limit * 2, 12) }).filter((doc) =>
+        matchesClientFilters(doc, f)
+      );
+      if (results.length) {
+        rememberProxy(via);
+        return results.slice(0, limit);
       }
+      errors.push(`${via || "index"}: no product ids`);
+    } catch (error) {
+      errors.push(`${indexUrl}: ${error?.message || error}`);
     }
   }
   if (errors.length) {
-    console.warn("[eMC DDG]", errors.slice(0, 4).join(" · "));
+    console.warn("[eMC DDG]", errors.slice(0, 6).join(" · "));
   }
   return [];
 }
@@ -1555,7 +1644,7 @@ async function searchEmcSource(query, { limit = 8, filters = {} } = {}) {
 
   const errors = [];
 
-  // Ensure Puter is ready before DDG discovery (fire-and-forget warm was racing the first query).
+  // Ensure Puter is ready before discovery (fire-and-forget warm was racing the first query).
   try {
     const { loadPuter } = await import("./puter-auth.js");
     await loadPuter();
@@ -1563,7 +1652,7 @@ async function searchEmcSource(query, { limit = 8, filters = {} } = {}) {
     errors.push(`puter-init: ${error?.message || error}`);
   }
 
-  // 1) Primary: DuckDuckGo via Puter (reachable). Avoids medicines.org.uk + Jina 403 entirely.
+  // 1) Primary: DuckDuckGo via Puter→Jina (direct Puter→DDG often has no parseable products).
   try {
     const ddgHits = await searchEmcViaDuckDuckGo(searchQ, { limit, filters: f });
     if (ddgHits.length) return ddgHits;
@@ -1572,7 +1661,7 @@ async function searchEmcSource(query, { limit = 8, filters = {} } = {}) {
     errors.push(`ddg: ${error?.message || error}`);
   }
 
-  // 2) Secondary: direct eMC search page (rarely works from the browser today).
+  // 2) Secondary: eMC search page through the shared remote fetcher (Puter→Jina / proxies).
   const searchUrls = [
     `https://www.medicines.org.uk/emc/search?q=${encodeURIComponent(searchQ)}&docType=smpc`,
   ];
@@ -1580,7 +1669,7 @@ async function searchEmcSource(query, { limit = 8, filters = {} } = {}) {
     try {
       const { text: payload, via } = await fetchRemotePage(searchUrl, {
         preferHtml: false,
-        timeoutMs: 12000,
+        timeoutMs: 14000,
       });
       const results = parseEmcHitsFromHtml(payload, { limit: Math.max(limit * 2, 12) }).filter((doc) =>
         matchesClientFilters(doc, f)
