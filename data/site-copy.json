@@ -51,9 +51,9 @@
     },
     "smpc-filters-hint": {
       "id": "smpc-filters-hint",
-      "text": "",
-      "visible": true,
-      "updatedAt": "2026-09-12T08:39:48.481Z",
+      "text": "الفلاتر تعمل بأفضل دقة مع DailyMed و drugs.com عبر OpenFDA NDC. لـ eMC تُستخدم ككلمات بحث إضافية. حقل ATC يقبل رمزاً (مثل C10AA05) أو فئة دوائية FDA (EPC/MoA).",
+      "visible": false,
+      "updatedAt": "2026-09-12T08:41:08.339Z",
       "updatedBy": "admin"
     },
     "cert-search-intro": {
