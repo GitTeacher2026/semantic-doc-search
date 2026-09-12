@@ -13,6 +13,27 @@ const DAILYMED_SPLS = "https://dailymed.nlm.nih.gov/dailymed/services/v2/spls.js
 const JINA_PREFIX = "https://r.jina.ai/";
 const ALLORIGINS_RAW = "https://api.allorigins.win/raw?url=";
 const PROXY_PREF_KEY = "smpc_proxy_pref_v5";
+const MHRA_GRAPHQL = "https://medicines.api.mhra.gov.uk/graphql";
+const MHRA_SEARCH_QUERY = `query($searchTerm: String, $first: Int, $after: String, $documentTypes: [DocumentType!], $territoryTypes: [TerritoryType!]) {
+  products {
+    documents(search: $searchTerm, first: $first, after: $after, documentTypes: $documentTypes, territoryTypes: $territoryTypes) {
+      count: totalCount
+      edges {
+        cursor
+        node {
+          product: productName
+          activeSubstances
+          highlights
+          created
+          docType
+          fileBytes: fileSizeInBytes
+          title
+          url
+        }
+      }
+    }
+  }
+}`;
 
 /** Serialize Puter networking so the Wisp/WebSocket can finish connecting. */
 let puterFetchQueue = Promise.resolve();
@@ -31,7 +52,7 @@ export const SMPC_SOURCE_OPTIONS = [
   {
     id: "emc",
     label: "eMC",
-    hint: "SmPC من medicines.org.uk",
+    hint: "SmPC بريطاني (eMC / MHRA)",
   },
   {
     id: "drugs",
@@ -64,9 +85,12 @@ const SECTION_MAP = [
   { key: "warnings", title: "4.4 Special warnings and precautions", fields: ["warnings", "warnings_and_cautions", "warnings_and_cautions_table", "boxed_warning", "ask_doctor", "ask_doctor_or_pharmacist", "when_using", "stop_use", "precautions"] },
   { key: "interactions", title: "4.5 Interaction with other medicinal products", fields: ["drug_interactions", "drug_interactions_table"] },
   { key: "pregnancy", title: "4.6 Fertility, pregnancy and lactation", fields: ["pregnancy", "pregnancy_or_breast_feeding", "nursing_mothers", "labor_and_delivery"] },
+  { key: "driving", title: "4.7 Effects on ability to drive and use machines", fields: [] },
   { key: "undesirable_effects", title: "4.8 Undesirable effects", fields: ["adverse_reactions", "adverse_reactions_table"] },
   { key: "overdose", title: "4.9 Overdose", fields: ["overdosage"] },
-  { key: "pharmacological", title: "5. Pharmacological properties", fields: ["clinical_pharmacology", "clinical_pharmacology_table", "mechanism_of_action", "pharmacodynamics", "pharmacokinetics", "pharmacokinetics_table", "microbiology"] },
+  { key: "pharmacodynamics", title: "5.1 Pharmacodynamic properties", fields: ["mechanism_of_action", "pharmacodynamics", "microbiology"] },
+  { key: "pharmacokinetics", title: "5.2 Pharmacokinetic properties", fields: ["pharmacokinetics", "pharmacokinetics_table", "clinical_pharmacology", "clinical_pharmacology_table"] },
+  { key: "preclinical", title: "5.3 Preclinical safety data", fields: ["nonclinical_toxicology", "carcinogenesis_and_mutagenesis_and_impairment_of_fertility"] },
   { key: "pharmaceutical", title: "6. Pharmaceutical particulars", fields: ["how_supplied", "how_supplied_table", "storage_and_handling", "package_label_principal_display_panel"] },
   ...OPENFDA_EXTRA_FIELDS,
 ];
@@ -270,7 +294,10 @@ function sectionKey(title, index) {
   return `${index + 1}-${slug}`;
 }
 
-async function fetchWithTimeout(url, { timeoutMs = 28000, signal } = {}) {
+async function fetchWithTimeout(
+  url,
+  { timeoutMs = 28000, signal, method = "GET", headers = null, body = null } = {}
+) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   const onOuterAbort = () => ctrl.abort();
@@ -279,7 +306,10 @@ async function fetchWithTimeout(url, { timeoutMs = 28000, signal } = {}) {
     else signal.addEventListener("abort", onOuterAbort, { once: true });
   }
   try {
-    const response = await fetch(url, { signal: ctrl.signal, cache: "no-store" });
+    const init = { method, signal: ctrl.signal, cache: "no-store" };
+    if (headers) init.headers = headers;
+    if (body != null && method !== "GET" && method !== "HEAD") init.body = body;
+    const response = await fetch(url, init);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return await response.text();
   } catch (error) {
@@ -352,7 +382,10 @@ function readResponseHeader(headers, name) {
 }
 
 /** Low-level Puter fetch with manual redirect following (no queue). */
-async function fetchViaPuterRaw(url, { timeoutMs = 22000, followRedirects = true, puter } = {}) {
+async function fetchViaPuterRaw(
+  url,
+  { timeoutMs = 22000, followRedirects = true, puter, method = "GET", headers = null, body = null } = {}
+) {
   const client = puter || (await (await import("./puter-auth.js")).loadPuter());
   if (!client?.net?.fetch) throw new Error("puter.net unavailable");
 
@@ -361,13 +394,16 @@ async function fetchViaPuterRaw(url, { timeoutMs = 22000, followRedirects = true
   try {
     let current = String(url || "").trim();
     let response = null;
+    const verb = String(method || "GET").toUpperCase();
     for (let hop = 0; hop < 8; hop += 1) {
-      response = await client.net.fetch(current, {
-        method: "GET",
+      const init = {
+        method: hop === 0 ? verb : "GET",
         signal: ctrl.signal,
-        headers: { Accept: "*/*" },
+        headers: hop === 0 && headers ? headers : { Accept: "*/*" },
         redirect: "manual",
-      });
+      };
+      if (hop === 0 && body != null && verb !== "GET" && verb !== "HEAD") init.body = body;
+      response = await client.net.fetch(current, init);
       const status = Number(response?.status || 0);
       if (!(followRedirects && status >= 300 && status < 400)) break;
       let location = readResponseHeader(response.headers, "location");
@@ -389,12 +425,15 @@ async function fetchViaPuterRaw(url, { timeoutMs = 22000, followRedirects = true
   }
 }
 
-async function fetchViaPuter(url, { timeoutMs = 22000, followRedirects = true } = {}) {
+async function fetchViaPuter(
+  url,
+  { timeoutMs = 22000, followRedirects = true, method = "GET", headers = null, body = null } = {}
+) {
   const run = async () => {
     let lastError = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        return await fetchViaPuterRaw(url, { timeoutMs, followRedirects });
+        return await fetchViaPuterRaw(url, { timeoutMs, followRedirects, method, headers, body });
       } catch (error) {
         lastError = error;
         const message = String(error?.message || error || "");
@@ -620,7 +659,7 @@ async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = 
     if (ukEmc && text && text.length > 500) {
       emcPageCache.set(target, text);
       try {
-        sessionStorage.setItem(`smpc_emc_page_${target}`, text.slice(0, 450000));
+        sessionStorage.setItem(`smpc_emc_page_v2_${target}`, text.slice(0, 450000));
       } catch {
         /* ignore quota */
       }
@@ -631,7 +670,7 @@ async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = 
   // Restore from session cache for eMC re-opens.
   if (ukEmc) {
     try {
-      const cached = sessionStorage.getItem(`smpc_emc_page_${target}`);
+      const cached = sessionStorage.getItem(`smpc_emc_page_v2_${target}`);
       if (cached && cached.length > 500) {
         emcPageCache.set(target, cached);
         return { text: cached, via: "session-cache" };
@@ -1060,10 +1099,17 @@ function parseMarkdownSections(
       if (title.includes("](") || title.startsWith("[")) return "";
       return title;
     }
-    const numbered = line.match(/^(\d{1,2}(?:\.\d+){0,3})\s+([A-Z][A-Za-z0-9].{2,140})$/);
+    // EU SmPC: "1. Title" or subsection "4.1 Title". US DailyMed often uses "1 TITLE".
+    const numbered =
+      line.match(/^((?:\d{1,2}\.\d+(?:\.\d+){0,2})|(?:\d{1,2})\.)\s+([A-Z][\s\S]{2,160})$/) ||
+      line.match(/^(\d{1,2}(?:\.\d+){0,3})\s+([A-Z][A-Z0-9][\s\S]{2,140})$/);
     if (numbered) {
-      const major = Number(numbered[1].split(".")[0]);
-      if (major >= 1 && major <= 16) return `${numbered[1]} ${numbered[2]}`.trim();
+      const num = String(numbered[1] || "").replace(/\.$/, "");
+      const major = Number(num.split(".")[0]);
+      const title = `${num} ${numbered[2]}`.replace(/\s+/g, " ").trim();
+      // Reject body lines like "36 months." accidentally treated as headings.
+      if (/^\d{1,2}(?:\.\d+)*\s+[a-z]/.test(title)) return "";
+      if (major >= 1 && major <= 16 && title.length >= 5) return title;
     }
     return "";
   };
@@ -2105,6 +2151,41 @@ export async function searchSmpc(query, { limit = 8, source = "dailymed", filter
   return searchDailyMedSource(q, { limit, filters: f });
 }
 
+function parseEmcPlainNumberedSections(markdown) {
+  const text = String(markdown || "")
+    .replace(/\r/g, "")
+    .replace(/^Title:.*$/m, "")
+    .replace(/^URL Source:.*$/m, "")
+    .replace(/^Published Time:.*$/m, "")
+    .replace(/^Markdown Content:\s*/im, "")
+    .trim();
+
+  const start = text.search(/(?:^|\n)\s*1\.\s+Name of the medicinal product\b/i);
+  const body = start >= 0 ? text.slice(start) : text;
+  // Top-level EU headings are "1. Title"; subsections are "4.1 Title" (no extra trailing dot).
+  const headingRe =
+    /(?:^|\n)\s*((?:\d{1,2}\.\d+(?:\.\d+){0,2})|(?:\d{1,2})\.)\s+([A-Z][^\n]{2,160})\s*(?=\n|$)/g;
+  const hits = [];
+  let match;
+  while ((match = headingRe.exec(body))) {
+    const num = String(match[1] || "").replace(/\.$/, "");
+    const title = `${num} ${match[2]}`.replace(/\s+/g, " ").trim();
+    if (!isEmcSectionTitle(title)) continue;
+    hits.push({ index: match.index, end: headingRe.lastIndex, title });
+  }
+  if (hits.length < 3) return [];
+
+  const sections = [];
+  for (let i = 0; i < hits.length; i += 1) {
+    const from = hits[i].end;
+    const to = i + 1 < hits.length ? hits[i + 1].index : body.length;
+    const raw = body.slice(from, to).trim();
+    if (raw.length < 8 && i > 0) continue;
+    sections.push(makeSection(hits[i].title, raw, sections.length, "https://www.medicines.org.uk/"));
+  }
+  return sections.filter((section) => section.text.length >= 8 || /^\d+\.\d+/.test(section.title));
+}
+
 function parseEmcMarkdownSections(markdown) {
   const sections = parseMarkdownSections(markdown, { minBody: 15, requireNumbered: false });
   const filtered = sections.filter(
@@ -2115,6 +2196,92 @@ function parseEmcMarkdownSections(markdown) {
       )
   );
   return filtered.length >= 3 ? filtered : sections;
+}
+
+async function mhraGraphql(variables) {
+  const payload = JSON.stringify({
+    query: MHRA_SEARCH_QUERY,
+    variables,
+  });
+  // Prefer Puter (CORS); fall back to browser fetch if API allows it.
+  let raw = "";
+  try {
+    raw = await fetchViaPuter(MHRA_GRAPHQL, {
+      timeoutMs: 18000,
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: payload,
+    });
+  } catch {
+    raw = await fetchWithTimeout(MHRA_GRAPHQL, {
+      timeoutMs: 15000,
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: payload,
+    });
+  }
+  const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+  if (data?.errors?.length) throw new Error(data.errors[0]?.message || "MHRA GraphQL error");
+  return data?.data || {};
+}
+
+async function searchMhraSpcDocuments(query, { limit = 5 } = {}) {
+  const q = String(query || "").trim();
+  if (!q) return [];
+  const data = await mhraGraphql({
+    searchTerm: q,
+    first: Math.min(Math.max(limit, 3), 10),
+    documentTypes: ["Spc"],
+    territoryTypes: ["UK", "GB"],
+  });
+  const edges = data?.products?.documents?.edges || [];
+  return edges
+    .map((edge) => edge?.node)
+    .filter((node) => node?.url && /spc|smpc|summary of product/i.test(`${node.docType || ""} ${node.title || ""}`))
+    .slice(0, limit);
+}
+
+async function hydrateFromMhraSpc(doc) {
+  const hints = expandUkDrugHints(doc.title)
+    .concat(expandUkDrugHints(doc.api))
+    .filter((value, index, arr) => value && arr.indexOf(value) === index)
+    .slice(0, 4);
+  let lastError = null;
+  for (const hint of hints) {
+    try {
+      const docs = await searchMhraSpcDocuments(hint, { limit: 4 });
+      for (const item of docs) {
+        try {
+          // MHRA hosts SmPC PDFs — Jina extracts text well.
+          const { text, via } = await fetchRemotePage(item.url, { preferHtml: false, timeoutMs: 22000 });
+          if (isBlockedOrMissing(text) || text.length < 400) continue;
+          let sections = parseEmcPlainNumberedSections(text);
+          if (sections.length < 3) sections = parseEmcMarkdownSections(text);
+          if (sections.length < 3) {
+            sections = parseMarkdownSections(text, { minBody: 15, requireNumbered: false, baseUrl: item.url });
+          }
+          if (sections.length < 3) continue;
+          return {
+            ...doc,
+            title: doc.title || item.product || item.title || hint,
+            sourceLabel: "MHRA Products (UK SmPC PDF)",
+            url: item.url || doc.url,
+            mhraProduct: item.product || "",
+            sections,
+            englishText: sections.map((sec) => `${sec.title}\n${sec.text}`).join("\n\n"),
+            hydrated: true,
+            needsFullLabel: false,
+            fetchVia: `mhra:${via}`,
+          };
+        } catch (error) {
+          lastError = error;
+        }
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError || "MHRA SmPC unavailable"));
 }
 
 async function hydrateEmcFull(doc) {
@@ -2130,7 +2297,6 @@ async function hydrateEmcFull(doc) {
   }
 
   const productId = doc.productId || (baseUrl.match(/\/product\/(\d+)/) || [])[1] || "";
-  // Prefer print once — sequential fetchRemotePage already tries Jina then Wayback.
   const candidates = [
     productId ? `https://www.medicines.org.uk/emc/product/${productId}/smpc/print` : "",
     productId ? `https://www.medicines.org.uk/emc/product/${productId}/smpc` : "",
@@ -2139,23 +2305,27 @@ async function hydrateEmcFull(doc) {
   let lastError = null;
   for (const candidate of candidates) {
     try {
-      const { text, via } = await fetchRemotePage(candidate, { preferHtml: false, timeoutMs: 20000 });
+      const { text, via } = await fetchRemotePage(candidate, { preferHtml: false, timeoutMs: 22000 });
       if (isBlockedOrMissing(text)) {
         lastError = new Error("blocked");
         continue;
       }
 
-      let sections = [];
-      if (/<details[\s>]|spcWrapper|Section4|therapeutic indications|name of the medicinal product/i.test(text)) {
-        sections = parseEmcHtml(text);
+      // Jina returns plain "1. Title" markdown for eMC print — parse that first.
+      let sections = parseEmcPlainNumberedSections(text);
+      if (sections.length < 5 && /<details[\s>]|spcWrapper|Section4|therapeutic indications/i.test(text)) {
+        const htmlSections = parseEmcHtml(text);
+        if (htmlSections.length > sections.length) sections = htmlSections;
+      }
+      if (sections.length < 5) {
+        const md = parseEmcMarkdownSections(text);
+        if (md.length > sections.length) sections = md;
+      }
+      if (sections.length < 5) {
+        const plain = parseMarkdownSections(text, { minBody: 12, requireNumbered: false, baseUrl: candidate });
+        if (plain.length > sections.length) sections = plain;
       }
       if (sections.length < 3) {
-        sections = parseEmcMarkdownSections(text);
-      }
-      if (sections.length < 3) {
-        sections = parseMarkdownSections(text, { minBody: 20, requireNumbered: false, baseUrl: candidate });
-      }
-      if (!sections.length) {
         lastError = new Error("no sections");
         continue;
       }
@@ -2186,56 +2356,21 @@ async function hydrateEmcFull(doc) {
       };
     } catch (error) {
       lastError = error;
-      // On Wayback rate-limit, skip remaining eMC URLs and fall through to OpenFDA.
       if (isRateLimitedError(error)) break;
     }
   }
 
-  // Soft fallback: eMC link + US label body (UK INNs mapped, e.g. paracetamol→acetaminophen).
-  const hintSources = expandUkDrugHints(doc.title).concat(expandUkDrugHints(doc.api));
-  for (const hint of hintSources) {
-    try {
-      for (const expr of buildQueryVariants(hint).slice(0, 4)) {
-        const batch = await fetchOpenFda(expr, 2);
-        if (!batch[0]) continue;
-        const fda = normalizeOpenFda(batch[0]);
-        if (!fda.sections?.length) continue;
-        return {
-          ...doc,
-          title: doc.title || fda.title,
-          sections: fda.sections,
-          englishText: fda.englishText,
-          hydrated: true,
-          needsFullLabel: false,
-          sourceLabel: "eMC link · body via OpenFDA/DailyMed",
-          fetchVia: "openfda-fallback",
-          url: baseUrl,
-        };
-      }
-      // Looser OpenFDA token search when exact field queries miss.
-      const loose = await fetchOpenFda(hint, 2);
-      if (loose[0]) {
-        const fda = normalizeOpenFda(loose[0]);
-        if (fda.sections?.length) {
-          return {
-            ...doc,
-            title: doc.title || fda.title,
-            sections: fda.sections,
-            englishText: fda.englishText,
-            hydrated: true,
-            needsFullLabel: false,
-            sourceLabel: "eMC link · body via OpenFDA/DailyMed",
-            fetchVia: "openfda-fallback",
-            url: baseUrl,
-          };
-        }
-      }
-    } catch {
-      /* try next hint */
-    }
+  // UK alternate: MHRA Products SmPC PDFs (same regulatory content family as eMC).
+  try {
+    return await hydrateFromMhraSpc(doc);
+  } catch (error) {
+    lastError = error;
   }
 
-  throw new Error(`تعذّر تحميل SmPC من eMC. ${lastError?.message || ""}`.trim());
+  // Do NOT silently substitute a US OpenFDA/DailyMed body for eMC — that confused users.
+  throw new Error(
+    `تعذّر تحميل SmPC البريطاني من eMC/MHRA. ${lastError?.message || ""} جرّب DailyMed كمصدر منفصل إن أردت نشرة أمريكية.`.trim()
+  );
 }
 
 async function hydrateDrugsComFull(doc) {
