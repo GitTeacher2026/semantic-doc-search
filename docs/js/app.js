@@ -112,12 +112,12 @@ import {
   renderSmpcDocument,
   renderSmpcSearchResults,
   searchSmpc,
-} from "./smpc.js?v=20260912m";
+} from "./smpc.js?v=20260912n";
 import {
   getLastTranslationEngine,
   translateSmpcSections,
-} from "./smpc-translate.js?v=20260912m";
-import { downloadSmpcDocxPair } from "./smpc-docx.js?v=20260912m";
+} from "./smpc-translate.js?v=20260912n";
+import { downloadSmpcDocxPair } from "./smpc-docx.js?v=20260912n";
 import {
   CERT_BODIES,
   bindCertificationResults,
@@ -1924,7 +1924,7 @@ function getSelectedSmpcSource() {
 
 function smpcSourceLabel(source = getSelectedSmpcSource()) {
   if (source === "all") return "كل المصادر";
-  if (source === "emc") return "eMC / MHRA (UK SmPC)";
+  if (source === "emc") return "MHRA (UK SmPC)";
   if (source === "drugs") return "drugs.com";
   return "DailyMed";
 }

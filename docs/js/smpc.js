@@ -1,7 +1,7 @@
 /**
  * SmPC search & full-document viewer for three sources:
  * - DailyMed (US SPL / prescribing info)
- * - eMC / medicines.org.uk (UK SmPC)
+ * - MHRA Products (UK SpC PDFs via Azure Search + products.mhra.gov.uk)
  * - drugs.com (US package insert — content via FDA/DailyMed when site blocks bots)
  *
  * Sites without CORS are loaded through public readers/proxies with fallbacks.
@@ -13,27 +13,11 @@ const DAILYMED_SPLS = "https://dailymed.nlm.nih.gov/dailymed/services/v2/spls.js
 const JINA_PREFIX = "https://r.jina.ai/";
 const ALLORIGINS_RAW = "https://api.allorigins.win/raw?url=";
 const PROXY_PREF_KEY = "smpc_proxy_pref_v5";
-const MHRA_GRAPHQL = "https://medicines.api.mhra.gov.uk/graphql";
-const MHRA_SEARCH_QUERY = `query($searchTerm: String, $first: Int, $after: String, $documentTypes: [DocumentType!], $territoryTypes: [TerritoryType!]) {
-  products {
-    documents(search: $searchTerm, first: $first, after: $after, documentTypes: $documentTypes, territoryTypes: $territoryTypes) {
-      count: totalCount
-      edges {
-        cursor
-        node {
-          product: productName
-          activeSubstances
-          highlights
-          created
-          docType
-          fileBytes: fileSizeInBytes
-          title
-          url
-        }
-      }
-    }
-  }
-}`;
+const MHRA_SEARCH_HOST = "https://mhraproducts4853.search.windows.net";
+const MHRA_SEARCH_INDEX = "products-index";
+/** Public query key embedded by products.mhra.gov.uk front-end (CORS *). */
+const MHRA_SEARCH_API_KEY = "17CCFC430C1A78A169B392A35A99C49D";
+const MHRA_SEARCH_API_VERSION = "2017-11-11";
 
 /** Serialize Puter networking so the Wisp/WebSocket can finish connecting. */
 let puterFetchQueue = Promise.resolve();
@@ -42,7 +26,7 @@ export const SMPC_SOURCE_OPTIONS = [
   {
     id: "all",
     label: "الكل",
-    hint: "بحث في DailyMed + eMC + drugs.com",
+    hint: "بحث في DailyMed + MHRA + drugs.com",
   },
   {
     id: "dailymed",
@@ -51,8 +35,8 @@ export const SMPC_SOURCE_OPTIONS = [
   },
   {
     id: "emc",
-    label: "eMC",
-    hint: "SmPC بريطاني (eMC / MHRA)",
+    label: "MHRA",
+    hint: "SmPC بريطاني من products.mhra.gov.uk",
   },
   {
     id: "drugs",
@@ -507,8 +491,18 @@ function buildProxyAttempts(target) {
 
 function acceptRemoteText(text) {
   if (!text || text.length < 80) throw new Error("empty");
+  // Reject raw PDF bytes (proxies sometimes return the blob unchanged).
+  if (/^%PDF-/i.test(String(text).slice(0, 16))) throw new Error("binary PDF");
   if (isBlockedOrMissing(text)) throw new Error("blocked");
   return text;
+}
+
+function isMhraBlobHost(url) {
+  try {
+    return /mhraproducts\d*\.blob\.core\.windows\.net$/i.test(new URL(url).hostname);
+  } catch {
+    return /mhraproducts\d*\.blob\.core\.windows\.net/i.test(String(url || ""));
+  }
 }
 
 const waybackSnapshotCache = new Map();
@@ -637,8 +631,8 @@ async function fetchViaPuterWayback(target, { timeoutMs = 18000 } = {}) {
 /**
  * Fetch a remote page without CORS.
  *
- * For UK eMC: try Puter→Jina (live) first, then a single Puter→Wayback hop.
- * Never race multiple Wayback requests — archive.org rate-limits with HTTP 429.
+ * MHRA SpC PDFs: prefer Jina (PDF→markdown). Avoid returning raw %PDF bytes.
+ * Legacy medicines.org.uk: Puter→Jina, then a single Puter→Wayback hop (no Wayback race).
  */
 async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = {}) {
   const target = String(url || "").trim();
@@ -651,12 +645,14 @@ async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = 
 
   const errors = [];
   const pref = preferredProxyName();
-  const budget = Math.max(9000, Math.min(timeoutMs, 22000));
+  const budget = Math.max(9000, Math.min(timeoutMs, 24000));
   const ukEmc = isUkEmcHost(target);
+  const mhraPdf = isMhraBlobHost(target);
+  const cacheable = ukEmc || mhraPdf;
 
   const remember = (via, text) => {
     rememberProxy(via);
-    if (ukEmc && text && text.length > 500) {
+    if (cacheable && text && text.length > 500) {
       emcPageCache.set(target, text);
       try {
         sessionStorage.setItem(`smpc_emc_page_v2_${target}`, text.slice(0, 450000));
@@ -667,8 +663,7 @@ async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = 
     return { text, via };
   };
 
-  // Restore from session cache for eMC re-opens.
-  if (ukEmc) {
+  if (cacheable) {
     try {
       const cached = sessionStorage.getItem(`smpc_emc_page_v2_${target}`);
       if (cached && cached.length > 500) {
@@ -680,8 +675,42 @@ async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = 
     }
   }
 
+  // MHRA PDF blobs: Jina extracts SpC text reliably; Puter→Jina as backup.
+  if (mhraPdf) {
+    for (const variant of buildJinaTargets(target).slice(0, 1)) {
+      try {
+        const text = acceptRemoteText(
+          await fetchWithTimeout(jinaReaderUrl(variant), { timeoutMs: Math.min(budget, 20000) })
+        );
+        if (!/NAME OF THE MEDICINAL PRODUCT|QUALITATIVE AND QUANTITATIVE|CLINICAL PARTICULARS/i.test(text)) {
+          throw new Error("not SpC text");
+        }
+        return remember("jina-mhra", text);
+      } catch (error) {
+        errors.push(`jina-mhra: ${error?.message || error}`);
+      }
+    }
+    if (pref !== "skip-puter") {
+      for (const variant of buildJinaTargets(target).slice(0, 1)) {
+        try {
+          const text = acceptRemoteText(
+            await fetchViaPuter(jinaReaderUrl(variant), { timeoutMs: Math.min(budget, 20000) })
+          );
+          if (!/NAME OF THE MEDICINAL PRODUCT|QUALITATIVE AND QUANTITATIVE|CLINICAL PARTICULARS/i.test(text)) {
+            throw new Error("not SpC text");
+          }
+          return remember("puter-jina-mhra", text);
+        } catch (error) {
+          errors.push(`puter-jina-mhra: ${error?.message || error}`);
+        }
+      }
+    }
+    throw new Error(
+      `تعذّر قراءة PDF من MHRA. ${errors.slice(0, 3).join(" · ")}`
+    );
+  }
+
   if (ukEmc) {
-    // 1) Puter → Jina → live eMC (works when Jina allows Puter's egress).
     if (pref !== "skip-puter") {
       for (const variant of buildJinaTargets(target).slice(0, 1)) {
         try {
@@ -694,7 +723,6 @@ async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = 
         }
       }
 
-      // 2) Single Puter → Wayback attempt (no race).
       if (Date.now() >= waybackCooldownUntil) {
         try {
           const text = await fetchViaPuterWayback(target, { timeoutMs: Math.min(budget, 20000) });
@@ -713,7 +741,6 @@ async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = 
     );
   }
 
-  // Non-eMC hosts: existing Puter + proxy race.
   const attempts = [];
   if (pref !== "skip-puter") {
     const jinaTargets = buildJinaTargets(target).slice(0, 2);
@@ -1928,92 +1955,287 @@ async function fetchEmcDiscoveryPayload(targetUrl, { timeoutMs = 16000 } = {}) {
   throw new Error(errors.slice(0, 3).join(" · ") || "discovery fetch failed");
 }
 
-/** eMC discovery via public search indexes that still list medicines.org.uk product URLs. */
-async function searchEmcViaDuckDuckGo(query, { limit = 8, filters = {} } = {}) {
+/** MHRA Products Azure Search — browser-callable (CORS *), no medicines.org.uk. */
+function buildMhraSearchUrl(query, { limit = 8, skip = 0, filters = {} } = {}) {
   const f = normalizeSmpcFilters(filters);
-  const q = appendFilterKeywords(query, f);
-  if (!q) return [];
+  const params = new URLSearchParams({
+    "api-version": MHRA_SEARCH_API_VERSION,
+    "api-key": MHRA_SEARCH_API_KEY,
+    search: String(query || "").trim() || "*",
+    $top: String(Math.min(Math.max(limit, 1), 25)),
+    $skip: String(Math.max(skip, 0)),
+    searchMode: "all",
+    scoringProfile: "preferKeywords",
+    $count: "true",
+  });
 
-  const encoded = encodeURIComponent(`site:medicines.org.uk/emc/product ${q} smpc`);
-  const encodedAlt = encodeURIComponent(`${q} site:medicines.org.uk/emc/product smpc`);
-  const indexUrls = [
-    `https://lite.duckduckgo.com/lite/?q=${encoded}`,
-    `https://search.brave.com/search?q=${encoded}`,
-    `https://html.duckduckgo.com/html/?q=${encoded}`,
-    `https://lite.duckduckgo.com/lite/?q=${encodedAlt}`,
-  ];
-
-  const errors = [];
-  for (const indexUrl of indexUrls) {
-    try {
-      const { text: payload, via } = await fetchEmcDiscoveryPayload(indexUrl, { timeoutMs: 14000 });
-      const results = parseEmcHitsFromHtml(payload, { limit: Math.max(limit * 2, 12) }).filter((doc) =>
-        matchesClientFilters(doc, f)
-      );
-      if (results.length) {
-        rememberProxy(via);
-        return results.slice(0, limit);
-      }
-      errors.push(`${via || "index"}: no product ids`);
-    } catch (error) {
-      errors.push(`${indexUrl}: ${error?.message || error}`);
-    }
+  const clauses = ["doc_type eq 'Spc'"];
+  if (f.manufacturer) {
+    // PL holder / product text often includes manufacturer keywords.
+    params.set("search", `${params.get("search")} ${f.manufacturer}`.trim());
   }
-  if (errors.length) {
-    console.warn("[eMC DDG]", errors.slice(0, 6).join(" · "));
-  }
-  return [];
+  if (f.atc) params.set("search", `${params.get("search")} ${f.atc}`.trim());
+  if (f.formulation) params.set("search", `${params.get("search")} ${f.formulation}`.trim());
+  if (f.strength) params.set("search", `${params.get("search")} ${f.strength}`.trim());
+  params.set("$filter", clauses.join(" and "));
+  return `${MHRA_SEARCH_HOST}/indexes/${MHRA_SEARCH_INDEX}/docs?${params.toString()}`;
 }
 
-async function searchEmcSource(query, { limit = 8, filters = {} } = {}) {
+function normalizeMhraSearchHit(item) {
+  const pdfUrl = String(item?.metadata_storage_path || "").trim();
+  const productName = String(item?.product_name || "").replace(/\s+/g, " ").trim();
+  const fileTitle = String(item?.title || item?.file_name || "").replace(/\s+/g, " ").trim();
+  const title =
+    productName ||
+    (fileTitle && !/^spc-doc_/i.test(fileTitle) ? fileTitle : "") ||
+    "MHRA SmPC";
+  const substances = Array.isArray(item?.substance_name)
+    ? item.substance_name.join(", ")
+    : String(item?.substance_name || "");
+  const pl = Array.isArray(item?.pl_number) ? item.pl_number.join(", ") : String(item?.pl_number || "");
+  const fileName = String(item?.file_name || "");
+  const idSeed = pdfUrl.split("/").pop() || fileName || title;
+  const plDisplay = pl.replace(/PL(?=\d)/gi, "PL ").replace(/\s+/g, " ").trim();
+  return {
+    id: `mhra:${idSeed}`,
+    source: "emc",
+    sourceLabel: "MHRA Products (UK SmPC)",
+    title,
+    api: substances,
+    formulation: plDisplay ? `UK SpC · ${plDisplay}` : "UK SpC",
+    manufacturer: "",
+    productId: "",
+    plNumber: pl,
+    substanceName: substances,
+    productName: productName || title,
+    fileName,
+    url: pdfUrl || "https://products.mhra.gov.uk/",
+    pdfUrl,
+    sections: [],
+    englishText: title,
+    needsFullLabel: true,
+    hydrated: false,
+  };
+}
+
+async function searchMhraAzure(query, { limit = 8, filters = {} } = {}) {
+  const q = String(query || "").trim();
   const f = normalizeSmpcFilters(filters);
-  const searchQ = appendFilterKeywords(query, f);
-  if (!searchQ) return [];
+  if (!q && !hasActiveSmpcFilters(f)) return [];
 
-  const errors = [];
+  const url = buildMhraSearchUrl(appendFilterKeywords(q || f.manufacturer || f.formulation || "*", f), {
+    limit: Math.max(limit * 2, 12),
+    filters: f,
+  });
+  const raw = await fetchWithTimeout(url, {
+    timeoutMs: 18000,
+    headers: { Accept: "application/json", "api-key": MHRA_SEARCH_API_KEY },
+  });
+  const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+  const rows = Array.isArray(data?.value) ? data.value : [];
+  const docs = rows.map(normalizeMhraSearchHit).filter((doc) => doc.pdfUrl || doc.url);
+  return docs.filter((doc) => matchesClientFilters(doc, f)).slice(0, limit);
+}
 
-  // Ensure Puter is ready before discovery (fire-and-forget warm was racing the first query).
+/** UK SmPC search — MHRA Products only (replaces medicines.org.uk / eMC). */
+async function searchEmcSource(query, { limit = 8, filters = {} } = {}) {
+  try {
+    const hits = await searchMhraAzure(query, { limit, filters });
+    if (hits.length) return hits;
+    throw new Error("no MHRA SpC hits");
+  } catch (error) {
+    throw new Error(
+      `تعذّر بحث MHRA حالياً. ${error?.message || error}`.trim()
+    );
+  }
+}
+
+function parseUkSpcPlainSections(markdown) {
+  const text = String(markdown || "")
+    .replace(/\r/g, "")
+    .replace(/^Title:.*$/m, "")
+    .replace(/^URL Source:.*$/m, "")
+    .replace(/^Published Time:.*$/m, "")
+    .replace(/^Number of Pages:.*$/m, "")
+    .replace(/^Markdown Content:\s*/im, "")
+    .replace(/^#+\s*SUMMARY OF PRODUCT CHARACTERISTICS\s*/im, "")
+    .trim();
+
+  const start = text.search(
+    /(?:^|\n)\s*(?:>\s*)?#*\s*1(?:\.)?\s+NAME OF THE MEDICINAL PRODUCT\b/i
+  );
+  const body = start >= 0 ? text.slice(start) : text;
+
+  // Canonical EU/UK SpC headings (order matters: longer / more specific first within a number).
+  const KNOWN = [
+    [1, "Name of the medicinal product", /name of the medicinal product/i],
+    [2, "Qualitative and quantitative composition", /qualitative and quantitative composition/i],
+    [3, "Pharmaceutical form", /pharmaceutical form/i],
+    [4, "Clinical particulars", /clinical particulars/i],
+    ["4.1", "Therapeutic indications", /therapeutic indications?/i],
+    ["4.2", "Posology and method of administration", /posology and method of administration/i],
+    ["4.3", "Contraindications", /contraindications?/i],
+    ["4.4", "Special warnings and precautions for use", /special warnings and precautions for use/i],
+    ["4.5", "Interaction with other medicinal products and other forms of interaction", /interaction(?:s)?(?:\s+with other medicinal products)?/i],
+    ["4.6", "Fertility, pregnancy and lactation", /fertility,\s*pregnancy and lactation|pregnancy and lactation/i],
+    ["4.7", "Effects on ability to drive and use machines", /effects on ability to drive|effects on ability to drive and use machines/i],
+    ["4.8", "Undesirable effects", /undesirable effects/i],
+    ["4.9", "Overdose", /overdose/i],
+    [5, "Pharmacological properties", /pharmacological properties/i],
+    ["5.1", "Pharmacodynamic properties", /pharmacodynamic properties/i],
+    ["5.2", "Pharmacokinetic properties", /pharmacokinetic properties/i],
+    ["5.3", "Preclinical safety data", /preclinical safety data/i],
+    [6, "Pharmaceutical particulars", /pharmaceutical particulars/i],
+    ["6.1", "List of excipients", /list of excipients/i],
+    ["6.2", "Incompatibilities", /incompatibilities/i],
+    ["6.3", "Shelf life", /shelf\s*life/i],
+    ["6.4", "Special precautions for storage", /special precautions for storage/i],
+    ["6.5", "Nature and contents of container", /nature and contents? of container/i],
+    ["6.6", "Special precautions for disposal and other handling", /instruction for use\/handling|special precautions for disposal|special precautions for disposal and other handling/i],
+    [7, "Marketing authorisation holder", /marketing authorisation holder/i],
+    [8, "Marketing authorisation number(s)", /marketing authorisation numbers?/i],
+    [9, "Date of first authorisation/renewal of the authorisation", /date of first authorisation/i],
+    [10, "Date of revision of the text", /date of revision of the text/i],
+  ];
+
+  const hits = [];
+  for (const [num, label, re] of KNOWN) {
+    const numRe = String(num).replace(/\./g, "\\.");
+    const headingRe = new RegExp(
+      `(?:^|\\n)\\s*(?:>\\s*)?#*\\s*${numRe}\\.?\\s+[^\\n]{0,220}`,
+      "i"
+    );
+    const match = headingRe.exec(body);
+    if (!match) continue;
+    const line = match[0].replace(/^(?:\n)?\s*(?:>\s*)?#*\s*/, "");
+    if (!re.test(line)) continue;
+    const index = match.index + (match[0].startsWith("\n") ? 1 : 0);
+    const end = index + match[0].replace(/^\n/, "").length;
+    hits.push({
+      index,
+      end,
+      title: `${num} ${label}`,
+      num: String(num),
+    });
+  }
+
+  // Dedupe overlapping matches — keep earliest unique section number.
+  hits.sort((a, b) => a.index - b.index || a.num.length - b.num.length);
+  const unique = [];
+  const seenNum = new Set();
+  for (const hit of hits) {
+    if (seenNum.has(hit.num)) continue;
+    // Skip if this match sits inside a previous section's title line only.
+    if (unique.length && hit.index < unique[unique.length - 1].end) continue;
+    seenNum.add(hit.num);
+    unique.push(hit);
+  }
+  if (unique.length < 3) {
+    // Fallback: generic numbered headings.
+    return parseMarkdownSections(body, {
+      minBody: 8,
+      requireNumbered: true,
+      baseUrl: "https://products.mhra.gov.uk/",
+    });
+  }
+
+  const sections = [];
+  for (let i = 0; i < unique.length; i += 1) {
+    const from = unique[i].end;
+    const to = i + 1 < unique.length ? unique[i + 1].index : body.length;
+    let raw = body.slice(from, to).trim();
+    // Strip leading blockquote markers left by Jina.
+    raw = raw.replace(/^(?:>\s*)+/gm, "").trim();
+    if (raw.length < 2 && i > 0) continue;
+    sections.push(
+      makeSection(unique[i].title, raw || "(See source PDF.)", sections.length, "https://products.mhra.gov.uk/")
+    );
+  }
+  return sections.filter((section) => section.text.length >= 2 || /^\d+\.\d+/.test(section.title));
+}
+
+async function hydrateMhraPdfDoc(doc) {
+  const pdfUrl = String(doc.pdfUrl || doc.url || "").trim();
+  if (!pdfUrl) throw new Error("missing MHRA PDF url");
+
+  const { text, via } = await fetchRemotePage(pdfUrl, { preferHtml: false, timeoutMs: 24000 });
+  if (isBlockedOrMissing(text) || text.length < 400) throw new Error("empty MHRA PDF text");
+
+  let sections = parseUkSpcPlainSections(text);
+  if (sections.length < 8) {
+    const generic = parseMarkdownSections(text, {
+      minBody: 8,
+      requireNumbered: false,
+      baseUrl: pdfUrl,
+    }).filter(
+      (section) =>
+        /^\d+(?:\.\d+)*\b/.test(section.title) ||
+        /name of the medicinal|composition|pharmaceutical|clinical|indication|posology|contraindic|warning|interaction|pregnancy|undesirable|overdose|pharmacolog|excipient|shelf|storage|packag|nature and contents|marketing authorisation/i.test(
+          section.title
+        )
+    );
+    if (generic.length > sections.length) sections = generic;
+  }
+  if (sections.length < 3) throw new Error("no SpC sections in MHRA PDF");
+
+  return {
+    ...doc,
+    source: "emc",
+    sourceLabel: "MHRA Products (UK SmPC)",
+    title: doc.productName || doc.title || "MHRA SmPC",
+    url: pdfUrl,
+    pdfUrl,
+    sections,
+    englishText: sections.map((sec) => `${sec.title}\n${sec.text}`).join("\n\n"),
+    hydrated: true,
+    needsFullLabel: false,
+    fetchVia: via,
+  };
+}
+
+async function hydrateEmcFull(doc) {
+  // UK source is MHRA-only now (medicines.org.uk dropped).
   try {
     const { loadPuter } = await import("./puter-auth.js");
     await loadPuter();
-  } catch (error) {
-    errors.push(`puter-init: ${error?.message || error}`);
+  } catch {
+    /* Puter helps PDF→text via Jina; Azure search itself does not need it */
   }
 
-  // 1) Primary: DuckDuckGo via Puter→Jina (direct Puter→DDG often has no parseable products).
-  try {
-    const ddgHits = await searchEmcViaDuckDuckGo(searchQ, { limit, filters: f });
-    if (ddgHits.length) return ddgHits;
-    errors.push("ddg: no parseable products");
-  } catch (error) {
-    errors.push(`ddg: ${error?.message || error}`);
+  // If this is already an MHRA hit (has pdf blob URL), hydrate it directly.
+  if (/blob\.core\.windows\.net\/docs\//i.test(String(doc.pdfUrl || doc.url || ""))) {
+    return hydrateMhraPdfDoc(doc);
   }
 
-  // 2) Secondary: eMC search page through the shared remote fetcher (Puter→Jina / proxies).
-  const searchUrls = [
-    `https://www.medicines.org.uk/emc/search?q=${encodeURIComponent(searchQ)}&docType=smpc`,
-  ];
-  for (const searchUrl of searchUrls) {
+  // Legacy eMC stubs / title-only docs: search MHRA by name, then hydrate best SpC PDF.
+  const hints = expandUkDrugHints(doc.title)
+    .concat(expandUkDrugHints(doc.api))
+    .concat(expandUkDrugHints(doc.productName))
+    .filter((value, index, arr) => value && arr.indexOf(value) === index)
+    .slice(0, 5);
+
+  let lastError = null;
+  for (const hint of hints) {
     try {
-      const { text: payload, via } = await fetchRemotePage(searchUrl, {
-        preferHtml: false,
-        timeoutMs: 14000,
-      });
-      const results = parseEmcHitsFromHtml(payload, { limit: Math.max(limit * 2, 12) }).filter((doc) =>
-        matchesClientFilters(doc, f)
-      );
-      if (results.length) {
-        rememberProxy(via);
-        return results.slice(0, limit);
+      const hits = await searchMhraAzure(hint, { limit: 5 });
+      for (const hit of hits) {
+        try {
+          return await hydrateMhraPdfDoc({
+            ...doc,
+            ...hit,
+            title: doc.title || hit.title,
+          });
+        } catch (error) {
+          lastError = error;
+        }
       }
-      errors.push(`${via || "emc-search"}: no parseable products`);
     } catch (error) {
-      errors.push(error?.message || String(error));
+      lastError = error;
     }
   }
 
   throw new Error(
-    `تعذّر بحث eMC حالياً (يلزم Puter لتجاوز حجب medicines.org.uk). جرّب DailyMed أو «الكل». ${errors[0] ? `· ${errors[0]}` : ""}`
+    `تعذّر تحميل SmPC من MHRA. ${lastError?.message || ""}`.trim()
   );
 }
 
@@ -2059,7 +2281,10 @@ async function searchDrugsComSource(query, { limit = 8, filters = {} } = {}) {
   };
 
   addCandidate(q);
-  q.split(/[\/,|]/).map((part) => part.trim()).filter(Boolean).forEach((part) => addCandidate(part));
+  q.split(/[\/,|]/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .forEach((part) => addCandidate(part));
 
   for (const expr of buildQueryVariants(q)) {
     try {
@@ -2088,8 +2313,12 @@ async function searchDrugsComSource(query, { limit = 8, filters = {} } = {}) {
       const setA = a.setId ? 0 : 1;
       const setB = b.setId ? 0 : 1;
       if (setA !== setB) return setA - setB;
-      const junkA = /care-one|topcare|leader|good-sense|equaline|kirkland|up-and-up|infant/i.test(a.slug) ? 1 : 0;
-      const junkB = /care-one|topcare|leader|good-sense|equaline|kirkland|up-and-up|infant/i.test(b.slug) ? 1 : 0;
+      const junkA = /care-one|topcare|leader|good-sense|equaline|kirkland|up-and-up|infant/i.test(a.slug)
+        ? 1
+        : 0;
+      const junkB = /care-one|topcare|leader|good-sense|equaline|kirkland|up-and-up|infant/i.test(b.slug)
+        ? 1
+        : 0;
       if (junkA !== junkB) return junkA - junkB;
       return a.slug.length - b.slug.length;
     });
@@ -2102,9 +2331,11 @@ export async function searchSmpc(query, { limit = 8, source = "dailymed", filter
   const src = SMPC_SOURCE_OPTIONS.some((item) => item.id === source) ? source : "dailymed";
   if (!q && !hasActiveSmpcFilters(f)) return [];
 
-  // Warm Puter in the background so eMC/proxy fetches do not pay script-load latency.
+  // Warm Puter so MHRA PDF hydration does not pay script-load latency.
   if (src === "emc" || src === "all") {
-    import("./puter-auth.js").then((mod) => mod.loadPuter?.()).catch(() => {});
+    import("./puter-auth.js")
+      .then((mod) => mod.loadPuter?.())
+      .catch(() => {});
   }
 
   if (src === "all") {
@@ -2117,13 +2348,12 @@ export async function searchSmpc(query, { limit = 8, source = "dailymed", filter
     const batches = await Promise.all(tasks);
     const seen = new Set();
     const merged = [];
-    // Interleave sources so the top of the list is diverse.
     const maxLen = Math.max(...batches.map((batch) => batch.length), 0);
     for (let i = 0; i < maxLen; i += 1) {
       for (const batch of batches) {
         const item = batch[i];
         if (!item) continue;
-        const key = `${item.source}:${item.setId || item.productId || item.slug || item.id}`;
+        const key = `${item.source}:${item.setId || item.plNumber || item.productId || item.slug || item.id}`;
         if (seen.has(key)) continue;
         seen.add(key);
         merged.push(item);
@@ -2136,7 +2366,6 @@ export async function searchSmpc(query, { limit = 8, source = "dailymed", filter
     return merged;
   }
 
-  // Filtered NDC search is richest for DailyMed / drugs.com
   if ((src === "dailymed" || src === "drugs") && hasActiveSmpcFilters(f)) {
     const filtered = await searchByNdcFilters(q || f.atc || f.formulation || f.manufacturer, {
       limit,
@@ -2149,228 +2378,6 @@ export async function searchSmpc(query, { limit = 8, source = "dailymed", filter
   if (src === "emc") return searchEmcSource(q, { limit, filters: f });
   if (src === "drugs") return searchDrugsComSource(q, { limit, filters: f });
   return searchDailyMedSource(q, { limit, filters: f });
-}
-
-function parseEmcPlainNumberedSections(markdown) {
-  const text = String(markdown || "")
-    .replace(/\r/g, "")
-    .replace(/^Title:.*$/m, "")
-    .replace(/^URL Source:.*$/m, "")
-    .replace(/^Published Time:.*$/m, "")
-    .replace(/^Markdown Content:\s*/im, "")
-    .trim();
-
-  const start = text.search(/(?:^|\n)\s*1\.\s+Name of the medicinal product\b/i);
-  const body = start >= 0 ? text.slice(start) : text;
-  // Top-level EU headings are "1. Title"; subsections are "4.1 Title" (no extra trailing dot).
-  const headingRe =
-    /(?:^|\n)\s*((?:\d{1,2}\.\d+(?:\.\d+){0,2})|(?:\d{1,2})\.)\s+([A-Z][^\n]{2,160})\s*(?=\n|$)/g;
-  const hits = [];
-  let match;
-  while ((match = headingRe.exec(body))) {
-    const num = String(match[1] || "").replace(/\.$/, "");
-    const title = `${num} ${match[2]}`.replace(/\s+/g, " ").trim();
-    if (!isEmcSectionTitle(title)) continue;
-    hits.push({ index: match.index, end: headingRe.lastIndex, title });
-  }
-  if (hits.length < 3) return [];
-
-  const sections = [];
-  for (let i = 0; i < hits.length; i += 1) {
-    const from = hits[i].end;
-    const to = i + 1 < hits.length ? hits[i + 1].index : body.length;
-    const raw = body.slice(from, to).trim();
-    if (raw.length < 8 && i > 0) continue;
-    sections.push(makeSection(hits[i].title, raw, sections.length, "https://www.medicines.org.uk/"));
-  }
-  return sections.filter((section) => section.text.length >= 8 || /^\d+\.\d+/.test(section.title));
-}
-
-function parseEmcMarkdownSections(markdown) {
-  const sections = parseMarkdownSections(markdown, { minBody: 15, requireNumbered: false });
-  const filtered = sections.filter(
-    (section) =>
-      /^\d+(?:\.\d+)*\b/.test(section.title) ||
-      /name of the medicinal|composition|pharmaceutical|clinical|indication|posology|contraindic|warning|interaction|pregnancy|undesirable|overdose|pharmacolog|excipient|shelf|storage|packag|nature and contents|marketing authorisation/i.test(
-        section.title
-      )
-  );
-  return filtered.length >= 3 ? filtered : sections;
-}
-
-async function mhraGraphql(variables) {
-  const payload = JSON.stringify({
-    query: MHRA_SEARCH_QUERY,
-    variables,
-  });
-  // Prefer Puter (CORS); fall back to browser fetch if API allows it.
-  let raw = "";
-  try {
-    raw = await fetchViaPuter(MHRA_GRAPHQL, {
-      timeoutMs: 18000,
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: payload,
-    });
-  } catch {
-    raw = await fetchWithTimeout(MHRA_GRAPHQL, {
-      timeoutMs: 15000,
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: payload,
-    });
-  }
-  const data = typeof raw === "string" ? JSON.parse(raw) : raw;
-  if (data?.errors?.length) throw new Error(data.errors[0]?.message || "MHRA GraphQL error");
-  return data?.data || {};
-}
-
-async function searchMhraSpcDocuments(query, { limit = 5 } = {}) {
-  const q = String(query || "").trim();
-  if (!q) return [];
-  const data = await mhraGraphql({
-    searchTerm: q,
-    first: Math.min(Math.max(limit, 3), 10),
-    documentTypes: ["Spc"],
-    territoryTypes: ["UK", "GB"],
-  });
-  const edges = data?.products?.documents?.edges || [];
-  return edges
-    .map((edge) => edge?.node)
-    .filter((node) => node?.url && /spc|smpc|summary of product/i.test(`${node.docType || ""} ${node.title || ""}`))
-    .slice(0, limit);
-}
-
-async function hydrateFromMhraSpc(doc) {
-  const hints = expandUkDrugHints(doc.title)
-    .concat(expandUkDrugHints(doc.api))
-    .filter((value, index, arr) => value && arr.indexOf(value) === index)
-    .slice(0, 4);
-  let lastError = null;
-  for (const hint of hints) {
-    try {
-      const docs = await searchMhraSpcDocuments(hint, { limit: 4 });
-      for (const item of docs) {
-        try {
-          // MHRA hosts SmPC PDFs — Jina extracts text well.
-          const { text, via } = await fetchRemotePage(item.url, { preferHtml: false, timeoutMs: 22000 });
-          if (isBlockedOrMissing(text) || text.length < 400) continue;
-          let sections = parseEmcPlainNumberedSections(text);
-          if (sections.length < 3) sections = parseEmcMarkdownSections(text);
-          if (sections.length < 3) {
-            sections = parseMarkdownSections(text, { minBody: 15, requireNumbered: false, baseUrl: item.url });
-          }
-          if (sections.length < 3) continue;
-          return {
-            ...doc,
-            title: doc.title || item.product || item.title || hint,
-            sourceLabel: "MHRA Products (UK SmPC PDF)",
-            url: item.url || doc.url,
-            mhraProduct: item.product || "",
-            sections,
-            englishText: sections.map((sec) => `${sec.title}\n${sec.text}`).join("\n\n"),
-            hydrated: true,
-            needsFullLabel: false,
-            fetchVia: `mhra:${via}`,
-          };
-        } catch (error) {
-          lastError = error;
-        }
-      }
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError || "MHRA SmPC unavailable"));
-}
-
-async function hydrateEmcFull(doc) {
-  const baseUrl =
-    doc.url || (doc.productId ? `https://www.medicines.org.uk/emc/product/${doc.productId}/smpc` : "");
-  if (!baseUrl) return doc;
-
-  try {
-    const { loadPuter } = await import("./puter-auth.js");
-    await loadPuter();
-  } catch {
-    /* continue */
-  }
-
-  const productId = doc.productId || (baseUrl.match(/\/product\/(\d+)/) || [])[1] || "";
-  const candidates = [
-    productId ? `https://www.medicines.org.uk/emc/product/${productId}/smpc/print` : "",
-    productId ? `https://www.medicines.org.uk/emc/product/${productId}/smpc` : "",
-  ].filter((value, index, arr) => value && arr.indexOf(value) === index);
-
-  let lastError = null;
-  for (const candidate of candidates) {
-    try {
-      const { text, via } = await fetchRemotePage(candidate, { preferHtml: false, timeoutMs: 22000 });
-      if (isBlockedOrMissing(text)) {
-        lastError = new Error("blocked");
-        continue;
-      }
-
-      // Jina returns plain "1. Title" markdown for eMC print — parse that first.
-      let sections = parseEmcPlainNumberedSections(text);
-      if (sections.length < 5 && /<details[\s>]|spcWrapper|Section4|therapeutic indications/i.test(text)) {
-        const htmlSections = parseEmcHtml(text);
-        if (htmlSections.length > sections.length) sections = htmlSections;
-      }
-      if (sections.length < 5) {
-        const md = parseEmcMarkdownSections(text);
-        if (md.length > sections.length) sections = md;
-      }
-      if (sections.length < 5) {
-        const plain = parseMarkdownSections(text, { minBody: 12, requireNumbered: false, baseUrl: candidate });
-        if (plain.length > sections.length) sections = plain;
-      }
-      if (sections.length < 3) {
-        lastError = new Error("no sections");
-        continue;
-      }
-
-      const titleMatch = text.match(/<title>([^<]+)<\/title>/i) || text.match(/^Title:\s*(.+)$/m);
-      let title = doc.title;
-      if (titleMatch) {
-        title =
-          stripTags(titleMatch[1])
-            .replace(/\s*-\s*Summary of Product Characteristics.*$/i, "")
-            .replace(/\s*-\s*print friendly.*$/i, "")
-            .replace(/\s*\|\s*\d+\s*$/i, "")
-            .replace(/\s*-\s*\(emc\).*$/i, "")
-            .trim() || title;
-      }
-
-      return {
-        ...doc,
-        title,
-        productId: productId || doc.productId,
-        sourceLabel: "eMC (medicines.org.uk)",
-        url: `https://www.medicines.org.uk/emc/product/${productId || doc.productId}/smpc`,
-        sections,
-        englishText: sections.map((sec) => `${sec.title}\n${sec.text}`).join("\n\n"),
-        hydrated: true,
-        needsFullLabel: false,
-        fetchVia: via,
-      };
-    } catch (error) {
-      lastError = error;
-      if (isRateLimitedError(error)) break;
-    }
-  }
-
-  // UK alternate: MHRA Products SmPC PDFs (same regulatory content family as eMC).
-  try {
-    return await hydrateFromMhraSpc(doc);
-  } catch (error) {
-    lastError = error;
-  }
-
-  // Do NOT silently substitute a US OpenFDA/DailyMed body for eMC — that confused users.
-  throw new Error(
-    `تعذّر تحميل SmPC البريطاني من eMC/MHRA. ${lastError?.message || ""} جرّب DailyMed كمصدر منفصل إن أردت نشرة أمريكية.`.trim()
-  );
 }
 
 async function hydrateDrugsComFull(doc) {
@@ -2452,7 +2459,7 @@ export async function hydrateSmpcDocument(doc, { onStatus } = {}) {
   if (doc.hydrated && doc.sections?.length >= 8 && !doc.needsFullLabel) return doc;
 
   if (doc.source === "emc") {
-    onStatus?.("جارٍ تحميل SmPC الكامل من eMC…");
+    onStatus?.("جارٍ تحميل SmPC الكامل من MHRA…");
     return hydrateEmcFull(doc);
   }
   if (doc.source === "drugs") {
@@ -2471,7 +2478,7 @@ export async function hydrateDailyMedLabel(doc) {
 
 export function renderSmpcSearchResults(docs) {
   if (!docs.length) {
-    return `<p class="muted search-empty">لا توجد نتائج SmPC لهذا المصدر. جرّب اسماً آخر أو غيّر المصدر (DailyMed / eMC / drugs.com).</p>`;
+    return `<p class="muted search-empty">لا توجد نتائج SmPC لهذا المصدر. جرّب اسماً آخر أو غيّر المصدر (DailyMed / MHRA / drugs.com).</p>`;
   }
 
   return `
