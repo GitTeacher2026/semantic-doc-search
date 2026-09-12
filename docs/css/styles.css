@@ -3608,7 +3608,8 @@ html[data-theme="dark"] .fb-card:hover {
 .smpc-section-body {
   font-size: 0.92rem;
   line-height: 1.55;
-  white-space: normal;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .smpc-viewer-en,

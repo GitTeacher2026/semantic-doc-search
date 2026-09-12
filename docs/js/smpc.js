@@ -44,7 +44,7 @@ const OPENFDA_EXTRA_FIELDS = [
   { key: "keep_out", title: "Keep out of reach of children", fields: ["keep_out_of_reach_of_children"] },
   { key: "questions", title: "Questions", fields: ["questions"] },
   { key: "information_for_patients", title: "Information for patients", fields: ["information_for_patients"] },
-  { key: "use_in_specific_populations", title: "Use in specific populations", fields: ["use_in_specific_populations", "pediatric_use", "geriatric_use"] },
+  { key: "use_in_specific_populations", title: "Use in specific populations", fields: ["use_in_specific_populations", "use_in_specific_populations_table", "pediatric_use", "geriatric_use"] },
   { key: "nonclinical", title: "Nonclinical toxicology", fields: ["nonclinical_toxicology", "carcinogenesis_and_mutagenesis_and_impairment_of_fertility"] },
   { key: "clinical_studies", title: "Clinical studies", fields: ["clinical_studies", "clinical_studies_table"] },
   { key: "risks", title: "Risks", fields: ["risks"] },
@@ -54,11 +54,11 @@ const OPENFDA_EXTRA_FIELDS = [
 const SECTION_MAP = [
   { key: "product_overview", title: "1. Name of the medicinal product", fields: [] },
   { key: "qualitative_quantitative", title: "2. Qualitative and quantitative composition", fields: ["active_ingredient", "inactive_ingredient", "spl_product_data_elements"] },
-  { key: "pharmaceutical_form", title: "3. Pharmaceutical form", fields: ["dosage_forms_and_strengths", "description"] },
-  { key: "indications", title: "4.1 Therapeutic indications", fields: ["indications_and_usage", "purpose"] },
-  { key: "posology", title: "4.2 Posology and method of administration", fields: ["dosage_and_administration"] },
+  { key: "pharmaceutical_form", title: "3. Pharmaceutical form", fields: ["dosage_forms_and_strengths", "dosage_forms_and_strengths_table", "description"] },
+  { key: "indications", title: "4.1 Therapeutic indications", fields: ["indications_and_usage", "indications_and_usage_table", "purpose"] },
+  { key: "posology", title: "4.2 Posology and method of administration", fields: ["dosage_and_administration", "dosage_and_administration_table"] },
   { key: "contraindications", title: "4.3 Contraindications", fields: ["contraindications", "do_not_use"] },
-  { key: "warnings", title: "4.4 Special warnings and precautions", fields: ["warnings", "warnings_and_cautions", "boxed_warning", "ask_doctor", "ask_doctor_or_pharmacist", "when_using", "stop_use", "precautions"] },
+  { key: "warnings", title: "4.4 Special warnings and precautions", fields: ["warnings", "warnings_and_cautions", "warnings_and_cautions_table", "boxed_warning", "ask_doctor", "ask_doctor_or_pharmacist", "when_using", "stop_use", "precautions"] },
   { key: "interactions", title: "4.5 Interaction with other medicinal products", fields: ["drug_interactions", "drug_interactions_table"] },
   { key: "pregnancy", title: "4.6 Fertility, pregnancy and lactation", fields: ["pregnancy", "pregnancy_or_breast_feeding", "nursing_mothers", "labor_and_delivery"] },
   { key: "undesirable_effects", title: "4.8 Undesirable effects", fields: ["adverse_reactions", "adverse_reactions_table"] },
@@ -99,7 +99,17 @@ function slugify(value) {
 function stripTags(html) {
   return String(html || "")
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|li|tr|h\d|summary|section)>/gi, "\n")
+    .replace(/<\/?(table|thead|tbody|tfoot)[^>]*>/gi, "\n")
+    .replace(/<\/tr>/gi, "\n")
+    .replace(/<\/(td|th)>/gi, " | ")
+    .replace(/<(td|th)[^>]*>/gi, "")
+    .replace(/<img[^>]*alt=["']([^"']+)["'][^>]*>/gi, "\n[Image: $1]\n")
+    .replace(/<img[^>]*src=["']([^"']+)["'][^>]*>/gi, "\n[Image]\n")
+    .replace(/<img[^>]*>/gi, "\n[Image]\n")
+    .replace(/<figcaption[^>]*>([\s\S]*?)<\/figcaption>/gi, "\n($1)\n")
+    .replace(/<(figure|picture)[^>]*>/gi, "\n")
+    .replace(/<\/(figure|picture)>/gi, "\n")
+    .replace(/<\/(p|div|li|h\d|summary|section)>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
@@ -110,6 +120,7 @@ function stripTags(html) {
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
+    .replace(/(?:\s*\|\s*){2,}/g, " | ")
     .trim();
 }
 
@@ -351,8 +362,9 @@ async function hydrateDailyMedFull(doc) {
   if (!doc?.setId && !doc?.title && !doc?.api) return doc;
 
   // 1) OpenFDA first — CORS * and no proxy required.
+  // Keep it as a candidate only: OpenFDA often omits table/figure-heavy sections,
+  // so we still try DailyMed HTML/XSL when a setId is available and pick the richer copy.
   const fromFda = await hydrateFromOpenFdaSetId(doc);
-  if (fromFda?.sections?.length >= 5) return fromFda;
 
   if (!doc?.setId) {
     // Try resolving a set id via OpenFDA name search, then hydrate.
@@ -417,9 +429,11 @@ async function hydrateDailyMedFull(doc) {
       }
       sections = sections.filter(
         (section) =>
-          section.text.length >= 50 ||
+          section.text.length >= 40 ||
+          /\[Image:/i.test(section.text) ||
+          /\s\|\s/.test(section.text) ||
           /^\d+(?:\.\d+)*\b/.test(section.title) ||
-          /indication|dosage|warning|adverse|interaction|description|clinical|contraindic|overdose|how supplied|storage|pregnancy|nursing|pediatric|geriatric|active ingredient|purpose|uses|directions|highlights|boxed/i.test(
+          /indication|dosage|warning|adverse|interaction|description|clinical|contraindic|overdose|how supplied|storage|pregnancy|nursing|pediatric|geriatric|active ingredient|purpose|uses|directions|highlights|boxed|composition|pharmacolog/i.test(
             section.title
           )
       );
@@ -435,7 +449,22 @@ async function hydrateDailyMedFull(doc) {
   }
 
   if (best?.sections?.length >= 3) {
-    return finalizeDailyMedDoc({ ...doc, url: best.url }, best.sections, best.label);
+    const htmlDoc = finalizeDailyMedDoc({ ...doc, url: best.url }, best.sections, best.label);
+    const htmlScore = scoreLabelSections(htmlDoc.sections);
+    const fdaScore = scoreLabelSections(fromFda?.sections);
+    // Prefer the richer body; if close, merge unique OpenFDA extras into HTML result.
+    if (fromFda?.sections?.length && fdaScore > htmlScore * 1.15) {
+      return fromFda;
+    }
+    if (fromFda?.sections?.length) {
+      const have = new Set(htmlDoc.sections.map((s) => s.title.toLowerCase()));
+      const extras = fromFda.sections.filter((s) => !have.has(String(s.title || "").toLowerCase()) && s.text?.length > 80);
+      if (extras.length) {
+        const merged = [...htmlDoc.sections, ...extras];
+        return finalizeDailyMedDoc({ ...doc, url: best.url }, merged, `${best.label} + OpenFDA`);
+      }
+    }
+    return htmlDoc;
   }
 
   if (fromFda?.sections?.length) return fromFda;
@@ -536,40 +565,91 @@ function parseMarkdownSections(markdown, { minBody = 12, requireNumbered = false
   if (current && current.text.trim()) sections.push(current);
 
   return sections
-    .map((section, index) => ({
-      key: sectionKey(section.title, index),
-      title: section.title,
-      text: section.text
-        .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
+    .map((section, index) => {
+      let body = section.text
+        // Keep image alt text so figure-only sections are not dropped.
+        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt) => {
+          const label = String(alt || "").trim() || "figure / table image";
+          return `\n[Image: ${label}]\n`;
+        })
         .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+        // Normalize markdown tables into readable rows.
+        .replace(/^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/gm, "")
+        .replace(/^\|(.+)\|$/gm, (_, row) =>
+          row
+            .split("|")
+            .map((cell) => cell.trim())
+            .filter(Boolean)
+            .join(" | ")
+        )
         .replace(/\n{3,}/g, "\n\n")
-        .trim(),
-    }))
-    .filter((section) => section.text.length >= minBody);
+        .trim();
+      return {
+        key: sectionKey(section.title, index),
+        title: section.title,
+        text: body,
+      };
+    })
+    .filter((section) => {
+      if (section.text.length >= minBody) return true;
+      // Keep short sections that still carry figure/table placeholders.
+      return /\[Image:/i.test(section.text) || /\s\|\s/.test(section.text);
+    });
+}
+
+function isEmcSectionTitle(title) {
+  return (
+    /^\d+(\.\d+)*\b/.test(title) ||
+    /name of the medicinal|composition|pharmaceutical|clinical|indication|posology|contraindic|warning|interaction|pregnancy|undesirable|overdose|pharmacolog|marketing authorisation|excipient|shelf|storage|packag|nature and contents|qualitative|quantitative/i.test(
+      title
+    )
+  );
 }
 
 function parseEmcHtml(html) {
-  const start = html.search(/id=["']smpc["']|class=["']spcWrapper["']/i);
+  const start = html.search(/id=["']smpc["']|class=["']spcWrapper["']|id=["']product-smpc["']/i);
   const block = start >= 0 ? html.slice(start) : html;
-
   const sections = [];
-  const detailRe =
-    /<details[^>]*>\s*<summary[^>]*>([\s\S]*?)<\/summary>\s*<div class="sectionWrapper">([\s\S]*?)<\/div>\s*<\/details>/gi;
-  let match;
-  while ((match = detailRe.exec(block))) {
-    const title = stripTags(match[1]);
-    const text = stripTags(match[2]);
-    if (!title) continue;
-    if (/my account|cookie|sign in|accept all|expand all/i.test(title)) continue;
-    // Keep SmPC-looking headings (numbered) and known section labels
-    if (!/^\d+(\.\d+)*\b/.test(title) && !/name of the medicinal|composition|pharmaceutical|clinical|indication|posology|contraindic|warning|interaction|pregnancy|undesirable|overdose|pharmacolog|marketing authorisation|excipient|shelf|storage|packag|nature and contents/i.test(title)) {
-      continue;
+  const seen = new Set();
+
+  const pushSection = (rawTitle, rawBody) => {
+    const title = stripTags(rawTitle);
+    let text = stripTags(rawBody);
+    if (!title) return;
+    if (/my account|cookie|sign in|accept all|expand all|print smpc|share/i.test(title)) return;
+    if (!isEmcSectionTitle(title)) return;
+    const key = title.toLowerCase();
+    if (seen.has(key)) {
+      // Merge duplicate headings (parent + nested) instead of dropping content.
+      const existing = sections.find((s) => s.title.toLowerCase() === key);
+      if (existing && text && !existing.text.includes(text.slice(0, 80))) {
+        existing.text = `${existing.text}\n\n${text}`.trim();
+      }
+      return;
     }
+    seen.add(key);
     sections.push({
       key: sectionKey(title, sections.length),
       title,
       text: text || "(See subsections below.)",
     });
+  };
+
+  // Primary eMC accordion pattern.
+  const detailRe =
+    /<details[^>]*>\s*<summary[^>]*>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>/gi;
+  let match;
+  while ((match = detailRe.exec(block))) {
+    pushSection(match[1], match[2]);
+  }
+
+  // Fallback: numbered headings wrapping content until the next heading.
+  if (sections.length < 5) {
+    const headingRe =
+      /<h([2-4])[^>]*>\s*(\d+(?:\.\d+)*\s+[^<]{3,160})\s*<\/h\1>([\s\S]*?)(?=<h[2-4]\b|$)/gi;
+    while ((match = headingRe.exec(block))) {
+      pushSection(match[2], match[3]);
+    }
   }
 
   return sections;
