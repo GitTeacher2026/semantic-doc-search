@@ -480,8 +480,11 @@ async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = 
     attempts.push(attempt);
   }
 
-  if (pref) {
+  if (pref && !ukEmc) {
     attempts.sort((a, b) => Number(b.name.startsWith(pref)) - Number(a.name.startsWith(pref)));
+  } else if (ukEmc) {
+    // Prefer Puter→Jina for UK hosts; ignore stale corsproxy preferences that only 403.
+    attempts.sort((a, b) => Number(b.name.startsWith("puter")) - Number(a.name.startsWith("puter")));
   }
 
   // Race the best candidates in parallel.
@@ -1431,37 +1434,116 @@ function parseEmcSearch(markdownOrHtml, { limit = 8 } = {}) {
   return found;
 }
 
-async function searchEmcViaWebFallback(query, { limit = 8, filters = {} } = {}) {
+function parseEmcHitsFromHtml(html, { limit = 8 } = {}) {
+  const text = String(html || "");
+  const found = [];
+  const seen = new Set();
+
+  const pushHit = (productId, titleHint = "") => {
+    if (!productId || seen.has(productId)) return;
+    let title = stripTags(titleHint || "")
+      .replace(/\s+/g, " ")
+      .replace(/https?:\/\/\S+/g, "")
+      .trim();
+    if (!title || title.length < 3 || /medicines\.org|duckduckgo|smpc only|^product$/i.test(title)) {
+      title = `eMC product ${productId}`;
+    }
+    seen.add(productId);
+    found.push({
+      id: `emc:${productId}`,
+      source: "emc",
+      sourceLabel: "eMC (medicines.org.uk)",
+      title: title.slice(0, 180),
+      api: "",
+      formulation: "UK SmPC",
+      manufacturer: "",
+      productId,
+      url: `https://www.medicines.org.uk/emc/product/${productId}/smpc`,
+      sections: [],
+      englishText: title,
+      needsFullLabel: true,
+      hydrated: false,
+    });
+  };
+
+  // DuckDuckGo redirect links: .../l/?uddg=https%3A%2F%2Fwww.medicines.org.uk%2Femc%2Fproduct%2F123...
+  const uddgRe = /uddg=([^&"'<>\s]+)/gi;
+  let match;
+  while ((match = uddgRe.exec(text))) {
+    try {
+      const decoded = decodeURIComponent(match[1].replace(/\+/g, " "));
+      const idMatch = decoded.match(/medicines\.org\.uk\/emc\/product\/(\d+)/i);
+      if (idMatch) pushHit(idMatch[1]);
+    } catch {
+      /* ignore bad encoding */
+    }
+    if (found.length >= limit) return found;
+  }
+
+  // Prefer anchors that wrap product links (DuckDuckGo / eMC search HTML).
+  const anchorRe =
+    /<a\b[^>]*href=["']([^"']*medicines\.org\.uk\/emc\/product\/(\d+)(?:\/smpc)?)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
+  while ((match = anchorRe.exec(text))) {
+    pushHit(match[2], match[3] || "");
+    if (found.length >= limit) return found;
+  }
+
+  // Plain URL / markdown leftovers.
+  for (const doc of parseEmcSearch(text, { limit })) {
+    pushHit(doc.productId, doc.title);
+    if (found.length >= limit) break;
+  }
+  return found;
+}
+
+async function fetchViaPuterText(url, timeoutMs = 16000) {
+  return acceptRemoteText(await fetchViaPuter(url, { timeoutMs }));
+}
+
+/** eMC discovery via DuckDuckGo — Puter can reach DDG even when medicines.org.uk / Jina are blocked. */
+async function searchEmcViaDuckDuckGo(query, { limit = 8, filters = {} } = {}) {
   const f = normalizeSmpcFilters(filters);
   const q = appendFilterKeywords(query, f);
   if (!q) return [];
 
-  // DuckDuckGo HTML is reachable from Puter even when medicines.org.uk is not.
-  const ddgUrls = [
-    `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`site:medicines.org.uk/emc/product ${q} smpc`)}`,
-    `https://duckduckgo.com/html/?q=${encodeURIComponent(`site:www.medicines.org.uk/emc/product ${q} smpc`)}`,
+  const queries = [
+    `site:medicines.org.uk/emc/product ${q} smpc`,
+    `site:www.medicines.org.uk/emc/product ${q} "Summary of Product Characteristics"`,
+    `${q} site:medicines.org.uk/emc/product/ smpc`,
   ];
 
-  for (const ddgUrl of ddgUrls) {
-    try {
-      // Prefer Puter→Jina for DDG too (browser often blocks scraping hosts).
-      let payload = "";
+  const errors = [];
+  for (const searchQ of queries) {
+    const ddgUrls = [
+      `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(searchQ)}`,
+    ];
+    for (const ddgUrl of ddgUrls) {
       try {
-        payload = await fetchViaPuter(jinaReaderUrl(ddgUrl), { timeoutMs: 16000 });
-      } catch {
-        const hit = await fetchRemotePage(ddgUrl, { timeoutMs: 14000 });
-        payload = hit.text;
+        // IMPORTANT: call DuckDuckGo directly through Puter — do NOT wrap with Jina
+        // (Jina returns HTTP 403 for Puter's network).
+        let payload = "";
+        try {
+          payload = await fetchViaPuterText(ddgUrl, 16000);
+        } catch (puterErr) {
+          // Browser fetch may work for DDG in some environments.
+          const response = await fetchWithTimeout(ddgUrl, { timeoutMs: 12000 });
+          payload = acceptRemoteText(response);
+        }
+        const results = parseEmcHitsFromHtml(payload, { limit: Math.max(limit * 2, 12) }).filter((doc) =>
+          matchesClientFilters(doc, f)
+        );
+        if (results.length) {
+          rememberProxy("puter-ddg");
+          return results.slice(0, limit);
+        }
+        errors.push(`${ddgUrl}: no product ids`);
+      } catch (error) {
+        errors.push(`${ddgUrl}: ${error?.message || error}`);
       }
-      const results = parseEmcSearch(payload, { limit: Math.max(limit * 2, 12) }).filter((doc) =>
-        matchesClientFilters(doc, f)
-      );
-      if (results.length) {
-        rememberProxy("puter-jina-ddg");
-        return results.slice(0, limit);
-      }
-    } catch {
-      /* try next */
     }
+  }
+  if (errors.length) {
+    console.warn("[eMC DDG]", errors.slice(0, 4).join(" · "));
   }
   return [];
 }
@@ -1471,45 +1553,50 @@ async function searchEmcSource(query, { limit = 8, filters = {} } = {}) {
   const searchQ = appendFilterKeywords(query, f);
   if (!searchQ) return [];
 
-  // Warm Puter early — eMC needs Puter→Jina because Puter cannot reach medicines.org.uk directly.
-  import("./puter-auth.js").then((mod) => mod.loadPuter?.()).catch(() => {});
+  const errors = [];
 
+  // Ensure Puter is ready before DDG discovery (fire-and-forget warm was racing the first query).
+  try {
+    const { loadPuter } = await import("./puter-auth.js");
+    await loadPuter();
+  } catch (error) {
+    errors.push(`puter-init: ${error?.message || error}`);
+  }
+
+  // 1) Primary: DuckDuckGo via Puter (reachable). Avoids medicines.org.uk + Jina 403 entirely.
+  try {
+    const ddgHits = await searchEmcViaDuckDuckGo(searchQ, { limit, filters: f });
+    if (ddgHits.length) return ddgHits;
+    errors.push("ddg: no parseable products");
+  } catch (error) {
+    errors.push(`ddg: ${error?.message || error}`);
+  }
+
+  // 2) Secondary: direct eMC search page (rarely works from the browser today).
   const searchUrls = [
     `https://www.medicines.org.uk/emc/search?q=${encodeURIComponent(searchQ)}&docType=smpc`,
-    `https://www.medicines.org.uk/emc/search?q=${encodeURIComponent(searchQ)}`,
   ];
-
-  const errors = [];
   for (const searchUrl of searchUrls) {
     try {
       const { text: payload, via } = await fetchRemotePage(searchUrl, {
         preferHtml: false,
-        timeoutMs: 18000,
+        timeoutMs: 12000,
       });
-      const results = parseEmcSearch(payload, { limit: Math.max(limit * 2, 12) }).filter((doc) =>
+      const results = parseEmcHitsFromHtml(payload, { limit: Math.max(limit * 2, 12) }).filter((doc) =>
         matchesClientFilters(doc, f)
       );
       if (results.length) {
         rememberProxy(via);
         return results.slice(0, limit);
       }
-      errors.push(`${via || "fetch"}: no parseable products`);
+      errors.push(`${via || "emc-search"}: no parseable products`);
     } catch (error) {
       errors.push(error?.message || String(error));
     }
   }
 
-  // Last resort: discover eMC product IDs via DuckDuckGo (Puter-reachable).
-  try {
-    const fallback = await searchEmcViaWebFallback(searchQ, { limit, filters: f });
-    if (fallback.length) return fallback;
-    errors.push("ddg-fallback: no parseable products");
-  } catch (error) {
-    errors.push(`ddg-fallback: ${error?.message || error}`);
-  }
-
   throw new Error(
-    `تعذّر بحث eMC حالياً (الوسطاء غير متاحين أو لا نتائج). جرّب مصدر DailyMed أو «الكل». ${errors[0] ? `· ${errors[0]}` : ""}`
+    `تعذّر بحث eMC حالياً (يلزم Puter لتجاوز حجب medicines.org.uk). جرّب DailyMed أو «الكل». ${errors[0] ? `· ${errors[0]}` : ""}`
   );
 }
 
@@ -1660,54 +1747,62 @@ function parseEmcMarkdownSections(markdown) {
 }
 
 async function hydrateEmcFull(doc) {
-  const url = doc.url || (doc.productId ? `https://www.medicines.org.uk/emc/product/${doc.productId}/smpc` : "");
-  if (!url) return doc;
+  const baseUrl =
+    doc.url || (doc.productId ? `https://www.medicines.org.uk/emc/product/${doc.productId}/smpc` : "");
+  if (!baseUrl) return doc;
 
-  const urls = [
-    url,
-    url.replace("https://www.medicines.org.uk", "https://medicines.org.uk"),
-    url.replace("https://www.", "http://www."),
+  const productId = doc.productId || (baseUrl.match(/\/product\/(\d+)/) || [])[1] || "";
+  const candidates = [
+    productId ? `https://www.medicines.org.uk/emc/product/${productId}/smpc/print` : "",
+    baseUrl.endsWith("/print") ? baseUrl : `${baseUrl.replace(/\/$/, "")}/print`,
+    baseUrl,
+    baseUrl.replace("https://www.medicines.org.uk", "https://medicines.org.uk"),
   ].filter((value, index, arr) => value && arr.indexOf(value) === index);
 
   let lastError = null;
-  for (const candidate of urls) {
+  for (const candidate of candidates) {
     try {
-      const { text, via } = await fetchRemotePage(candidate, { preferHtml: false });
+      const { text, via } = await fetchRemotePage(candidate, { preferHtml: false, timeoutMs: 20000 });
       if (isBlockedOrMissing(text)) {
         lastError = new Error("blocked");
         continue;
       }
 
       let sections = [];
-      if (/<details[\s>]/i.test(text) || /spcWrapper/i.test(text)) {
+      if (/<details[\s>]|spcWrapper|Section4|therapeutic indications/i.test(text)) {
         sections = parseEmcHtml(text);
       }
       if (sections.length < 3) {
         sections = parseEmcMarkdownSections(text);
+      }
+      // Print pages are often plain HTML headings without <details>.
+      if (sections.length < 3) {
+        sections = parseMarkdownSections(text, { minBody: 20, requireNumbered: false, baseUrl: candidate });
       }
       if (!sections.length) {
         lastError = new Error("no sections");
         continue;
       }
 
-      const titleMatch =
-        text.match(/<title>([^<]+)<\/title>/i) || text.match(/^Title:\s*(.+)$/m);
+      const titleMatch = text.match(/<title>([^<]+)<\/title>/i) || text.match(/^Title:\s*(.+)$/m);
       let title = doc.title;
       if (titleMatch) {
         title =
           stripTags(titleMatch[1])
             .replace(/\s*-\s*Summary of Product Characteristics.*$/i, "")
             .replace(/\s*\|\s*\d+\s*$/i, "")
+            .replace(/\s*-\s*\(emc\).*$/i, "")
             .trim() || title;
       }
 
       return {
         ...doc,
         title,
+        productId: productId || doc.productId,
         sourceLabel: "eMC (medicines.org.uk)",
-        url: candidate.startsWith("http") ? candidate.replace(/^http:/, "https:") : url,
+        url: `https://www.medicines.org.uk/emc/product/${productId || doc.productId}/smpc`,
         sections,
-        englishText: sections.map((s) => `${s.title}\n${s.text}`).join("\n\n"),
+        englishText: sections.map((sec) => `${sec.title}\n${sec.text}`).join("\n\n"),
         hydrated: true,
         needsFullLabel: false,
         fetchVia: via,
@@ -1717,9 +1812,36 @@ async function hydrateEmcFull(doc) {
     }
   }
 
-  throw new Error(
-    `تعذّر تحميل SmPC من eMC. ${lastError?.message || ""}`.trim()
-  );
+  // Soft fallback: keep the eMC result but fill body from OpenFDA/DailyMed by name.
+  try {
+    const hint = String(doc.title || "")
+      .replace(/\beMC product\s+\d+\b/ig, "")
+      .replace(/\bSmPC\b/ig, "")
+      .trim();
+    if (hint.length >= 3) {
+      const batch = await fetchOpenFda(buildQueryVariants(hint)[0] || hint, 1);
+      if (batch[0]) {
+        const fda = normalizeOpenFda(batch[0]);
+        if (fda.sections?.length) {
+          return {
+            ...doc,
+            title: doc.title || fda.title,
+            sections: fda.sections,
+            englishText: fda.englishText,
+            hydrated: true,
+            needsFullLabel: false,
+            sourceLabel: "eMC link · body via OpenFDA/DailyMed",
+            fetchVia: "openfda-fallback",
+            url: baseUrl,
+          };
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  throw new Error(`تعذّر تحميل SmPC من eMC. ${lastError?.message || ""}`.trim());
 }
 
 async function hydrateDrugsComFull(doc) {
