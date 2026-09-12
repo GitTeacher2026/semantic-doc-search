@@ -52,16 +52,49 @@ export function toArrayBuffer(bytes) {
   return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
 }
 
+/** Join text items on a page into lines using Y position (reading order). */
+function pageItemsToLines(items, yTol = 2.8) {
+  const rows = [];
+  for (const item of items || []) {
+    const str = String(item.str || "");
+    if (!str) continue;
+    const x = Number(item.transform?.[4] || 0);
+    const y = Number(item.transform?.[5] || 0);
+    const row = rows.find((r) => Math.abs(r.y - y) <= yTol);
+    if (row) {
+      row.items.push({ str, x });
+      row.y = (row.y * (row.items.length - 1) + y) / row.items.length;
+    } else {
+      rows.push({ y, items: [{ str, x }] });
+    }
+  }
+  rows.sort((a, b) => b.y - a.y);
+  return rows.map((row) => {
+    row.items.sort((a, b) => a.x - b.x);
+    let line = "";
+    let prevRight = null;
+    for (const it of row.items) {
+      const gap = prevRight == null ? 0 : it.x - prevRight;
+      if (!line) line = it.str;
+      else if (gap > 1.2) line += ` ${it.str}`;
+      else line += it.str;
+      prevRight = it.x + Math.max(String(it.str).length * 2.2, 2);
+    }
+    return line.replace(/[ \t]+/g, " ").trim();
+  }).filter(Boolean);
+}
+
 export async function extractPdfTextLayer(arrayBuffer) {
   const pdf = await loadPdfDocument(arrayBuffer);
   const parts = [];
   for (let i = 1; i <= pdf.numPages; i += 1) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    parts.push(content.items.map((item) => item.str).join(" "));
+    const lines = pageItemsToLines(content.items || []);
+    parts.push(lines.join("\n"));
     page.cleanup?.();
   }
-  return parts.join("\n").trim();
+  return parts.join("\n\n").trim();
 }
 
 const NATIVE_TEXT_MIN_CHARS = 40;

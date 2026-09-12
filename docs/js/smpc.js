@@ -12,6 +12,7 @@ import {
   extractTablesFromPdfBytes,
   injectTablesIntoSections,
 } from "./smpc-tables.js";
+import { extractPdfTextLayer } from "./pdf-utils.js";
 
 const OPENFDA_LABEL = "https://api.fda.gov/drug/label.json";
 const OPENFDA_NDC = "https://api.fda.gov/drug/ndc.json";
@@ -27,6 +28,15 @@ const MHRA_SEARCH_API_VERSION = "2017-11-11";
 
 /** Serialize Puter networking so the Wisp/WebSocket can finish connecting. */
 let puterFetchQueue = Promise.resolve();
+
+/** Reuse MHRA PDF bytes between text extract and table extract in one hydrate. */
+const mhraPdfBytesCache = new Map();
+
+function pdfBytesToArrayBuffer(bytes) {
+  if (bytes instanceof ArrayBuffer) return bytes.slice(0);
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+}
 
 export const SMPC_SOURCE_OPTIONS = [
   {
@@ -512,6 +522,22 @@ function isMhraBlobHost(url) {
   }
 }
 
+/** Loose SpC detection — pdf.js line breaks can split headings across lines. */
+function looksLikeUkSpcText(text) {
+  const sample = String(text || "").slice(0, 120000);
+  if (sample.length < 400) return false;
+  if (/SUMMARY OF PRODUCT CHARACTERISTICS/i.test(sample)) return true;
+  if (/NAME OF THE MEDICINAL PRODUCT/i.test(sample) && /QUALITATIVE AND QUANTITATIVE/i.test(sample)) {
+    return true;
+  }
+  if (/CLINICAL PARTICULARS/i.test(sample) && /PHARMACEUTICAL (?:FORM|PARTICULARS)/i.test(sample)) {
+    return true;
+  }
+  // Numbered SpC outline even when heading words wrap oddly.
+  const nums = (sample.match(/(?:^|\n)\s*([1-9]|10)\s+[A-Z][A-Z \/,()-]{8,}/g) || []).length;
+  return nums >= 5;
+}
+
 const waybackSnapshotCache = new Map();
 
 /** Prefer raw archived payload (no Wayback toolbar). */
@@ -638,7 +664,7 @@ async function fetchViaPuterWayback(target, { timeoutMs = 18000 } = {}) {
 /**
  * Fetch a remote page without CORS.
  *
- * MHRA SpC PDFs: prefer Jina (PDF→markdown). Avoid returning raw %PDF bytes.
+ * MHRA SpC PDFs: Puter→PDF bytes→pdf.js (Azure blob has no CORS; Jina often 403).
  * Legacy medicines.org.uk: Puter→Jina, then a single Puter→Wayback hop (no Wayback race).
  */
 async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = {}) {
@@ -682,36 +708,32 @@ async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = 
     }
   }
 
-  // MHRA PDF blobs: Jina extracts SpC text reliably; Puter→Jina as backup.
+  // MHRA Azure blobs have no CORS. Jina from the browser often fails (CORS / Puter→Jina 403).
+  // Primary path: Puter → PDF bytes → pdf.js text layer.
   if (mhraPdf) {
+    try {
+      const pdfBytes = await fetchMhraPdfBytes(target, { timeoutMs: Math.min(budget + 10000, 40000) });
+      const text = acceptRemoteText(await extractPdfTextLayer(pdfBytesToArrayBuffer(pdfBytes)));
+      if (!looksLikeUkSpcText(text)) throw new Error("not SpC text");
+      mhraPdfBytesCache.set(target, pdfBytes);
+      return remember("puter-pdfjs-mhra", text);
+    } catch (error) {
+      errors.push(`puter-pdfjs-mhra: ${error?.message || error}`);
+    }
+
+    // Last-resort text readers (often blocked; keep for environments where they still work).
     for (const variant of buildJinaTargets(target).slice(0, 1)) {
       try {
         const text = acceptRemoteText(
-          await fetchWithTimeout(jinaReaderUrl(variant), { timeoutMs: Math.min(budget, 20000) })
+          await fetchWithTimeout(jinaReaderUrl(variant), { timeoutMs: Math.min(budget, 16000) })
         );
-        if (!/NAME OF THE MEDICINAL PRODUCT|QUALITATIVE AND QUANTITATIVE|CLINICAL PARTICULARS/i.test(text)) {
-          throw new Error("not SpC text");
-        }
+        if (!looksLikeUkSpcText(text)) throw new Error("not SpC text");
         return remember("jina-mhra", text);
       } catch (error) {
         errors.push(`jina-mhra: ${error?.message || error}`);
       }
     }
-    if (pref !== "skip-puter") {
-      for (const variant of buildJinaTargets(target).slice(0, 1)) {
-        try {
-          const text = acceptRemoteText(
-            await fetchViaPuter(jinaReaderUrl(variant), { timeoutMs: Math.min(budget, 20000) })
-          );
-          if (!/NAME OF THE MEDICINAL PRODUCT|QUALITATIVE AND QUANTITATIVE|CLINICAL PARTICULARS/i.test(text)) {
-            throw new Error("not SpC text");
-          }
-          return remember("puter-jina-mhra", text);
-        } catch (error) {
-          errors.push(`puter-jina-mhra: ${error?.message || error}`);
-        }
-      }
-    }
+
     throw new Error(
       `تعذّر قراءة PDF من MHRA. ${errors.slice(0, 3).join(" · ")}`
     );
@@ -2161,20 +2183,38 @@ function parseUkSpcPlainSections(markdown) {
   return sections.filter((section) => section.text.length >= 2 || /^\d+\.\d+/.test(section.title));
 }
 
-/** Fetch MHRA PDF bytes for table extraction (Puter → direct). */
-async function fetchMhraPdfBytes(pdfUrl, { timeoutMs = 25000 } = {}) {
+/** Fetch MHRA PDF bytes (Azure blob has no CORS — Puter is required in the browser). */
+async function fetchMhraPdfBytes(pdfUrl, { timeoutMs = 28000 } = {}) {
   const target = String(pdfUrl || "").trim();
   if (!target) throw new Error("missing pdf url");
 
-  const asPdfBytes = (buffer) => {
-    const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-    if (bytes.length < 100) throw new Error("not a PDF");
+  const cached = mhraPdfBytesCache.get(target);
+  if (cached instanceof Uint8Array && cached.length > 100) {
+    return cached;
+  }
+
+  const asPdfBytes = async (response) => {
+    if (!response) throw new Error("empty response");
+    let buffer = null;
+    if (typeof response.arrayBuffer === "function") {
+      try {
+        buffer = await response.arrayBuffer();
+      } catch {
+        buffer = null;
+      }
+    }
+    if ((!buffer || buffer.byteLength < 100) && typeof response.blob === "function") {
+      const blob = await response.blob();
+      buffer = await blob.arrayBuffer();
+    }
+    if (!buffer || buffer.byteLength < 100) throw new Error("empty PDF body");
+    const bytes = new Uint8Array(buffer);
     const magic = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
     if (magic !== "%PDF") throw new Error("not a PDF");
     return bytes;
   };
 
-  const tryPuter = async () => {
+  const tryPuterOnce = async () => {
     const { loadPuter } = await import("./puter-auth.js");
     const puter = await loadPuter();
     if (!puter?.net?.fetch) throw new Error("puter.net unavailable");
@@ -2188,37 +2228,72 @@ async function fetchMhraPdfBytes(pdfUrl, { timeoutMs = 25000 } = {}) {
         redirect: "follow",
       });
       if (!response?.ok) throw new Error(`HTTP ${response?.status || "?"}`);
-      return asPdfBytes(await response.arrayBuffer());
+      return await asPdfBytes(response);
+    } catch (error) {
+      if (error?.name === "AbortError") throw new Error(`timeout ${timeoutMs}ms`);
+      throw error instanceof Error ? error : new Error(String(error));
     } finally {
       clearTimeout(timer);
     }
   };
 
+  const tryPuter = async () => {
+    const run = async () => {
+      let lastError = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          return await tryPuterOnce();
+        } catch (error) {
+          lastError = error;
+          const message = String(error?.message || error || "");
+          if (/CONNECTING|InvalidStateError|WebSocket|Socket errored|timeout/i.test(message) && attempt < 2) {
+            await new Promise((resolve) => setTimeout(resolve, 450 + attempt * 400));
+            continue;
+          }
+          throw error instanceof Error ? error : new Error(String(error));
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    };
+    const queued = puterFetchQueue.then(run, run);
+    puterFetchQueue = queued.catch(() => {});
+    return queued;
+  };
+
   const tryDirect = async () => {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const timer = setTimeout(() => ctrl.abort(), Math.min(timeoutMs, 12000));
     try {
       const response = await fetch(target, {
         method: "GET",
         signal: ctrl.signal,
         cache: "no-store",
+        mode: "cors",
+        credentials: "omit",
         headers: { Accept: "application/pdf,*/*" },
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return asPdfBytes(await response.arrayBuffer());
+      return await asPdfBytes(response);
     } finally {
       clearTimeout(timer);
     }
   };
 
+  let puterError = null;
   try {
-    return await tryPuter();
-  } catch (puterError) {
-    try {
-      return await tryDirect();
-    } catch {
-      throw puterError instanceof Error ? puterError : new Error(String(puterError));
-    }
+    const bytes = await tryPuter();
+    mhraPdfBytesCache.set(target, bytes);
+    return bytes;
+  } catch (error) {
+    puterError = error;
+  }
+
+  try {
+    const bytes = await tryDirect();
+    mhraPdfBytesCache.set(target, bytes);
+    return bytes;
+  } catch {
+    throw puterError instanceof Error ? puterError : new Error(String(puterError || "PDF fetch failed"));
   }
 }
 
@@ -2226,7 +2301,15 @@ async function hydrateMhraPdfDoc(doc) {
   const pdfUrl = String(doc.pdfUrl || doc.url || "").trim();
   if (!pdfUrl) throw new Error("missing MHRA PDF url");
 
-  const { text, via } = await fetchRemotePage(pdfUrl, { preferHtml: false, timeoutMs: 24000 });
+  // Warm Puter before PDF fetch (Wisp/WebSocket needs a moment).
+  try {
+    const { loadPuter } = await import("./puter-auth.js");
+    await loadPuter();
+  } catch {
+    /* Puter required for Azure blob CORS bypass */
+  }
+
+  const { text, via } = await fetchRemotePage(pdfUrl, { preferHtml: false, timeoutMs: 32000 });
   if (isBlockedOrMissing(text) || text.length < 400) throw new Error("empty MHRA PDF text");
 
   let sections = parseUkSpcPlainSections(text);
@@ -2246,7 +2329,7 @@ async function hydrateMhraPdfDoc(doc) {
   }
   if (sections.length < 3) throw new Error("no SpC sections in MHRA PDF");
 
-  // Recover real PDF tables (Jina flattens them to messy prose).
+  // Reuse PDF bytes already fetched for text (avoids a second Puter round-trip).
   try {
     const pdfBytes = await fetchMhraPdfBytes(pdfUrl, { timeoutMs: 28000 });
     const matrices = await extractTablesFromPdfBytes(pdfBytes);

@@ -112,12 +112,12 @@ import {
   renderSmpcDocument,
   renderSmpcSearchResults,
   searchSmpc,
-} from "./smpc.js?v=20260912o";
+} from "./smpc.js?v=20260912p";
 import {
   getLastTranslationEngine,
   translateSmpcSections,
-} from "./smpc-translate.js?v=20260912o";
-import { downloadSmpcDocxPair } from "./smpc-docx.js?v=20260912o";
+} from "./smpc-translate.js?v=20260912p";
+import { downloadSmpcDocxPair } from "./smpc-docx.js?v=20260912p";
 import {
   CERT_BODIES,
   bindCertificationResults,
