@@ -7,6 +7,12 @@
  * Sites without CORS are loaded through public readers/proxies with fallbacks.
  */
 
+import {
+  restoreSpcTablesInMarkdown,
+  extractTablesFromPdfBytes,
+  injectTablesIntoSections,
+} from "./smpc-tables.js";
+
 const OPENFDA_LABEL = "https://api.fda.gov/drug/label.json";
 const OPENFDA_NDC = "https://api.fda.gov/drug/ndc.json";
 const DAILYMED_SPLS = "https://dailymed.nlm.nih.gov/dailymed/services/v2/spls.json";
@@ -245,8 +251,9 @@ function enrichSectionContent(raw, baseUrl = DAILYMED_BASE) {
     return { text: stripTags(html), html };
   }
 
-  // Markdown / Jina path
-  let md = source
+  // Markdown / Jina path — recover flattened SpC tables before rendering.
+  let md = restoreSpcTablesInMarkdown(source);
+  md = md
     .replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_, alt, src) => {
       const abs = absolutizeUrl(String(src || "").trim(), baseUrl);
       if (!abs) return "";
@@ -2154,6 +2161,67 @@ function parseUkSpcPlainSections(markdown) {
   return sections.filter((section) => section.text.length >= 2 || /^\d+\.\d+/.test(section.title));
 }
 
+/** Fetch MHRA PDF bytes for table extraction (Puter → direct). */
+async function fetchMhraPdfBytes(pdfUrl, { timeoutMs = 25000 } = {}) {
+  const target = String(pdfUrl || "").trim();
+  if (!target) throw new Error("missing pdf url");
+
+  const asPdfBytes = (buffer) => {
+    const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+    if (bytes.length < 100) throw new Error("not a PDF");
+    const magic = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
+    if (magic !== "%PDF") throw new Error("not a PDF");
+    return bytes;
+  };
+
+  const tryPuter = async () => {
+    const { loadPuter } = await import("./puter-auth.js");
+    const puter = await loadPuter();
+    if (!puter?.net?.fetch) throw new Error("puter.net unavailable");
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const response = await puter.net.fetch(target, {
+        method: "GET",
+        signal: ctrl.signal,
+        headers: { Accept: "application/pdf,*/*" },
+        redirect: "follow",
+      });
+      if (!response?.ok) throw new Error(`HTTP ${response?.status || "?"}`);
+      return asPdfBytes(await response.arrayBuffer());
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const tryDirect = async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const response = await fetch(target, {
+        method: "GET",
+        signal: ctrl.signal,
+        cache: "no-store",
+        headers: { Accept: "application/pdf,*/*" },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return asPdfBytes(await response.arrayBuffer());
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  try {
+    return await tryPuter();
+  } catch (puterError) {
+    try {
+      return await tryDirect();
+    } catch {
+      throw puterError instanceof Error ? puterError : new Error(String(puterError));
+    }
+  }
+}
+
 async function hydrateMhraPdfDoc(doc) {
   const pdfUrl = String(doc.pdfUrl || doc.url || "").trim();
   if (!pdfUrl) throw new Error("missing MHRA PDF url");
@@ -2177,6 +2245,17 @@ async function hydrateMhraPdfDoc(doc) {
     if (generic.length > sections.length) sections = generic;
   }
   if (sections.length < 3) throw new Error("no SpC sections in MHRA PDF");
+
+  // Recover real PDF tables (Jina flattens them to messy prose).
+  try {
+    const pdfBytes = await fetchMhraPdfBytes(pdfUrl, { timeoutMs: 28000 });
+    const matrices = await extractTablesFromPdfBytes(pdfBytes);
+    if (matrices.length) {
+      sections = injectTablesIntoSections(sections, matrices);
+    }
+  } catch {
+    /* Heuristic MedDRA tables from markdown still apply via enrichSectionContent */
+  }
 
   return {
     ...doc,

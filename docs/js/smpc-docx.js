@@ -1,16 +1,24 @@
+/**
+ * SmPC DOCX export (EN, AR, and bilingual EN+AR).
+ * Builds real Word tables from section HTML and strips illegal XML chars
+ * so bilingual files open cleanly in Word/LibreOffice.
+ */
+
+import { sanitizeXmlText } from "./smpc-tables.js";
+
 const DOCX_URL = "https://cdn.jsdelivr.net/npm/docx@8.5.0/+esm";
 const FILESAVER_URL = "https://cdn.jsdelivr.net/npm/file-saver@2.0.5/+esm";
 
 const FONT = "Times New Roman";
-const SIZE_12 = 24; // docx half-points
+const SIZE_12 = 24; // half-points
 const DOUBLE_LINE = { line: 480, lineRule: "auto" };
 
-let docxModule = null;
+let docxMod = null;
 let saveAsFn = null;
 
 async function getDocx() {
-  if (!docxModule) docxModule = await import(DOCX_URL);
-  return docxModule;
+  if (!docxMod) docxMod = await import(DOCX_URL);
+  return docxMod;
 }
 
 async function getSaveAs() {
@@ -31,71 +39,228 @@ function safeFilename(name) {
   );
 }
 
-function plainFromSection(section) {
-  const html = String(section?.html || "");
-  if (html) {
-    return html
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/p>/gi, "\n")
-      .replace(/<\/tr>/gi, "\n")
-      .replace(/<\/(td|th)>/gi, " | ")
-      .replace(/<img[^>]*alt=["']([^"']*)["'][^>]*>/gi, "[Image: $1]")
-      .replace(/<img[^>]*>/gi, "[Image]")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/[ \t]+\n/g, "\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .replace(/[ \t]{2,}/g, " ")
-      .trim();
+function cleanText(value) {
+  return sanitizeXmlText(String(value ?? ""))
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function decodeEntities(value) {
+  return String(value || "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#(\d+);/g, (_, n) => {
+      const code = Number(n);
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : "";
+    });
+}
+
+function htmlTableToMatrix(tableHtml) {
+  const rows = [];
+  const rowRe = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rowMatch;
+  while ((rowMatch = rowRe.exec(tableHtml))) {
+    const cells = [];
+    const cellRe = /<(td|th)\b[^>]*>([\s\S]*?)<\/\1>/gi;
+    let cellMatch;
+    while ((cellMatch = cellRe.exec(rowMatch[1]))) {
+      cells.push(
+        cleanText(
+          decodeEntities(
+            cellMatch[2]
+              .replace(/<br\s*\/?>/gi, "\n")
+              .replace(/<[^>]+>/g, " ")
+              .replace(/\s+/g, " ")
+          )
+        )
+      );
+    }
+    if (cells.length) rows.push(cells);
   }
-  return String(section?.text || "").trim();
+  const width = Math.max(0, ...rows.map((r) => r.length));
+  return rows.map((r) => {
+    const copy = [...r];
+    while (copy.length < width) copy.push("");
+    return copy;
+  });
 }
 
-function paraOpts(isRtl, extra = {}) {
-  return {
-    bidirectional: isRtl,
-    spacing: { ...DOUBLE_LINE, after: 120 },
-    ...extra,
-  };
+function parseSectionBlocks(section) {
+  const html = String(section?.html || "").trim();
+  if (!html) {
+    const plain = cleanText(section?.text || "");
+    return plain
+      ? plain
+          .split(/\n+/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => ({ type: "p", text: cleanText(line) }))
+      : [];
+  }
+
+  const blocks = [];
+  for (const part of html.split(/(<table\b[\s\S]*?<\/table>)/gi)) {
+    if (!part) continue;
+    if (/^<table\b/i.test(part)) {
+      const matrix = htmlTableToMatrix(part);
+      if (matrix.length >= 2) blocks.push({ type: "table", rows: matrix });
+      else {
+        const fallback = cleanText(decodeEntities(part.replace(/<[^>]+>/g, " ")));
+        if (fallback) blocks.push({ type: "p", text: fallback });
+      }
+      continue;
+    }
+    const text = cleanText(
+      decodeEntities(
+        part
+          .replace(/<br\s*\/?>/gi, "\n")
+          .replace(/<\/p>/gi, "\n")
+          .replace(/<\/div>/gi, "\n")
+          .replace(/<\/li>/gi, "\n")
+          .replace(/<li[^>]*>/gi, "• ")
+          .replace(/<[^>]+>/g, " ")
+      )
+    );
+    for (const line of text.split(/\n+/).map((l) => l.trim()).filter(Boolean)) {
+      blocks.push({ type: "p", text: cleanText(line) });
+    }
+  }
+  return blocks;
 }
 
-function textRun(text, { bold = false, italics = false } = {}) {
-  return {
-    text: String(text || ""),
+function textRun(TextRun, text, { bold = false, italics = false, rtl = false } = {}) {
+  return new TextRun({
+    text: cleanText(text),
     bold,
     italics,
     font: FONT,
     size: SIZE_12,
-  };
+    rightToLeft: rtl,
+  });
 }
 
-async function buildChildren({
-  Document,
+function paragraph(
   Paragraph,
   TextRun,
-  HeadingLevel,
-  AlignmentType,
-  title,
-  language,
-  sections,
-  meta,
-  bilingualSections,
-}) {
-  const isRtl = language === "ar";
-  const align = isRtl ? AlignmentType.RIGHT : AlignmentType.LEFT;
-  const children = [];
-
-  const pushPara = (opts, runs) => {
-    const rtl = opts.bidirectional ?? isRtl;
-    children.push(
-      new Paragraph({
-        ...opts,
-        alignment: opts.alignment ?? (rtl ? AlignmentType.RIGHT : AlignmentType.LEFT),
-        bidirectional: rtl,
-        spacing: opts.spacing || { ...DOUBLE_LINE, after: 120 },
-        children: runs.map((run) => new TextRun(run)),
-      })
-    );
+  text,
+  { rtl = false, bold = false, heading = null, after = 120 } = {}
+) {
+  const opts = {
+    bidirectional: rtl,
+    alignment: rtl ? "right" : "left",
+    spacing: { ...DOUBLE_LINE, after },
+    children: [textRun(TextRun, text, { bold, rtl })],
   };
+  if (heading) opts.heading = heading;
+  return new Paragraph(opts);
+}
+
+function docxTable(api, matrix, { rtl = false } = {}) {
+  const { Table, TableRow, TableCell, Paragraph, TextRun, WidthType, BorderStyle } = api;
+  if (!matrix || matrix.length < 2) return null;
+  const cols = Math.max(...matrix.map((r) => r.length));
+  if (cols < 1) return null;
+  const colWidth = Math.max(900, Math.floor(9000 / cols));
+  const border = { style: BorderStyle.SINGLE, size: 4, color: "666666" };
+  const borders = { top: border, bottom: border, left: border, right: border };
+
+  return new Table({
+    width: { size: Math.min(9000, colWidth * cols), type: WidthType.DXA },
+    columnWidths: Array.from({ length: cols }, () => colWidth),
+    rows: matrix.map((row, rowIndex) => {
+      const cells = [...row];
+      while (cells.length < cols) cells.push("");
+      return new TableRow({
+        children: cells.map(
+          (cell) =>
+            new TableCell({
+              borders,
+              width: { size: colWidth, type: WidthType.DXA },
+              children: [
+                new Paragraph({
+                  bidirectional: rtl,
+                  alignment: rtl ? "right" : "left",
+                  spacing: { ...DOUBLE_LINE, after: 40 },
+                  children: [textRun(TextRun, cell || " ", { bold: rowIndex === 0, rtl })],
+                }),
+              ],
+            })
+        ),
+      });
+    }),
+  });
+}
+
+function appendBlocks(children, api, blocks, { rtl = false } = {}) {
+  const { Paragraph, TextRun } = api;
+  for (const block of blocks || []) {
+    if (block.type === "table") {
+      const table = docxTable(api, block.rows, { rtl });
+      if (table) {
+        children.push(table);
+        children.push(new Paragraph({ text: "", spacing: { after: 160 } }));
+      }
+      continue;
+    }
+    if (!block.text) continue;
+    children.push(paragraph(Paragraph, TextRun, block.text, { rtl, after: 120 }));
+  }
+}
+
+function pairBilingualSections(englishSections = [], arabicSections = []) {
+  const arByKey = new Map((arabicSections || []).map((s) => [s.key, s]));
+  return (englishSections || []).map((en) => {
+    const ar = arByKey.get(en.key);
+    return {
+      enTitle: cleanText(en.title || ""),
+      enBlocks: parseSectionBlocks(en),
+      arTitle: cleanText(ar?.title || en.title || ""),
+      arBlocks: ar ? parseSectionBlocks(ar) : [],
+    };
+  });
+}
+
+export async function buildSmpcDocx({
+  title,
+  language = "en",
+  sections = [],
+  meta = {},
+  bilingualSections = null,
+} = {}) {
+  const {
+    Document,
+    Packer,
+    Paragraph,
+    TextRun,
+    HeadingLevel,
+    Table,
+    TableRow,
+    TableCell,
+    WidthType,
+    BorderStyle,
+  } = await getDocx();
+
+  const api = {
+    Paragraph,
+    TextRun,
+    HeadingLevel,
+    Table,
+    TableRow,
+    TableCell,
+    WidthType,
+    BorderStyle,
+  };
+
+  const rtlDefault = language === "ar";
+  const children = [];
 
   const docTitle =
     language === "bilingual"
@@ -104,22 +269,21 @@ async function buildChildren({
         ? "نشرة خصائص المنتج (SmPC) — ترجمة عربية"
         : "Summary of Product Characteristics (SmPC)";
 
-  pushPara(
-    {
+  children.push(
+    paragraph(Paragraph, TextRun, docTitle, {
+      rtl: language === "ar",
+      bold: true,
       heading: HeadingLevel.HEADING_1,
-      alignment: language === "ar" ? AlignmentType.RIGHT : AlignmentType.LEFT,
-      bidirectional: language === "ar",
-      spacing: { ...DOUBLE_LINE, after: 200 },
-    },
-    [textRun(docTitle, { bold: true })]
+      after: 200,
+    })
   );
-
-  pushPara(
-    paraOpts(language === "ar", {
+  children.push(
+    paragraph(Paragraph, TextRun, title || "", {
+      rtl: language === "ar",
+      bold: true,
       heading: HeadingLevel.HEADING_2,
-      spacing: { ...DOUBLE_LINE, after: 160 },
-    }),
-    [textRun(title || "", { bold: true })]
+      after: 160,
+    })
   );
 
   const metaLines =
@@ -142,86 +306,44 @@ async function buildChildren({
           ];
 
   for (const line of metaLines.filter(Boolean)) {
-    pushPara(paraOpts(language === "ar"), [textRun(line, { italics: true })]);
+    children.push(paragraph(Paragraph, TextRun, line, { rtl: language === "ar", after: 80 }));
   }
-
   children.push(new Paragraph({ text: "", spacing: { ...DOUBLE_LINE, after: 120 } }));
 
   if (language === "bilingual" && bilingualSections?.length) {
     for (const pair of bilingualSections) {
-      pushPara(
-        {
+      children.push(
+        paragraph(Paragraph, TextRun, pair.enTitle || "Section", {
+          bold: true,
           heading: HeadingLevel.HEADING_1,
-          alignment: AlignmentType.LEFT,
-          bidirectional: false,
-          spacing: { ...DOUBLE_LINE, after: 160 },
-        },
-        [textRun(pair.enTitle || "Section", { bold: true })]
+          after: 140,
+        })
       );
-      for (const para of String(pair.enText || "").split(/\n+/)) {
-        if (!para.trim()) continue;
-        pushPara(paraOpts(false), [textRun(para.trim())]);
-      }
-
-      pushPara(
-        {
+      appendBlocks(children, api, pair.enBlocks, { rtl: false });
+      children.push(
+        paragraph(Paragraph, TextRun, pair.arTitle || pair.enTitle || "قسم", {
+          rtl: true,
+          bold: true,
           heading: HeadingLevel.HEADING_2,
-          alignment: AlignmentType.RIGHT,
-          bidirectional: true,
-          spacing: { ...DOUBLE_LINE, after: 160 },
-        },
-        [textRun(pair.arTitle || pair.enTitle || "قسم", { bold: true })]
+          after: 140,
+        })
       );
-      for (const para of String(pair.arText || "").split(/\n+/)) {
-        if (!para.trim()) continue;
-        pushPara(paraOpts(true), [textRun(para.trim())]);
-      }
-
-      children.push(new Paragraph({ text: "", spacing: { ...DOUBLE_LINE, after: 200 } }));
+      appendBlocks(children, api, pair.arBlocks, { rtl: true });
+      children.push(new Paragraph({ text: "", spacing: { after: 200 } }));
     }
   } else {
     for (const section of sections || []) {
-      pushPara(
-        {
+      children.push(
+        paragraph(Paragraph, TextRun, section.title || "", {
+          rtl: rtlDefault,
+          bold: true,
           heading: HeadingLevel.HEADING_2,
-          alignment: align,
-          bidirectional: isRtl,
-          spacing: { ...DOUBLE_LINE, after: 160 },
-        },
-        [textRun(section.title || "", { bold: true })]
+          after: 140,
+        })
       );
-
-      const body = plainFromSection(section);
-      for (const para of body.split(/\n+/)) {
-        if (!para.trim()) continue;
-        pushPara(paraOpts(isRtl), [textRun(para.trim())]);
-      }
+      appendBlocks(children, api, parseSectionBlocks(section), { rtl: rtlDefault });
     }
   }
-
-  return children;
-}
-
-export async function buildSmpcDocx({
-  title,
-  language = "en",
-  sections = [],
-  meta = {},
-  bilingualSections = null,
-} = {}) {
-  const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = await getDocx();
-  const children = await buildChildren({
-    Document,
-    Paragraph,
-    TextRun,
-    HeadingLevel,
-    AlignmentType,
-    title,
-    language,
-    sections,
-    meta,
-    bilingualSections,
-  });
 
   const doc = new Document({
     styles: {
@@ -252,35 +374,15 @@ export async function buildSmpcDocx({
         },
       ],
     },
-    sections: [
-      {
-        properties: {},
-        children,
-      },
-    ],
+    sections: [{ properties: {}, children: children.filter(Boolean) }],
   });
 
   return Packer.toBlob(doc);
 }
 
-function pairBilingualSections(englishSections = [], arabicSections = []) {
-  const arByKey = new Map((arabicSections || []).map((s) => [s.key, s]));
-  const pairs = [];
-  for (const en of englishSections || []) {
-    const ar = arByKey.get(en.key);
-    pairs.push({
-      enTitle: en.title || "",
-      enText: plainFromSection(en),
-      arTitle: ar?.title || en.title || "",
-      arText: ar ? plainFromSection(ar) : "",
-    });
-  }
-  return pairs;
-}
-
 /**
  * Download SmPC DOCX files.
- * mode "both" → one bilingual EN+AR document (Times New Roman 12pt, double spaced).
+ * bilingual:true → one EN+AR document (Times New Roman 12pt, double spaced).
  */
 export async function downloadSmpcDocxPair({
   title,
@@ -299,6 +401,13 @@ export async function downloadSmpcDocxPair({
       bilingualSections: pairBilingualSections(englishSections, arabicSections),
       meta,
     });
+    if (!blob || blob.size < 2000) {
+      throw new Error("تعذّر إنشاء ملف DOCX الثنائي (الملف فارغ أو تالف).");
+    }
+    const head = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+    if (!(head[0] === 0x50 && head[1] === 0x4b)) {
+      throw new Error("ملف DOCX الثنائي تالف (توقيع ZIP غير صالح).");
+    }
     saveAs(blob, `${base}-SmPC-EN-AR.docx`);
     return;
   }

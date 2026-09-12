@@ -3614,23 +3614,46 @@ html[data-theme="dark"] .fb-card:hover {
 
 .smpc-section-body.smpc-section-rich {
   white-space: normal;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overflow-wrap: normal;
 }
 
 .smpc-section-rich table,
 .smpc-section-rich .smpc-table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
   border-collapse: collapse;
   margin: 0.75rem 0;
   font-size: 0.88rem;
   direction: ltr;
   text-align: left;
+  table-layout: auto;
 }
 
 .smpc-section-rich th,
 .smpc-section-rich td {
   border: 1px solid var(--line);
-  padding: 0.35rem 0.5rem;
+  padding: 0.45rem 0.65rem;
   vertical-align: top;
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: manual;
+  white-space: normal;
+  min-width: 5.5rem;
+  max-width: 28rem;
+}
+
+.smpc-section-rich th:first-child,
+.smpc-section-rich td:first-child {
+  min-width: 9rem;
+}
+
+.smpc-section-rich th:nth-child(2),
+.smpc-section-rich td:nth-child(2) {
+  min-width: 6.5rem;
+  white-space: nowrap;
 }
 
 .smpc-section-rich th {
