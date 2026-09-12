@@ -12,7 +12,7 @@ const OPENFDA_NDC = "https://api.fda.gov/drug/ndc.json";
 const DAILYMED_SPLS = "https://dailymed.nlm.nih.gov/dailymed/services/v2/spls.json";
 const JINA_PREFIX = "https://r.jina.ai/";
 const ALLORIGINS_RAW = "https://api.allorigins.win/raw?url=";
-const PROXY_PREF_KEY = "smpc_proxy_pref_v4";
+const PROXY_PREF_KEY = "smpc_proxy_pref_v5";
 
 /** Serialize Puter networking so the Wisp/WebSocket can finish connecting. */
 let puterFetchQueue = Promise.resolve();
@@ -373,22 +373,34 @@ async function fetchViaPuter(url, { timeoutMs = 22000 } = {}) {
   return queued;
 }
 
+function isUkEmcHost(url) {
+  try {
+    return /(^|\.)medicines\.org\.uk$/i.test(new URL(url).hostname);
+  } catch {
+    return /medicines\.org\.uk/i.test(String(url || ""));
+  }
+}
+
+function jinaReaderUrl(target) {
+  return `${JINA_PREFIX}${String(target || "").trim()}`;
+}
+
 function buildProxyAttempts(target) {
   const attempts = [];
-  // Jina usually works for eMC markdown; race a couple of URL variants quickly.
+  // Browser → Jina (often blocked by extensions/CSP, but cheap to try).
   for (const variant of buildJinaTargets(target).slice(0, 2)) {
     attempts.push({
       name: "jina",
       timeoutMs: 12000,
-      run: () => fetchWithTimeout(`${JINA_PREFIX}${variant}`, { timeoutMs: 12000 }),
+      run: () => fetchWithTimeout(jinaReaderUrl(variant), { timeoutMs: 12000 }),
     });
   }
   attempts.push({
     name: "corsproxy-io",
-    timeoutMs: 10000,
+    timeoutMs: 9000,
     run: () =>
       fetchWithTimeout(`https://corsproxy.io/?${encodeURIComponent(target)}`, {
-        timeoutMs: 10000,
+        timeoutMs: 9000,
       }),
   });
   attempts.push({
@@ -421,34 +433,59 @@ function acceptRemoteText(text) {
   return text;
 }
 
-async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 16000 } = {}) {
+/**
+ * Fetch a remote page without CORS.
+ *
+ * Puter's network often cannot resolve medicines.org.uk ("unreachable destination host"),
+ * while the browser often cannot call r.jina.ai (Failed to fetch). The reliable path for
+ * eMC is Puter → Jina → medicines.org.uk (double hop).
+ */
+async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = {}) {
   const target = String(url || "").trim();
   if (!target) throw new Error("رابط المصدر فارغ.");
-
-  // preferHtml is retained for callers, but we never send custom headers:
-  // browser CORS preflight on X-Return-Format was a common "Failed to fetch" cause.
   void preferHtml;
 
   const errors = [];
   const pref = preferredProxyName();
-  const budget = Math.max(8000, Math.min(timeoutMs, 16000));
+  const budget = Math.max(9000, Math.min(timeoutMs, 20000));
+  const ukEmc = isUkEmcHost(target);
 
   const attempts = [];
+
+  // 1) Puter → Jina first for UK eMC (and as a strong general fallback).
   if (pref !== "skip-puter") {
-    attempts.push({
-      name: "puter",
-      run: async () => acceptRemoteText(await fetchViaPuter(target, { timeoutMs: Math.min(budget, 12000) })),
-    });
+    const jinaTargets = buildJinaTargets(target).slice(0, 2);
+    for (const variant of jinaTargets) {
+      attempts.push({
+        name: "puter-jina",
+        run: async () =>
+          acceptRemoteText(
+            await fetchViaPuter(jinaReaderUrl(variant), {
+              timeoutMs: Math.min(budget, ukEmc ? 16000 : 14000),
+            })
+          ),
+      });
+    }
+    // Direct Puter→site only for non-eMC hosts (eMC is unreachable from Puter's network).
+    if (!ukEmc) {
+      attempts.push({
+        name: "puter",
+        run: async () =>
+          acceptRemoteText(await fetchViaPuter(target, { timeoutMs: Math.min(budget, 12000) })),
+      });
+    }
   }
+
   for (const attempt of buildProxyAttempts(target)) {
     attempts.push(attempt);
   }
+
   if (pref) {
     attempts.sort((a, b) => Number(b.name.startsWith(pref)) - Number(a.name.startsWith(pref)));
   }
 
-  // Race Puter + public proxies together so a slow/unavailable Puter cannot stall eMC search.
-  const racePool = attempts.slice(0, 4);
+  // Race the best candidates in parallel.
+  const racePool = attempts.slice(0, ukEmc ? 3 : 4);
   try {
     const winner = await Promise.any(
       racePool.map(async (attempt) => {
@@ -464,7 +501,7 @@ async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 16000 } = 
     errors.push(`proxy-race: ${details}`);
   }
 
-  for (const attempt of attempts.slice(4)) {
+  for (const attempt of attempts.slice(racePool.length)) {
     try {
       const text = acceptRemoteText(await attempt.run());
       rememberProxy(attempt.name);
@@ -1342,9 +1379,10 @@ function parseEmcSearch(markdownOrHtml, { limit = 8 } = {}) {
   const seen = new Set();
 
   const patterns = [
-    /\[([^\]]+?)\]\((https?:\/\/www\.medicines\.org\.uk\/emc\/product\/(\d+)\/smpc)\)/gi,
-    /href="(https?:\/\/www\.medicines\.org\.uk\/emc\/product\/(\d+)\/smpc)"[^>]*>\s*([^<]{3,160})/gi,
-    /https?:\/\/www\.medicines\.org\.uk\/emc\/product\/(\d+)\/smpc/gi,
+    /\[([^\]]+?)\]\((https?:\/\/(?:www\.)?medicines\.org\.uk\/emc\/product\/(\d+)(?:\/smpc)?)\)/gi,
+    /href="(https?:\/\/(?:www\.)?medicines\.org\.uk\/emc\/product\/(\d+)(?:\/smpc)?)"[^>]*>\s*([^<]{3,160})/gi,
+    /https?:\/\/(?:www\.)?medicines\.org\.uk\/emc\/product\/(\d+)(?:\/smpc)?/gi,
+    /\/emc\/product\/(\d+)(?:\/smpc)?/gi,
   ];
 
   for (const re of patterns) {
@@ -1371,6 +1409,7 @@ function parseEmcSearch(markdownOrHtml, { limit = 8 } = {}) {
       if (!title || /smpc|pil|patient|leaflet|click here/i.test(title)) {
         title = `eMC product ${productId}`;
       }
+      url = `https://www.medicines.org.uk/emc/product/${productId}/smpc`;
       found.push({
         id: `emc:${productId}`,
         source: "emc",
@@ -1392,12 +1431,49 @@ function parseEmcSearch(markdownOrHtml, { limit = 8 } = {}) {
   return found;
 }
 
+async function searchEmcViaWebFallback(query, { limit = 8, filters = {} } = {}) {
+  const f = normalizeSmpcFilters(filters);
+  const q = appendFilterKeywords(query, f);
+  if (!q) return [];
+
+  // DuckDuckGo HTML is reachable from Puter even when medicines.org.uk is not.
+  const ddgUrls = [
+    `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`site:medicines.org.uk/emc/product ${q} smpc`)}`,
+    `https://duckduckgo.com/html/?q=${encodeURIComponent(`site:www.medicines.org.uk/emc/product ${q} smpc`)}`,
+  ];
+
+  for (const ddgUrl of ddgUrls) {
+    try {
+      // Prefer Puter→Jina for DDG too (browser often blocks scraping hosts).
+      let payload = "";
+      try {
+        payload = await fetchViaPuter(jinaReaderUrl(ddgUrl), { timeoutMs: 16000 });
+      } catch {
+        const hit = await fetchRemotePage(ddgUrl, { timeoutMs: 14000 });
+        payload = hit.text;
+      }
+      const results = parseEmcSearch(payload, { limit: Math.max(limit * 2, 12) }).filter((doc) =>
+        matchesClientFilters(doc, f)
+      );
+      if (results.length) {
+        rememberProxy("puter-jina-ddg");
+        return results.slice(0, limit);
+      }
+    } catch {
+      /* try next */
+    }
+  }
+  return [];
+}
+
 async function searchEmcSource(query, { limit = 8, filters = {} } = {}) {
   const f = normalizeSmpcFilters(filters);
   const searchQ = appendFilterKeywords(query, f);
   if (!searchQ) return [];
 
-  // One primary URL first — retrying www/non-www through dead proxies made search feel stuck.
+  // Warm Puter early — eMC needs Puter→Jina because Puter cannot reach medicines.org.uk directly.
+  import("./puter-auth.js").then((mod) => mod.loadPuter?.()).catch(() => {});
+
   const searchUrls = [
     `https://www.medicines.org.uk/emc/search?q=${encodeURIComponent(searchQ)}&docType=smpc`,
     `https://www.medicines.org.uk/emc/search?q=${encodeURIComponent(searchQ)}`,
@@ -1406,22 +1482,30 @@ async function searchEmcSource(query, { limit = 8, filters = {} } = {}) {
   const errors = [];
   for (const searchUrl of searchUrls) {
     try {
-      const { text: payload } = await fetchRemotePage(searchUrl, {
+      const { text: payload, via } = await fetchRemotePage(searchUrl, {
         preferHtml: false,
-        timeoutMs: 14000,
+        timeoutMs: 18000,
       });
       const results = parseEmcSearch(payload, { limit: Math.max(limit * 2, 12) }).filter((doc) =>
         matchesClientFilters(doc, f)
       );
-      if (results.length) return results.slice(0, limit);
-      errors.push(`${searchUrl}: no parseable products`);
+      if (results.length) {
+        rememberProxy(via);
+        return results.slice(0, limit);
+      }
+      errors.push(`${via || "fetch"}: no parseable products`);
     } catch (error) {
       errors.push(error?.message || String(error));
-      // If Puter/proxies are down, don't burn another full timeout on a near-identical URL.
-      if (/puter:|proxy-race:|تعذّر جلب الصفحة/i.test(String(error?.message || error))) {
-        break;
-      }
     }
+  }
+
+  // Last resort: discover eMC product IDs via DuckDuckGo (Puter-reachable).
+  try {
+    const fallback = await searchEmcViaWebFallback(searchQ, { limit, filters: f });
+    if (fallback.length) return fallback;
+    errors.push("ddg-fallback: no parseable products");
+  } catch (error) {
+    errors.push(`ddg-fallback: ${error?.message || error}`);
   }
 
   throw new Error(
