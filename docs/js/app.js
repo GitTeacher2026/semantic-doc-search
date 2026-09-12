@@ -124,7 +124,7 @@ import {
   downloadCertificatePdf,
   renderCertificateDetail,
 } from "./certification.js?v=20260910g";
-import { isMegaConnected, ensureMegaAutoLogin, getMegaEmail, getLastMegaAuthError, loginToMega, logoutMega, needsMegaAuthRecovery, markMegaAuthFailed } from "./mega-auth.js";
+import { isMegaConnected, getMegaEmail, getLastMegaAuthError, loginToMega, logoutMega, needsMegaAuthRecovery, markMegaAuthFailed, clearMegaAuthFailed } from "./mega-auth.js";
 import {
   downloadMegaFile,
   deleteMegaFile,
@@ -148,7 +148,6 @@ import {
   resendPendingSignupEmails,
 } from "./auth-service.js";
 import { initAdminMembers } from "./admin-members.js";
-import { initAdminChangelog } from "./admin-changelog.js";
 import { getVaultPassword } from "./auth-page.js";
 import { initPasswordToggles } from "./password-toggle.js";
 import {
@@ -214,7 +213,6 @@ let pendingMoveTargetCategory = null;
 let authApi = null;
 let currentUser = null;
 let adminMembersApi = null;
-let adminChangelogApi = null;
 
 const appView = document.getElementById("app-view");
 const logoutBtn = document.getElementById("logout-btn");
@@ -499,8 +497,7 @@ function updateMegaConnectPanel() {
 
   const connected = isMegaConnected();
   const recovery = needsMegaAuthRecovery();
-  const showPanel = recovery || !connected;
-  megaConnectPanel.classList.toggle("hidden", !showPanel);
+  megaConnectPanel.classList.remove("hidden");
   megaConnectPanel.classList.toggle("is-recovery", recovery);
 
   const lastError = getLastMegaAuthError();
@@ -509,17 +506,19 @@ function updateMegaConnectPanel() {
     recovery && lastError ? lastError : ""
   );
 
-  megaConnectTitle.textContent = connected ? "تخزين MEGA" : "الاتصال بـ MEGA";
+  megaConnectTitle.textContent = "تخزين MEGA (اختياري)";
   if (connected) {
     megaConnectHint.textContent = `متصل — ${getMegaEmail()}`;
   } else if (recovery && lastError) {
-    megaConnectHint.textContent = "فشل الاتصال التلقائي. أعد إدخال بيانات MEGA.";
+    megaConnectHint.textContent = "فشل الاتصال. أعد إدخال بيانات MEGA إن أردت الرفع أو مزامنة الملفات.";
   } else {
-    megaConnectHint.textContent = "سجّل الدخول لرفع الملفات ومزامنة المكتبة.";
+    megaConnectHint.textContent =
+      "اختياري — اتصل فقط عند الرفع أو عرض ملفات MEGA. يمكنك استخدام البحث وباقي الأقسام دون اتصال.";
   }
 
   megaConnectBtn.textContent = connected ? "إعادة الاتصال" : "الاتصال بـ MEGA";
   megaDisconnectBtn?.classList.toggle("hidden", !connected);
+  document.getElementById("mega-login-fields")?.classList.toggle("hidden", connected);
 
   if (megaEmailInput && !megaEmailInput.value) {
     megaEmailInput.value = getMegaEmail();
@@ -551,11 +550,11 @@ async function handleMegaConnect() {
 function handleMegaDisconnect() {
   logoutMega({ clearSession: true });
   if (megaPasswordInput) megaPasswordInput.value = "";
-  markMegaAuthFailed("تم قطع اتصال MEGA. أعد إدخال بيانات الاعتماد للمتابعة.");
+  clearMegaAuthFailed();
   updateMegaConnectPanel();
   updateUploadAccess();
-  setStatus("تم قطع اتصال MEGA.", true);
-  setTimeout(() => setStatus("", false), 2000);
+  setStatus("تم قطع اتصال MEGA. يمكنك إعادة الاتصال لاحقاً عند الحاجة.", true);
+  setTimeout(() => setStatus("", false), 2500);
 }
 
 function updatePuterConnectPanel() {
@@ -679,7 +678,7 @@ function updateUploadAccess() {
       uploadDestinationHint.textContent =
         needsMegaAuthRecovery() && getLastMegaAuthError()
           ? `MEGA: ${getLastMegaAuthError()}`
-          : "يلزم الاتصال بـ MEGA — أدخل بيانات الاعتماد أعلاه.";
+          : "للرفع إلى MEGA: اتصل أعلاه عند الحاجة (اختياري).";
     }
   }
   updateIngestButtonState();
@@ -3440,29 +3439,12 @@ export async function startApp({ user, auth }) {
     isAdmin: () => authApi?.isAdmin?.(),
   });
 
-  adminChangelogApi = initAdminChangelog({
-    getActor: () => currentUser,
-    onStatus: setStatus,
-    isAdmin: () => authApi?.isAdmin?.(),
-    isMember: () => Boolean(currentUser),
-  });
-
-  try {
-    setStatus("جارٍ الاتصال بـ MEGA…");
-    await ensureMegaAutoLogin();
-  } catch (error) {
-    markMegaAuthFailed(error.message);
-    setStatus(`تعذّر الاتصال بـ MEGA: ${error.message}`, true);
-  }
-
   try {
     await hydrateDocuments(sessionPassword);
     applySearchOptionsToForm(loadSearchOptions());
     updateOcrDialogPanel();
     updateUploadAccess();
-    if (isMegaConnected()) {
-      setStatus("", false);
-    }
+    setStatus("", false);
     showView();
   } catch (error) {
     updateMegaConnectPanel();

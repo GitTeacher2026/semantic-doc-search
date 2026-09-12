@@ -66,8 +66,7 @@ export function getLastMegaAuthError() {
 }
 
 export function needsMegaAuthRecovery() {
-  if (authNeedsRecovery) return true;
-  return !isMegaConnected() && isMegaConfigured();
+  return authNeedsRecovery;
 }
 
 export function markMegaAuthFailed(message) {
@@ -134,20 +133,5 @@ export async function loginToMega(email, password, { persistSession = false } = 
     throw error;
   } finally {
     loginPromise = null;
-  }
-}
-
-export async function ensureMegaAutoLogin() {
-  if (isMegaConnected()) return megaStorage;
-
-  const creds = resolveMegaCredentials();
-  if (!creds.email || !creds.password) return null;
-
-  try {
-    const shouldPersist = hasMegaSessionCredentials();
-    return await loginToMega(creds.email, creds.password, { persistSession: shouldPersist });
-  } catch (error) {
-    markMegaAuthFailed(error.message);
-    throw error;
   }
 }
