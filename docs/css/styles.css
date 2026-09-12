@@ -3668,7 +3668,6 @@ body.smpc-viewer-open {
   line-height: 1.55;
 }
 
-.cert-standards-fieldset,
 .cert-bodies-fieldset {
   margin: 0.9rem 0;
   padding: 0.85rem 0.9rem;
@@ -3676,7 +3675,6 @@ body.smpc-viewer-open {
   border-radius: 14px;
 }
 
-.cert-standards-fieldset legend,
 .cert-bodies-fieldset legend {
   padding-inline: 0.35rem;
   font-weight: 600;
