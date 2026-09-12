@@ -433,12 +433,63 @@ function acceptRemoteText(text) {
   return text;
 }
 
+const waybackSnapshotCache = new Map();
+
+/** Prefer raw archived payload (no Wayback toolbar). */
+function toWaybackIdentityUrl(snapshotUrl) {
+  return String(snapshotUrl || "")
+    .replace(/^http:\/\//i, "https://")
+    .replace(/\/web\/(\d{8,14})(?:[a-z]{1,3}_?)?\//i, "/web/$1id_/");
+}
+
+/**
+ * Resolve a Wayback Machine snapshot for a live URL.
+ * archive.org/wayback/available supports browser CORS (*).
+ */
+async function resolveWaybackSnapshot(url, { timeoutMs = 9000 } = {}) {
+  const target = String(url || "").trim();
+  if (!target) throw new Error("empty url");
+  if (waybackSnapshotCache.has(target)) return waybackSnapshotCache.get(target);
+
+  const endpoints = [
+    `https://archive.org/wayback/available?url=${encodeURIComponent(target)}`,
+    `https://archive.org/wayback/available?url=${encodeURIComponent(target.replace("https://www.", "https://"))}`,
+  ];
+
+  let lastError = null;
+  for (const endpoint of endpoints) {
+    try {
+      const raw = await fetchWithTimeout(endpoint, { timeoutMs });
+      const data = JSON.parse(raw);
+      const snap = data?.archived_snapshots?.closest?.url;
+      if (!snap) throw new Error("no snapshot");
+      const identity = toWaybackIdentityUrl(snap);
+      waybackSnapshotCache.set(target, identity);
+      return identity;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  // Last resort: let Wayback redirect to the closest capture.
+  const fallback = `https://web.archive.org/web/${target}`;
+  waybackSnapshotCache.set(target, fallback);
+  if (lastError) {
+    /* still usable via redirect */
+  }
+  return fallback;
+}
+
+async function fetchViaPuterWayback(target, { timeoutMs = 18000 } = {}) {
+  const snap = await resolveWaybackSnapshot(target, { timeoutMs: Math.min(9000, timeoutMs) });
+  return acceptRemoteText(await fetchViaPuter(snap, { timeoutMs }));
+}
+
 /**
  * Fetch a remote page without CORS.
  *
- * Puter's network often cannot resolve medicines.org.uk ("unreachable destination host"),
- * while the browser often cannot call r.jina.ai (Failed to fetch). The reliable path for
- * eMC is Puter → Jina → medicines.org.uk (double hop).
+ * medicines.org.uk is unreachable from Puter and blocked (403) via Puter→Jina.
+ * For UK eMC we fetch Wayback snapshots through Puter instead.
  */
 async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = {}) {
   const target = String(url || "").trim();
@@ -447,27 +498,39 @@ async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = 
 
   const errors = [];
   const pref = preferredProxyName();
-  const budget = Math.max(9000, Math.min(timeoutMs, 20000));
+  const budget = Math.max(9000, Math.min(timeoutMs, 22000));
   const ukEmc = isUkEmcHost(target);
 
   const attempts = [];
 
-  // 1) Puter → Jina first for UK eMC (and as a strong general fallback).
   if (pref !== "skip-puter") {
-    const jinaTargets = buildJinaTargets(target).slice(0, 2);
-    for (const variant of jinaTargets) {
+    if (ukEmc) {
+      // Primary: Puter → Wayback (archive.org is reachable; medicines.org.uk is not /
+      // Puter→Jina returns HTTP 403 for eMC).
       attempts.push({
-        name: "puter-jina",
-        run: async () =>
-          acceptRemoteText(
-            await fetchViaPuter(jinaReaderUrl(variant), {
-              timeoutMs: Math.min(budget, ukEmc ? 16000 : 14000),
-            })
-          ),
+        name: "puter-wayback",
+        run: async () => fetchViaPuterWayback(target, { timeoutMs: Math.min(budget, 20000) }),
       });
-    }
-    // Direct Puter→site only for non-eMC hosts (eMC is unreachable from Puter's network).
-    if (!ukEmc) {
+      if (!/\/print\/?$/i.test(target)) {
+        const printUrl = `${target.replace(/\/$/, "")}/print`;
+        attempts.push({
+          name: "puter-wayback-print",
+          run: async () => fetchViaPuterWayback(printUrl, { timeoutMs: Math.min(budget, 20000) }),
+        });
+      }
+    } else {
+      const jinaTargets = buildJinaTargets(target).slice(0, 2);
+      for (const variant of jinaTargets) {
+        attempts.push({
+          name: "puter-jina",
+          run: async () =>
+            acceptRemoteText(
+              await fetchViaPuter(jinaReaderUrl(variant), {
+                timeoutMs: Math.min(budget, 14000),
+              })
+            ),
+        });
+      }
       attempts.push({
         name: "puter",
         run: async () =>
@@ -476,19 +539,33 @@ async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = 
     }
   }
 
-  for (const attempt of buildProxyAttempts(target)) {
-    attempts.push(attempt);
+  if (ukEmc) {
+    // Live medicines.org.uk proxies almost always 403/timeout — skip them.
+    // Try Wayback via Puter first (above), then one non-Puter Wayback attempt.
+    attempts.push({
+      name: "allorigins-wayback",
+      run: async () => {
+        const snap = await resolveWaybackSnapshot(target, { timeoutMs: 8000 });
+        const raw = await fetchWithTimeout(
+          `https://api.allorigins.win/get?url=${encodeURIComponent(snap)}`,
+          { timeoutMs: Math.min(budget, 12000) }
+        );
+        if (/^\s*</.test(raw)) throw new Error("allorigins html error");
+        const data = JSON.parse(raw);
+        return acceptRemoteText(String(data?.contents || ""));
+      },
+    });
+  } else {
+    for (const attempt of buildProxyAttempts(target)) {
+      attempts.push(attempt);
+    }
   }
 
   if (pref && !ukEmc) {
     attempts.sort((a, b) => Number(b.name.startsWith(pref)) - Number(a.name.startsWith(pref)));
-  } else if (ukEmc) {
-    // Prefer Puter→Jina for UK hosts; ignore stale corsproxy preferences that only 403.
-    attempts.sort((a, b) => Number(b.name.startsWith("puter")) - Number(a.name.startsWith("puter")));
   }
 
-  // Race the best candidates in parallel.
-  const racePool = attempts.slice(0, ukEmc ? 3 : 4);
+  const racePool = attempts.slice(0, ukEmc ? 2 : 4);
   try {
     const winner = await Promise.any(
       racePool.map(async (attempt) => {
@@ -1840,31 +1917,38 @@ async function hydrateEmcFull(doc) {
     doc.url || (doc.productId ? `https://www.medicines.org.uk/emc/product/${doc.productId}/smpc` : "");
   if (!baseUrl) return doc;
 
+  // Warm Puter before eMC hydration — Wayback path depends on it.
+  try {
+    const { loadPuter } = await import("./puter-auth.js");
+    await loadPuter();
+  } catch {
+    /* continue; allorigins-wayback may still help */
+  }
+
   const productId = doc.productId || (baseUrl.match(/\/product\/(\d+)/) || [])[1] || "";
   const candidates = [
     productId ? `https://www.medicines.org.uk/emc/product/${productId}/smpc/print` : "",
+    productId ? `https://www.medicines.org.uk/emc/product/${productId}/smpc` : "",
     baseUrl.endsWith("/print") ? baseUrl : `${baseUrl.replace(/\/$/, "")}/print`,
     baseUrl,
-    baseUrl.replace("https://www.medicines.org.uk", "https://medicines.org.uk"),
   ].filter((value, index, arr) => value && arr.indexOf(value) === index);
 
   let lastError = null;
   for (const candidate of candidates) {
     try {
-      const { text, via } = await fetchRemotePage(candidate, { preferHtml: false, timeoutMs: 20000 });
+      const { text, via } = await fetchRemotePage(candidate, { preferHtml: false, timeoutMs: 22000 });
       if (isBlockedOrMissing(text)) {
         lastError = new Error("blocked");
         continue;
       }
 
       let sections = [];
-      if (/<details[\s>]|spcWrapper|Section4|therapeutic indications/i.test(text)) {
+      if (/<details[\s>]|spcWrapper|Section4|therapeutic indications|name of the medicinal product/i.test(text)) {
         sections = parseEmcHtml(text);
       }
       if (sections.length < 3) {
         sections = parseEmcMarkdownSections(text);
       }
-      // Print pages are often plain HTML headings without <details>.
       if (sections.length < 3) {
         sections = parseMarkdownSections(text, { minBody: 20, requireNumbered: false, baseUrl: candidate });
       }
@@ -1902,32 +1986,43 @@ async function hydrateEmcFull(doc) {
   }
 
   // Soft fallback: keep the eMC result but fill body from OpenFDA/DailyMed by name.
-  try {
-    const hint = String(doc.title || "")
-      .replace(/\beMC product\s+\d+\b/ig, "")
-      .replace(/\bSmPC\b/ig, "")
-      .trim();
-    if (hint.length >= 3) {
-      const batch = await fetchOpenFda(buildQueryVariants(hint)[0] || hint, 1);
-      if (batch[0]) {
+  const hintSources = [
+    doc.title,
+    String(doc.title || "").split(/[-–|:(]/)[0],
+    String(doc.title || "").replace(/\d+\s*mg|\d+\s*%/gi, " "),
+  ]
+    .map((value) =>
+      String(value || "")
+        .replace(/\beMC product\s+\d+\b/gi, "")
+        .replace(/\bSmPC\b/gi, "")
+        .replace(/\bSummary of Product Characteristics\b/gi, "")
+        .replace(/\s+/g, " ")
+        .trim()
+    )
+    .filter((value, index, arr) => value.length >= 3 && arr.indexOf(value) === index);
+
+  for (const hint of hintSources) {
+    try {
+      for (const expr of buildQueryVariants(hint).slice(0, 3)) {
+        const batch = await fetchOpenFda(expr, 2);
+        if (!batch[0]) continue;
         const fda = normalizeOpenFda(batch[0]);
-        if (fda.sections?.length) {
-          return {
-            ...doc,
-            title: doc.title || fda.title,
-            sections: fda.sections,
-            englishText: fda.englishText,
-            hydrated: true,
-            needsFullLabel: false,
-            sourceLabel: "eMC link · body via OpenFDA/DailyMed",
-            fetchVia: "openfda-fallback",
-            url: baseUrl,
-          };
-        }
+        if (!fda.sections?.length) continue;
+        return {
+          ...doc,
+          title: doc.title || fda.title,
+          sections: fda.sections,
+          englishText: fda.englishText,
+          hydrated: true,
+          needsFullLabel: false,
+          sourceLabel: "eMC link · body via OpenFDA/DailyMed",
+          fetchVia: "openfda-fallback",
+          url: baseUrl,
+        };
       }
+    } catch {
+      /* try next hint */
     }
-  } catch {
-    /* ignore */
   }
 
   throw new Error(`تعذّر تحميل SmPC من eMC. ${lastError?.message || ""}`.trim());
