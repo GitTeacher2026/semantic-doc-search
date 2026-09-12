@@ -59,8 +59,8 @@
     "cert-search-intro": {
       "id": "cert-search-intro",
       "text": "ابحث مباشرة عبر أشهر هيئات التصديق (SGS، TÜV Rheinland/Certipedia، Bureau Veritas، Intertek، BSI، TÜV SÜD، DNV، LRQA، DEKRA، UKAS)",
-      "visible": true,
-      "updatedAt": "2026-09-12T08:08:18.275Z",
+      "visible": false,
+      "updatedAt": "2026-09-12T08:41:12.552Z",
       "updatedBy": "admin"
     }
   }
