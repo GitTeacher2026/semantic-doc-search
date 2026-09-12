@@ -1,5 +1,12 @@
 {
   "entries": {
+    "smpc-search-intro": {
+      "id": "smpc-search-intro",
+      "text": "اختر المصدر ثم ابحث بالمادة الفعّالة أو الاسم التجاري.",
+      "visible": true,
+      "updatedAt": "2026-09-12T08:39:57.803Z",
+      "updatedBy": "admin"
+    },
     "smpc-filters-hint": {
       "id": "smpc-filters-hint",
       "text": "",
