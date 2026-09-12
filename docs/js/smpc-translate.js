@@ -1,38 +1,39 @@
 /**
- * SmPC EN→AR translation (browser, no API key required by default):
- * 1) Google Translate public endpoints (fast, large chunks)
- * 2) Lingva public mirrors (Google proxy — usually fast)
- * 3) MyMemory last resort only (slow / small chunks)
- * 4) Optional self-hosted LibreTranslate when configured
+ * SmPC EN→AR translation priority (MyMemory is last resort only):
+ * 1) Google Translate via CORS proxy (browser-safe)
+ * 2) Google via Puter.net.fetch when Puter is available
+ * 3) Direct Google endpoints
+ * 4) Lingva mirrors
+ * 5) Puter AI chat
+ * 6) Optional LibreTranslate
+ * 7) MyMemory
  */
 
 import { LIBRETRANSLATE_API_KEY, LIBRETRANSLATE_URL } from "./config.js";
 
-const GOOGLE_ENDPOINTS = [
-  // gtx single — often CORS-open
-  (q) =>
-    `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ar&dt=t&q=${encodeURIComponent(q)}`,
-  // clients5 dict-chrome
-  (q) =>
-    `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=en&tl=ar&q=${encodeURIComponent(q)}`,
-];
+const GOOGLE_GTX =
+  "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ar&dt=t&q=";
+const GOOGLE_CLIENTS5 =
+  "https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=en&tl=ar&q=";
 
 const LINGVA_HOSTS = [
   "lingva.ml",
   "lingva.thedaviddelta.com",
-  "translate.plausibility.cloud",
   "lingva.lunar.icu",
   "lingva.garudalinux.org",
+  "translate.plausibility.cloud",
 ];
 
 const MYMEMORY_ENDPOINT = "https://api.mymemory.translated.net/get";
 
-const GOOGLE_CHUNK = 1600;
-const LINGVA_CHUNK = 1200;
-const MYMEMORY_CHUNK = 350;
+const GOOGLE_CHUNK = 1500;
+const PUTER_AI_CHUNK = 2200;
+const MYMEMORY_CHUNK = 320;
 const LIBRE_CHUNK = 1400;
-const SECTION_CONCURRENCY = 3;
-const MAX_RETRIES = 3;
+const SECTION_CONCURRENCY = 2;
+const MAX_RETRIES = 2;
+
+let lastEngineUsed = "";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -41,14 +42,18 @@ function sleep(ms) {
 function cleanTranslated(text) {
   return String(text || "")
     .replace(/[\u200e\u200f\u202a-\u202e]/g, "")
+    .replace(/^(here is the translation[:\s]*|translation[:\s]*|العربية[:\s]*)/i, "")
     .trim();
+}
+
+export function getLastTranslationEngine() {
+  return lastEngineUsed || "";
 }
 
 function chunkText(text, size) {
   const source = String(text || "").trim();
   if (!source) return [];
   if (source.length <= size) return [source];
-
   const parts = [];
   let start = 0;
   while (start < source.length) {
@@ -61,7 +66,7 @@ function chunkText(text, size) {
         window.lastIndexOf(".\n"),
         window.lastIndexOf(" ")
       );
-      if (breakAt > size * 0.4) end = start + breakAt + 1;
+      if (breakAt > size * 0.35) end = start + breakAt + 1;
     }
     const piece = source.slice(start, end).trim();
     if (piece) parts.push(piece);
@@ -73,7 +78,6 @@ function chunkText(text, size) {
 function extractGoogleTranslation(data) {
   if (typeof data === "string") return cleanTranslated(data);
   if (Array.isArray(data)) {
-    // gtx: [[["ar","en",...],...],...]
     if (Array.isArray(data[0])) {
       if (Array.isArray(data[0][0])) {
         return cleanTranslated(
@@ -83,7 +87,6 @@ function extractGoogleTranslation(data) {
             .join("")
         );
       }
-      // dict-chrome: [["ar","en"], ...] or ["ar","en"]
       if (typeof data[0][0] === "string") {
         return cleanTranslated(data.map((row) => (Array.isArray(row) ? row[0] : row)).join(""));
       }
@@ -96,25 +99,107 @@ function extractGoogleTranslation(data) {
   return "";
 }
 
-async function translateWithGoogle(text) {
-  const errors = [];
-  for (const buildUrl of GOOGLE_ENDPOINTS) {
+async function parseGoogleResponse(response, label) {
+  if (response.status === 429) throw new Error(`${label} (429)`);
+  if (!response.ok) throw new Error(`${label} (${response.status})`);
+  const raw = await response.text();
+  if (/^\s*</.test(raw) || /sorry|automated queries|captcha/i.test(raw.slice(0, 500))) {
+    throw new Error(`${label} blocked`);
+  }
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    throw new Error(`${label} non-JSON`);
+  }
+  const translated = extractGoogleTranslation(data);
+  if (!translated) throw new Error(`${label} أعاد ترجمة فارغة.`);
+  return translated;
+}
+
+async function getPuterIfReady() {
+  try {
+    const { loadPuter, ensurePuterConnected, isPuterConnected, isPuterPreconfigured } = await import(
+      "./puter-auth.js"
+    );
+    // net.fetch often works without a signed-in session — prefer loading Puter first.
     try {
-      const response = await fetch(buildUrl(text));
-      if (response.status === 429) throw new Error("Google Translate (429)");
-      if (!response.ok) throw new Error(`Google Translate (${response.status})`);
-      const raw = await response.text();
-      if (/^\s*</.test(raw) || /sorry|automated queries|captcha/i.test(raw.slice(0, 400))) {
-        throw new Error("Google Translate blocked");
+      const puter = await loadPuter();
+      if (puter?.net?.fetch || puter?.ai?.chat) {
+        if (isPuterConnected() || isPuterPreconfigured()) {
+          return await ensurePuterConnected().catch(() => puter);
+        }
+        return puter;
       }
-      let data;
+    } catch {
+      /* fall through */
+    }
+    if (!isPuterConnected() && !isPuterPreconfigured()) return null;
+    return await ensurePuterConnected();
+  } catch {
+    return null;
+  }
+}
+
+async function translateWithGoogleViaPuter(text) {
+  const puter = await getPuterIfReady();
+  if (!puter?.net?.fetch) throw new Error("Puter net غير متاح.");
+
+  const urls = [
+    `${GOOGLE_GTX}${encodeURIComponent(text)}`,
+    `${GOOGLE_CLIENTS5}${encodeURIComponent(text)}`,
+  ];
+  const errors = [];
+  for (const url of urls) {
+    try {
+      const response = await puter.net.fetch(url);
+      const translated = await parseGoogleResponse(response, "Google/Puter");
+      lastEngineUsed = "Google (via Puter)";
+      return translated;
+    } catch (error) {
+      errors.push(error.message || String(error));
+    }
+  }
+  throw new Error(errors.filter(Boolean).join(" · ") || "Google/Puter failed");
+}
+
+/** Browser-safe Google Translate via public CORS proxies (avoids MyMemory as default). */
+async function translateWithGoogleProxied(text) {
+  const targets = [
+    `${GOOGLE_GTX}${encodeURIComponent(text)}`,
+    `${GOOGLE_CLIENTS5}${encodeURIComponent(text)}`,
+  ];
+  const wrap = (url) => [
+    `https://corsproxy.org/?${encodeURIComponent(url)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  ];
+  const errors = [];
+  for (const target of targets) {
+    for (const proxied of wrap(target)) {
       try {
-        data = JSON.parse(raw);
-      } catch {
-        throw new Error("Google Translate non-JSON");
+        const response = await fetch(proxied);
+        const translated = await parseGoogleResponse(response, "Google/proxy");
+        lastEngineUsed = "Google Translate";
+        return translated;
+      } catch (error) {
+        errors.push(error.message || String(error));
       }
-      const translated = extractGoogleTranslation(data);
-      if (!translated) throw new Error("Google Translate أعاد ترجمة فارغة.");
+    }
+  }
+  throw new Error(errors.filter(Boolean).slice(0, 4).join(" · ") || "Google proxy failed");
+}
+
+async function translateWithGoogleDirect(text) {
+  const urls = [
+    `${GOOGLE_GTX}${encodeURIComponent(text)}`,
+    `${GOOGLE_CLIENTS5}${encodeURIComponent(text)}`,
+  ];
+  const errors = [];
+  for (const url of urls) {
+    try {
+      const response = await fetch(url);
+      const translated = await parseGoogleResponse(response, "Google");
+      lastEngineUsed = "Google Translate";
       return translated;
     } catch (error) {
       errors.push(error.message || String(error));
@@ -127,13 +212,13 @@ async function translateWithLingva(text) {
   const errors = [];
   for (const host of LINGVA_HOSTS) {
     try {
-      const url = `https://${host}/api/v1/en/ar/${encodeURIComponent(text)}`;
-      const response = await fetch(url);
+      const response = await fetch(`https://${host}/api/v1/en/ar/${encodeURIComponent(text)}`);
       if (response.status === 429) throw new Error(`Lingva/${host} (429)`);
       if (!response.ok) throw new Error(`Lingva/${host} (${response.status})`);
       const data = await response.json();
       const translated = cleanTranslated(data.translation || data.text || "");
-      if (!translated) throw new Error(`Lingva/${host} أعاد ترجمة فارغة.`);
+      if (!translated) throw new Error(`Lingva/${host} فارغ`);
+      lastEngineUsed = `Lingva (${host})`;
       return translated;
     } catch (error) {
       errors.push(error.message || String(error));
@@ -142,72 +227,33 @@ async function translateWithLingva(text) {
   throw new Error(errors.filter(Boolean).join(" · ") || "Lingva failed");
 }
 
-async function translateWithMyMemory(text) {
-  // Keep queries short — MyMemory free tier rejects long chunks and throttles hard.
-  const url =
-    `${MYMEMORY_ENDPOINT}?q=${encodeURIComponent(text)}` +
-    `&langpair=${encodeURIComponent("en|ar")}`;
-  const response = await fetch(url);
-  if (response.status === 429) throw new Error("MyMemory (429)");
-  if (!response.ok) throw new Error(`MyMemory (${response.status})`);
-  const data = await response.json();
-  if (Number(data.responseStatus) === 429) throw new Error("MyMemory (429)");
-  if (Number(data.responseStatus) !== 200) {
-    throw new Error(data.responseDetails || "فشلت ترجمة MyMemory.");
-  }
-  const translated = cleanTranslated(data.responseData?.translatedText);
-  if (!translated) throw new Error("MyMemory أعاد ترجمة فارغة.");
-  if (/QUERY LENGTH LIMIT EXCEEDED/i.test(translated)) {
-    throw new Error("تجاوز حد طول النص في MyMemory.");
-  }
-  if (/MYMEMORY WARNING/i.test(translated)) {
-    throw new Error("MyMemory: تم تجاوز الحصة اليومية.");
-  }
+async function translateWithPuterAi(text) {
+  const puter = await getPuterIfReady();
+  if (!puter?.ai?.chat) throw new Error("Puter AI غير متاح.");
+  const prompt =
+    "Translate this pharmaceutical SmPC English text to Modern Standard Arabic. " +
+    "Preserve drug names, doses, units, section numbers, and table layout. " +
+    "Return Arabic only, no preface.\n\n" +
+    text;
+  const result = await puter.ai
+    .chat(prompt)
+    .catch(async () => puter.ai.chat(prompt, { model: "gpt-4o-mini" }));
+  const translated = cleanTranslated(
+    typeof result === "string"
+      ? result
+      : result?.message?.content || result?.toString?.() || ""
+  );
+  if (!translated) throw new Error("Puter AI أعاد ترجمة فارغة.");
+  lastEngineUsed = "Puter AI";
   return translated;
-}
-
-
-async function translateWithPuter(text) {
-  try {
-    const { ensurePuterConnected, isPuterConnected, isPuterPreconfigured } = await import("./puter-auth.js");
-    if (!isPuterConnected() && !isPuterPreconfigured()) {
-      throw new Error("Puter AI غير متصل.");
-    }
-    const puter = await ensurePuterConnected();
-    if (!puter?.ai?.chat) throw new Error("puter.ai.chat غير متاح.");
-    const prompt =
-      "Translate the following pharmaceutical SmPC English text to Modern Standard Arabic. " +
-      "Keep drug names, doses, units, section numbers, and table structure. " +
-      "Return Arabic translation only, with no preface.\n\n" +
-      text;
-    const result = await puter.ai.chat(prompt, { model: "gpt-5o-mini" }).catch(async () =>
-      puter.ai.chat(prompt)
-    );
-    const translated = cleanTranslated(
-      typeof result === "string"
-        ? result
-        : result?.message?.content || result?.toString?.() || ""
-    );
-    if (!translated) throw new Error("Puter AI أعاد ترجمة فارغة.");
-    return translated;
-  } catch (error) {
-    throw new Error(error?.message || "Puter AI translation failed");
-  }
 }
 
 async function translateWithLibreTranslate(text) {
   const base = String(LIBRETRANSLATE_URL || "").replace(/\/$/, "");
   if (!base) throw new Error("LibreTranslate غير مضبوط.");
-
-  const payload = {
-    q: text,
-    source: "en",
-    target: "ar",
-    format: "text",
-  };
+  const payload = { q: text, source: "en", target: "ar", format: "text" };
   const key = String(LIBRETRANSLATE_API_KEY || "").trim();
   if (key) payload.api_key = key;
-
   const response = await fetch(`${base}/translate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -221,6 +267,28 @@ async function translateWithLibreTranslate(text) {
   const data = await response.json();
   const translated = cleanTranslated(data.translatedText);
   if (!translated) throw new Error("LibreTranslate أعاد ترجمة فارغة.");
+  lastEngineUsed = "LibreTranslate";
+  return translated;
+}
+
+async function translateWithMyMemory(text) {
+  const url =
+    `${MYMEMORY_ENDPOINT}?q=${encodeURIComponent(text)}` +
+    `&langpair=${encodeURIComponent("en|ar")}`;
+  const response = await fetch(url);
+  if (response.status === 429) throw new Error("MyMemory (429)");
+  if (!response.ok) throw new Error(`MyMemory (${response.status})`);
+  const data = await response.json();
+  if (Number(data.responseStatus) === 429) throw new Error("MyMemory (429)");
+  if (Number(data.responseStatus) !== 200) {
+    throw new Error(data.responseDetails || "فشلت ترجمة MyMemory.");
+  }
+  const translated = cleanTranslated(data.responseData?.translatedText);
+  if (!translated) throw new Error("MyMemory أعاد ترجمة فارغة.");
+  if (/QUERY LENGTH LIMIT EXCEEDED|MYMEMORY WARNING/i.test(translated)) {
+    throw new Error("MyMemory: حد الطول/الحصة.");
+  }
+  lastEngineUsed = "MyMemory";
   return translated;
 }
 
@@ -234,7 +302,7 @@ async function withRetries(fn) {
       const msg = String(error?.message || error);
       const rateLimited = /\(429\)|quota|حصة/i.test(msg);
       if (!rateLimited && attempt >= 1) break;
-      await sleep(rateLimited ? 900 * (attempt + 1) ** 2 : 250 * (attempt + 1));
+      await sleep(rateLimited ? 800 * (attempt + 1) ** 2 : 200 * (attempt + 1));
     }
   }
   throw lastError || new Error("translator failed");
@@ -243,32 +311,32 @@ async function withRetries(fn) {
 async function translateChunkFast(text) {
   const errors = [];
   const libreConfigured = Boolean(String(LIBRETRANSLATE_URL || "").trim());
-  // Prefer fast public engines, then Puter AI (already configured for OCR), MyMemory last.
-  const order = libreConfigured
-    ? [
-        translateWithLibreTranslate,
-        translateWithGoogle,
-        translateWithLingva,
-        translateWithPuter,
-        translateWithMyMemory,
-      ]
-    : [
-        translateWithGoogle,
-        translateWithLingva,
-        translateWithPuter,
-        translateWithMyMemory,
-      ];
+  // Google (proxied) first so MyMemory is never the everyday engine in the browser.
+  const order = [
+    translateWithGoogleProxied,
+    translateWithGoogleViaPuter,
+    translateWithGoogleDirect,
+    translateWithLingva,
+    translateWithPuterAi,
+    ...(libreConfigured ? [translateWithLibreTranslate] : []),
+    translateWithMyMemory,
+  ];
 
   for (const fn of order) {
     try {
-      // MyMemory needs tiny chunks — if we reached it with a large piece, split further.
       if (fn === translateWithMyMemory && text.length > MYMEMORY_CHUNK) {
         const bits = chunkText(text, MYMEMORY_CHUNK);
         const out = [];
         for (let i = 0; i < bits.length; i += 1) {
           out.push(await withRetries(() => translateWithMyMemory(bits[i])));
-          if (i < bits.length - 1) await sleep(350);
+          if (i < bits.length - 1) await sleep(300);
         }
+        return out.join("\n\n").trim();
+      }
+      if (fn === translateWithPuterAi && text.length > PUTER_AI_CHUNK) {
+        const bits = chunkText(text, PUTER_AI_CHUNK);
+        const out = [];
+        for (const bit of bits) out.push(await withRetries(() => translateWithPuterAi(bit)));
         return out.join("\n\n").trim();
       }
       return await withRetries(() => fn(text));
@@ -280,20 +348,16 @@ async function translateChunkFast(text) {
 }
 
 async function translateLongText(text, { onStatus, label = "النص" } = {}) {
-  const libreConfigured = Boolean(String(LIBRETRANSLATE_URL || "").trim());
-  const size = libreConfigured ? LIBRE_CHUNK : GOOGLE_CHUNK;
+  const size = String(LIBRETRANSLATE_URL || "").trim() ? LIBRE_CHUNK : GOOGLE_CHUNK;
   const chunks = chunkText(text, size);
   if (!chunks.length) return "";
-
   const out = [];
   for (let i = 0; i < chunks.length; i += 1) {
     onStatus?.(
-      chunks.length > 1
-        ? `ترجمة ${label}… (${i + 1}/${chunks.length})`
-        : `ترجمة ${label}…`
+      chunks.length > 1 ? `ترجمة ${label}… (${i + 1}/${chunks.length})` : `ترجمة ${label}…`
     );
     out.push(await translateChunkFast(chunks[i]));
-    if (i < chunks.length - 1) await sleep(80);
+    if (i < chunks.length - 1) await sleep(60);
   }
   return out.join("\n\n").trim();
 }
@@ -318,6 +382,7 @@ const HEADING_GLOSSARY = {
   "5. Pharmacological properties": "5. الخصائص الدوائية",
   "6. Pharmaceutical particulars": "6. الخصائص الصيدلانية",
   "HIGHLIGHTS OF PRESCRIBING INFORMATION": "أبرز معلومات الوصفة",
+  "FULL PRESCRIBING INFORMATION": "معلومات الوصفة الكاملة",
   "BOXED WARNING": "تحذير مؤطر",
   "INDICATIONS AND USAGE": "الاستطبابات والاستعمال",
   "DOSAGE AND ADMINISTRATION": "الجرعة وطريقة الإعطاء",
@@ -333,8 +398,8 @@ const HEADING_GLOSSARY = {
   "NONCLINICAL TOXICOLOGY": "السموميات غير السريرية",
   "CLINICAL STUDIES": "دراسات سريرية",
   "HOW SUPPLIED": "كيفية التوفير",
+  "HOW SUPPLIED/STORAGE AND HANDLING": "التوفير / التخزين والمناولة",
   "PATIENT COUNSELING INFORMATION": "معلومات إرشاد المريض",
-  "DailyMed listing": "قائمة DailyMed",
 };
 
 function glossaryLookup(title) {
@@ -362,10 +427,7 @@ async function translateHeading(title, { onStatus } = {}) {
 }
 
 export function getTranslationEngineLabel() {
-  if (String(LIBRETRANSLATE_URL || "").trim()) {
-    return "LibreTranslate + Google + Lingva + Puter";
-  }
-  return "Google Translate + Lingva + Puter AI";
+  return "Google → Lingva → Puter AI → MyMemory (احتياطي)";
 }
 
 async function mapPool(items, concurrency, worker) {
@@ -378,52 +440,105 @@ async function mapPool(items, concurrency, worker) {
       results[index] = await worker(items[index], index);
     }
   }
-  const runners = Array.from({ length: Math.min(concurrency, items.length) }, () => run());
-  await Promise.all(runners);
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length || 1) }, () => run()));
   return results;
 }
 
+/** Translate visible text nodes inside HTML while keeping tags/attrs (tables + images). */
+async function translateRichHtml(html, { onStatus, label } = {}) {
+  const source = String(html || "").trim();
+  if (!source) return "";
+  const slots = [];
+  const masked = source.replace(/>([^<]+)</g, (full, text) => {
+    if (!/[A-Za-z\u0600-\u06FF]/.test(text) || !text.trim()) return full;
+    const id = slots.length;
+    slots.push(text);
+    return `>⟦T${id}⟧<`;
+  });
+  if (!slots.length) return source;
+
+  const joined = slots.map((s, i) => `[[${i}]]${s}`).join("\n\n");
+  const translatedBlob = await translateLongText(joined, { onStatus, label: label || "جدول" });
+  const map = new Map();
+  for (const piece of translatedBlob.split(/\n\n+/)) {
+    const m = piece.match(/^\[\[(\d+)\]\]([\s\S]*)$/);
+    if (m) map.set(Number(m[1]), cleanTranslated(m[2]));
+  }
+  // Fallback: sequential if markers lost
+  if (map.size < slots.length * 0.5) {
+    for (let i = 0; i < slots.length; i += 1) {
+      if (!map.has(i)) {
+        map.set(i, await translateLongText(slots[i], { onStatus, label: `${label || "خلية"} ${i + 1}` }));
+      }
+    }
+  }
+
+  return masked.replace(/⟦T(\d+)⟧/g, (_, id) => map.get(Number(id)) || slots[Number(id)] || "");
+}
+
 export async function translateSmpcSections(sections, { onStatus } = {}) {
-  onStatus?.(`محرك الترجمة: ${getTranslationEngineLabel()} (MyMemory احتياطي فقط)`);
+  lastEngineUsed = "";
+  onStatus?.(`محرك الترجمة: ${getTranslationEngineLabel()}`);
+  await getPuterIfReady();
+
   const total = sections.length;
   let completed = 0;
-  let skippedEmpty = 0;
 
   const translated = await mapPool(sections, SECTION_CONCURRENCY, async (section, i) => {
     const body = String(section.text || "").trim();
+    const html = String(section.html || "").trim();
     const arabicTitle = await translateHeading(section.title, { onStatus });
 
-    if (!body || /^\(see subsections below\.?\)$/i.test(body) || body.length < 8) {
-      skippedEmpty += 1;
+    if ((!body || body.length < 8) && !html) {
       completed += 1;
-      onStatus?.(`ترجمة القسم ${completed} من ${total}…`);
+      onStatus?.(
+        `ترجمة القسم ${completed}/${total}…${lastEngineUsed ? ` [${lastEngineUsed}]` : ""}`
+      );
       return {
         key: section.key,
         title: arabicTitle,
-        text: body
-          ? await translateLongText(body, { label: `القسم ${i + 1}` }).catch(() => body)
-          : "",
+        text: "",
+        html: "",
       };
     }
 
-    const arabicText = await translateLongText(body, {
-      onStatus,
-      label: `القسم ${i + 1}/${total}`,
-    });
+    let arabicText = body;
+    if (body && body.length >= 8 && !/^\(see subsections below\.?\)$/i.test(body)) {
+      arabicText = await translateLongText(body, {
+        onStatus,
+        label: `القسم ${i + 1}/${total}`,
+      });
+    }
+
+    let arabicHtml = "";
+    if (html) {
+      try {
+        arabicHtml = await translateRichHtml(html, {
+          onStatus,
+          label: `تنسيق القسم ${i + 1}`,
+        });
+      } catch {
+        arabicHtml = html;
+      }
+    }
+
     completed += 1;
-    onStatus?.(`ترجمة القسم ${completed} من ${total}…`);
+    onStatus?.(
+      `ترجمة القسم ${completed}/${total}…${lastEngineUsed ? ` عبر ${lastEngineUsed}` : ""}`
+    );
     return {
       key: section.key,
       title: arabicTitle,
       text: arabicText,
+      html: arabicHtml,
     };
   });
 
-  if (skippedEmpty) {
-    onStatus?.(`اكتملت الترجمة (تُخطّي ${skippedEmpty} قسماً فارغاً/عناوين فقط).`);
-  } else {
-    onStatus?.("اكتملت الترجمة.");
-  }
+  onStatus?.(
+    lastEngineUsed
+      ? `اكتملت الترجمة (المحرك: ${lastEngineUsed}).`
+      : "اكتملت الترجمة."
+  );
   return translated;
 }
 

@@ -96,32 +96,170 @@ function slugify(value) {
     .replace(/^-|-$/g, "");
 }
 
-function stripTags(html) {
-  return String(html || "")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/?(table|thead|tbody|tfoot)[^>]*>/gi, "\n")
-    .replace(/<\/tr>/gi, "\n")
-    .replace(/<\/(td|th)>/gi, " | ")
-    .replace(/<(td|th)[^>]*>/gi, "")
-    .replace(/<img[^>]*alt=["']([^"']+)["'][^>]*>/gi, "\n[Image: $1]\n")
-    .replace(/<img[^>]*src=["']([^"']+)["'][^>]*>/gi, "\n[Image]\n")
-    .replace(/<img[^>]*>/gi, "\n[Image]\n")
-    .replace(/<figcaption[^>]*>([\s\S]*?)<\/figcaption>/gi, "\n($1)\n")
-    .replace(/<(figure|picture)[^>]*>/gi, "\n")
-    .replace(/<\/(figure|picture)>/gi, "\n")
-    .replace(/<\/(p|div|li|h\d|summary|section)>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
+const DAILYMED_BASE = "https://dailymed.nlm.nih.gov/";
+
+function decodeEntities(value) {
+  return String(value || "")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
+}
+
+function absolutizeUrl(url, baseUrl = DAILYMED_BASE) {
+  const raw = String(url || "").trim();
+  if (!raw || /^data:/i.test(raw)) return raw;
+  try {
+    return new URL(raw, baseUrl).href;
+  } catch {
+    return raw;
+  }
+}
+
+/** Plain text from HTML — used for search/translation, not for display of tables/images. */
+function stripTags(html) {
+  return decodeEntities(
+    String(html || "")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/tr>/gi, "\n")
+      .replace(/<\/(td|th)>/gi, " | ")
+      .replace(/<(td|th)[^>]*>/gi, "")
+      .replace(/<img[^>]*alt=["']([^"']+)["'][^>]*>/gi, "\n[Image: $1]\n")
+      .replace(/<img[^>]*>/gi, "\n[Image]\n")
+      .replace(/<\/(p|div|li|h\d|summary|section|table|thead|tbody|tfoot|figure|picture)>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+  )
     .replace(/\r/g, "")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/(?:\s*\|\s*){2,}/g, " | ")
     .trim();
+}
+
+function sanitizeRichHtml(html) {
+  return String(html || "")
+    .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button)[^>]*>/gi, "")
+    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/(href|src)\s*=\s*(["'])\s*javascript:[^"']*\2/gi, '$1="#"')
+    .replace(/\s{2,}/g, " ");
+}
+
+function rewriteImgTags(html, baseUrl) {
+  return String(html || "").replace(/<img\b([^>]*)>/gi, (_, attrs) => {
+    const srcMatch =
+      attrs.match(/\bsrc\s*=\s*["']([^"']+)["']/i) || attrs.match(/\bsrc\s*=\s*([^\s>]+)/i);
+    if (!srcMatch) return "";
+    const src = absolutizeUrl(srcMatch[1].replace(/^["']|["']$/g, ""), baseUrl);
+    if (!src || /^javascript:/i.test(src)) return "";
+    const altMatch = attrs.match(/\balt\s*=\s*["']([^"']*)["']/i);
+    const alt = altMatch ? altMatch[1] : "";
+    return `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" loading="lazy" referrerpolicy="no-referrer" />`;
+  });
+}
+
+function markdownTablesToHtml(text) {
+  const lines = String(text || "").split("\n");
+  const out = [];
+  let i = 0;
+  const isRow = (line) => /^\s*\|/.test(line);
+  const isSep = (line) => /^\s*\|?\s*:?-{3,}/.test(line);
+  const cells = (line) =>
+    line
+      .trim()
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map((cell) => cell.trim());
+
+  while (i < lines.length) {
+    if (isRow(lines[i]) && i + 1 < lines.length && isSep(lines[i + 1])) {
+      const rows = [];
+      while (i < lines.length && isRow(lines[i])) {
+        if (!isSep(lines[i])) rows.push(cells(lines[i]));
+        i += 1;
+      }
+      if (rows.length) {
+        const [header, ...body] = rows;
+        const thead = `<thead><tr>${header.map((c) => `<th>${escapeHtml(c)}</th>`).join("")}</tr></thead>`;
+        const tbody = body.length
+          ? `<tbody>${body
+              .map((row) => `<tr>${row.map((c) => `<td>${escapeHtml(c)}</td>`).join("")}</tr>`)
+              .join("")}</tbody>`
+          : "";
+        out.push(`<table class="smpc-table">${thead}${tbody}</table>`);
+      }
+      continue;
+    }
+    out.push(lines[i]);
+    i += 1;
+  }
+  return out.join("\n");
+}
+
+function paragraphizeMixed(content) {
+  return String(content || "")
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => {
+      if (/^<(?:table|img|ul|ol|h\d|div)\b/i.test(block)) return block;
+      if (/<(?:table|img)\b/i.test(block)) return block;
+      return `<p>${block.replace(/\n/g, "<br>")}</p>`;
+    })
+    .join("\n");
+}
+
+/** Build display HTML + plain text; keeps real tables and images. */
+function enrichSectionContent(raw, baseUrl = DAILYMED_BASE) {
+  let source = String(raw || "").replace(/\r/g, "");
+  if (!source.trim()) return { text: "", html: "" };
+
+  // Already HTML-heavy (OpenFDA / eMC / DailyMed HTML path)
+  if (/<(?:table|img|thead|tbody|tr|td|th)\b/i.test(source)) {
+    let html = rewriteImgTags(source, baseUrl);
+    html = html
+      .replace(/<\/?(html|head|body|section|article)[^>]*>/gi, "")
+      .replace(/<a\b[^>]*>/gi, "")
+      .replace(/<\/a>/gi, "");
+    // Keep table structure; drop other noisy wrappers lightly
+    html = sanitizeRichHtml(html);
+    if (!/<(?:p|br|table|img|ul|ol)\b/i.test(html)) {
+      html = paragraphizeMixed(html);
+    }
+    return { text: stripTags(html), html };
+  }
+
+  // Markdown / Jina path
+  let md = source
+    .replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_, alt, src) => {
+      const abs = absolutizeUrl(String(src || "").trim(), baseUrl);
+      if (!abs) return "";
+      return `\n<img src="${escapeHtml(abs)}" alt="${escapeHtml(alt || "")}" loading="lazy" referrerpolicy="no-referrer" />\n`;
+    })
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+
+  md = markdownTablesToHtml(md);
+  const hasRich = /<(?:table|img)\b/i.test(md);
+  const text = stripTags(md);
+  const html = hasRich ? sanitizeRichHtml(paragraphizeMixed(md)) : "";
+  return { text, html };
+}
+
+function makeSection(title, rawBody, index, baseUrl = DAILYMED_BASE) {
+  const { text, html } = enrichSectionContent(rawBody, baseUrl);
+  return {
+    key: sectionKey(title, index),
+    title: String(title || "").trim(),
+    text,
+    html,
+  };
 }
 
 function sectionKey(title, index) {
@@ -310,13 +448,17 @@ function isBlockedOrMissing(text) {
 
 function scoreLabelSections(sections) {
   if (!sections?.length) return 0;
-  const chars = sections.reduce((n, s) => n + String(s.text || "").length, 0);
+  const chars = sections.reduce(
+    (n, s) => n + String(s.text || "").length + String(s.html || "").length,
+    0
+  );
   const clinical = sections.filter((s) =>
     /indication|dosage|warning|adverse|interaction|contraindic|pharmacolog|overdose|description|clinical|composition|posology/i.test(
       s.title
     )
   ).length;
-  return sections.length * 10 + Math.min(chars, 200000) / 200 + clinical * 25;
+  const rich = sections.filter((s) => /<(?:table|img)\b/i.test(s.html || "")).length;
+  return sections.length * 10 + Math.min(chars, 400000) / 200 + clinical * 25 + rich * 50;
 }
 
 function finalizeDailyMedDoc(doc, sections, sourceNote) {
@@ -332,6 +474,104 @@ function finalizeDailyMedDoc(doc, sections, sourceNote) {
         ? `https://dailymed.nlm.nih.gov/dailymed/fda/fdaDrugXsl.cfm?setid=${doc.setId}&type=display`
         : doc.url,
   };
+}
+
+/** Prefer raw HTML proxies (skip Jina markdown) so tables/images survive. */
+async function fetchRemoteHtmlPrefer(url) {
+  const target = String(url || "").trim();
+  const attempts = [
+    {
+      name: "corsproxy-org",
+      run: () =>
+        fetchWithTimeout(`https://corsproxy.org/?${encodeURIComponent(target)}`, {
+          timeoutMs: 28000,
+        }),
+    },
+    {
+      name: "allorigins",
+      run: () =>
+        fetchWithTimeout(`${ALLORIGINS_RAW}${encodeURIComponent(target)}`, {
+          timeoutMs: 16000,
+        }),
+    },
+    {
+      name: "allorigins-json",
+      run: async () => {
+        const raw = await fetchWithTimeout(
+          `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`,
+          { timeoutMs: 16000 }
+        );
+        const data = JSON.parse(raw);
+        if (!data?.contents) throw new Error("empty");
+        return String(data.contents);
+      },
+    },
+  ];
+  for (const attempt of attempts) {
+    try {
+      const text = await attempt.run();
+      if (!text || text.length < 400) continue;
+      if (isBlockedOrMissing(text)) continue;
+      if (!/<(?:html|table|img|div|h[1-4])\b/i.test(text)) continue;
+      rememberProxy(attempt.name);
+      return { text, via: attempt.name };
+    } catch {
+      /* next */
+    }
+  }
+  return null;
+}
+
+function parseDailyMedHtmlSections(html, setId) {
+  const baseUrl = setId
+    ? `https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=${setId}`
+    : DAILYMED_BASE;
+  let content = String(html || "");
+  const start = content.search(
+    /<(?:div|section)[^>]*(?:id|class)=["'][^"']*(?:drug-information|spl|content|Section|main)[^"']*["'][^>]*>/i
+  );
+  if (start > 0) content = content.slice(start);
+  content = content
+    .split(/<(?:footer|nav)\b/i)[0]
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "");
+
+  const sections = [];
+  const headingRe = /<h([1-4])\b[^>]*>([\s\S]*?)<\/h\1>/gi;
+  const hits = [];
+  let match;
+  while ((match = headingRe.exec(content))) {
+    hits.push({ index: match.index, end: headingRe.lastIndex, level: Number(match[1]), rawTitle: match[2] });
+  }
+  if (hits.length < 3) {
+    // Fallback: class="Section" blocks
+    const sectionRe =
+      /<(?:div|section)[^>]*class=["'][^"']*Section[^"']*["'][^>]*>([\s\S]*?)(?=<(?:div|section)[^>]*class=["'][^"']*Section[^"']*["']|$)/gi;
+    let sm;
+    while ((sm = sectionRe.exec(content))) {
+      const block = sm[1];
+      const titleMatch = block.match(/<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/i);
+      const title = stripTags(titleMatch?.[1] || "").trim();
+      if (!title || title.length < 3) continue;
+      const bodyHtml = titleMatch ? block.slice(block.indexOf(titleMatch[0]) + titleMatch[0].length) : block;
+      sections.push(makeSection(title, bodyHtml, sections.length, baseUrl));
+    }
+    return sections.filter((s) => s.text.length >= 12 || s.html);
+  }
+
+  for (let i = 0; i < hits.length; i += 1) {
+    const title = stripTags(hits[i].rawTitle).trim();
+    if (!title || title.length < 2) continue;
+    if (
+      /^(skip to|table of contents|search|share|print|rss|disclaimer|contact us|version:)/i.test(title)
+    ) {
+      continue;
+    }
+    const bodyHtml = content.slice(hits[i].end, hits[i + 1]?.index ?? content.length);
+    const section = makeSection(title, bodyHtml, sections.length, baseUrl);
+    if (section.text.length >= 8 || section.html) sections.push(section);
+  }
+  return sections;
 }
 
 async function hydrateFromOpenFdaSetId(doc) {
@@ -414,29 +654,50 @@ async function hydrateDailyMedFull(doc) {
   ];
 
   let best = null;
+  const baseUrl = `https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=${doc.setId}`;
 
   for (const candidate of urls) {
     try {
+      // Prefer raw HTML so tables and product images are not flattened away.
+      const htmlHit = await fetchRemoteHtmlPrefer(candidate.url);
+      if (htmlHit?.text) {
+        let sections = parseDailyMedHtmlSections(htmlHit.text, doc.setId);
+        if (sections.length >= 4) {
+          const score = scoreLabelSections(sections) + 120;
+          if (!best || score > best.score) {
+            best = {
+              sections,
+              score,
+              label: `${candidate.label} HTML`,
+              url: candidate.url,
+            };
+          }
+          if (sections.length >= 10 && score > 900) break;
+          continue;
+        }
+      }
+
       const { text: markdown } = await fetchRemotePage(candidate.url);
       if (isBlockedOrMissing(markdown) || markdown.length < 1500) continue;
 
       let sections = parseMarkdownSections(markdown, {
-        minBody: 25,
-        requireNumbered: candidate.preferNumbered,
+        minBody: 8,
+        requireNumbered: false,
+        baseUrl,
       });
-      if (sections.length < 6) {
-        sections = parseMarkdownSections(markdown, { minBody: 25, requireNumbered: false });
+      if (sections.length < 4) {
+        sections = parseMarkdownSections(markdown, {
+          minBody: 8,
+          requireNumbered: candidate.preferNumbered,
+          baseUrl,
+        });
       }
-      sections = sections.filter(
-        (section) =>
-          section.text.length >= 40 ||
-          /\[Image:/i.test(section.text) ||
-          /\s\|\s/.test(section.text) ||
-          /^\d+(?:\.\d+)*\b/.test(section.title) ||
-          /indication|dosage|warning|adverse|interaction|description|clinical|contraindic|overdose|how supplied|storage|pregnancy|nursing|pediatric|geriatric|active ingredient|purpose|uses|directions|highlights|boxed|composition|pharmacolog/i.test(
-            section.title
-          )
-      );
+      // Keep nearly all real label sections — do not trim clinical bodies.
+      sections = sections.filter((section) => {
+        if (section.html) return true;
+        if (section.text.length >= 12) return true;
+        return /^\d+(?:\.\d+)*\b/.test(section.title);
+      });
 
       const score = scoreLabelSections(sections);
       if (!best || score > best.score) {
@@ -452,13 +713,15 @@ async function hydrateDailyMedFull(doc) {
     const htmlDoc = finalizeDailyMedDoc({ ...doc, url: best.url }, best.sections, best.label);
     const htmlScore = scoreLabelSections(htmlDoc.sections);
     const fdaScore = scoreLabelSections(fromFda?.sections);
-    // Prefer the richer body; if close, merge unique OpenFDA extras into HTML result.
-    if (fromFda?.sections?.length && fdaScore > htmlScore * 1.15) {
+    // Prefer DailyMed HTML/markdown whenever it is at least roughly as rich as OpenFDA.
+    if (fromFda?.sections?.length && fdaScore > htmlScore * 1.35 && htmlScore < 400) {
       return fromFda;
     }
     if (fromFda?.sections?.length) {
       const have = new Set(htmlDoc.sections.map((s) => s.title.toLowerCase()));
-      const extras = fromFda.sections.filter((s) => !have.has(String(s.title || "").toLowerCase()) && s.text?.length > 80);
+      const extras = fromFda.sections.filter(
+        (s) => !have.has(String(s.title || "").toLowerCase()) && (s.text?.length > 40 || s.html)
+      );
       if (extras.length) {
         const merged = [...htmlDoc.sections, ...extras];
         return finalizeDailyMedDoc({ ...doc, url: best.url }, merged, `${best.label} + OpenFDA`);
@@ -471,7 +734,10 @@ async function hydrateDailyMedFull(doc) {
   return doc;
 }
 
-function parseMarkdownSections(markdown, { minBody = 12, requireNumbered = false } = {}) {
+function parseMarkdownSections(
+  markdown,
+  { minBody = 12, requireNumbered = false, baseUrl = DAILYMED_BASE } = {}
+) {
   const text = String(markdown || "")
     .replace(/\r/g, "")
     .replace(/^Title:.*$/m, "")
@@ -482,7 +748,7 @@ function parseMarkdownSections(markdown, { minBody = 12, requireNumbered = false
   // Prefer the body that starts at the first real label/SmPC heading
   const startMatchers = [
     /(?:^|\n)#{1,4}\s+FULL PRESCRIBING INFORMATION\b[^\n]*/im,
-    /(?:^|\n)#{1,4}\s+\d{1,2}(?:\.\d+){0,3}\s+[A-Z][^\n[\]]{3,120}\s*$/m, // plain numbered heading (not TOC link)
+    /(?:^|\n)#{1,4}\s+\d{1,2}(?:\.\d+){0,3}\s+[A-Z][^\n[\]]{3,120}\s*$/m,
     /(?:^|\n)(#{1,4}\s+)?(BOXED WARNING[^\n]*)/im,
     /(?:^|\n)(#{1,4}\s+)?(HIGHLIGHTS OF PRESCRIBING INFORMATION[^\n]*)/im,
     /(?:^|\n)(#{1,4}\s+)?(1\s+INDICATIONS AND USAGE[^\n]*)/im,
@@ -499,15 +765,14 @@ function parseMarkdownSections(markdown, { minBody = 12, requireNumbered = false
     }
   }
 
-  // If a TOC of linked headings appears before the narrative body, jump to the first
-  // plain numbered markdown heading (## 2.1 ... without a markdown link).
   const plainBody = body.search(/^#{1,4}\s+\d{1,2}(?:\.\d+){0,3}\s+[A-Z][^\n[\]]{3,120}\s*$/m);
   if (plainBody > 0) {
-    const linkedBefore = (body.slice(0, plainBody).match(/^#{1,4}\s+\[[^\]]+\]\([^)]+\)/gm) || []).length;
+    const linkedBefore = (body.slice(0, plainBody).match(/^#{1,4}\s+\[[^\]]+\]\([^)]+\)/gm) || [])
+      .length;
     if (linkedBefore >= 3) body = body.slice(plainBody);
   }
 
-  // Truncate footer chrome common on commercial drug sites
+  // Only drop commercial site chrome footers — never cut mid-label content by length.
   body = body.split(
     /\n#{1,4}\s+(?:Related\/similar drugs|Frequently asked questions|More about |Professional resources|Other brands|Related treatment guides|Patient resources)\b/i
   )[0];
@@ -517,7 +782,6 @@ function parseMarkdownSections(markdown, { minBody = 12, requireNumbered = false
   let current = null;
 
   const isHeading = (line) => {
-    // Skip truncated / wrapped TOC link headings
     if (/^#{1,4}\s+\[[^\]]+\]\([^)]*$/.test(line)) return "";
     const h = line.match(/^#{1,4}\s+(.+?)\s*$/);
     if (h) {
@@ -525,7 +789,6 @@ function parseMarkdownSections(markdown, { minBody = 12, requireNumbered = false
         .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
         .replace(/^\[[^\]]*\]\([^)]*\)/, "")
         .trim();
-      // Drop incomplete markdown link leftovers
       if (title.includes("](") || title.startsWith("[")) return "";
       return title;
     }
@@ -552,7 +815,13 @@ function parseMarkdownSections(markdown, { minBody = 12, requireNumbered = false
     const heading = isHeading(line);
     if (heading) {
       if (junkHeading(heading)) continue;
-      if (requireNumbered && !/^\d+(?:\.\d+)*\b/.test(heading) && !/HIGHLIGHTS|BOXED WARNING|DESCRIPTION|CLINICAL|INDICATIONS|DOSAGE|CONTRAINDICATIONS|WARNINGS|ADVERSE|DRUG INTERACTIONS|USE IN SPECIFIC|OVERDOSAGE|HOW SUPPLIED|PATIENT COUNSELING/i.test(heading)) {
+      if (
+        requireNumbered &&
+        !/^\d+(?:\.\d+)*\b/.test(heading) &&
+        !/HIGHLIGHTS|BOXED WARNING|DESCRIPTION|CLINICAL|INDICATIONS|DOSAGE|CONTRAINDICATIONS|WARNINGS|ADVERSE|DRUG INTERACTIONS|USE IN SPECIFIC|OVERDOSAGE|HOW SUPPLIED|PATIENT COUNSELING/i.test(
+          heading
+        )
+      ) {
         continue;
       }
       if (current && current.text.trim().length >= minBody) sections.push(current);
@@ -565,34 +834,10 @@ function parseMarkdownSections(markdown, { minBody = 12, requireNumbered = false
   if (current && current.text.trim()) sections.push(current);
 
   return sections
-    .map((section, index) => {
-      let body = section.text
-        // Keep image alt text so figure-only sections are not dropped.
-        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt) => {
-          const label = String(alt || "").trim() || "figure / table image";
-          return `\n[Image: ${label}]\n`;
-        })
-        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-        // Normalize markdown tables into readable rows.
-        .replace(/^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/gm, "")
-        .replace(/^\|(.+)\|$/gm, (_, row) =>
-          row
-            .split("|")
-            .map((cell) => cell.trim())
-            .filter(Boolean)
-            .join(" | ")
-        )
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
-      return {
-        key: sectionKey(section.title, index),
-        title: section.title,
-        text: body,
-      };
-    })
+    .map((section, index) => makeSection(section.title, section.text, index, baseUrl))
     .filter((section) => {
+      if (section.html) return true;
       if (section.text.length >= minBody) return true;
-      // Keep short sections that still carry figure/table placeholders.
       return /\[Image:/i.test(section.text) || /\s\|\s/.test(section.text);
     });
 }
@@ -614,16 +859,18 @@ function parseEmcHtml(html) {
 
   const pushSection = (rawTitle, rawBody) => {
     const title = stripTags(rawTitle);
-    let text = stripTags(rawBody);
     if (!title) return;
     if (/my account|cookie|sign in|accept all|expand all|print smpc|share/i.test(title)) return;
     if (!isEmcSectionTitle(title)) return;
+    const rich = enrichSectionContent(rawBody, "https://www.medicines.org.uk/");
     const key = title.toLowerCase();
     if (seen.has(key)) {
-      // Merge duplicate headings (parent + nested) instead of dropping content.
       const existing = sections.find((s) => s.title.toLowerCase() === key);
-      if (existing && text && !existing.text.includes(text.slice(0, 80))) {
-        existing.text = `${existing.text}\n\n${text}`.trim();
+      if (existing && rich.text && !existing.text.includes(rich.text.slice(0, 80))) {
+        existing.text = `${existing.text}\n\n${rich.text}`.trim();
+        if (rich.html) {
+          existing.html = `${existing.html || ""}\n${rich.html}`.trim();
+        }
       }
       return;
     }
@@ -631,7 +878,8 @@ function parseEmcHtml(html) {
     sections.push({
       key: sectionKey(title, sections.length),
       title,
-      text: text || "(See subsections below.)",
+      text: rich.text || "(See subsections below.)",
+      html: rich.html || "",
     });
   };
 
@@ -941,24 +1189,28 @@ function normalizeOpenFda(item) {
         manufacturer ? `Marketing authorisation holder / Manufacturer: ${manufacturer}` : "",
         item.set_id ? `DailyMed / SPL set_id: ${item.set_id}` : "",
       ].filter(Boolean);
-      return { key: section.key, title: section.title, text: lines.join("\n") };
+      return { key: section.key, title: section.title, text: lines.join("\n"), html: "" };
     }
-    const text = section.fields.map((field) => asText(item[field])).filter(Boolean).join("\n\n");
-    return { key: section.key, title: section.title, text };
-  }).filter((section) => section.text);
+    const raw = section.fields.map((field) => asText(item[field])).filter(Boolean).join("\n\n");
+    if (!raw) return { key: section.key, title: section.title, text: "", html: "" };
+    const rich = enrichSectionContent(raw, DAILYMED_BASE);
+    return { key: section.key, title: section.title, text: rich.text, html: rich.html };
+  }).filter((section) => section.text || section.html);
 
   // Catch-all: any remaining lengthy OpenFDA string fields not already mapped
   const used = new Set(SECTION_MAP.flatMap((section) => section.fields));
   Object.keys(item)
     .filter((key) => !used.has(key) && !["openfda", "set_id", "id", "version", "effective_time"].includes(key))
     .forEach((key) => {
-      const text = asText(item[key]);
-      if (text.length < 40) return;
-      if (sections.some((section) => section.text.includes(text.slice(0, 80)))) return;
+      const raw = asText(item[key]);
+      if (raw.length < 40) return;
+      if (sections.some((section) => section.text.includes(raw.slice(0, 80)))) return;
+      const rich = enrichSectionContent(raw, DAILYMED_BASE);
       sections.push({
         key: sectionKey(key, sections.length),
         title: key.replace(/_/g, " "),
-        text,
+        text: rich.text,
+        html: rich.html,
       });
     });
 
@@ -1491,6 +1743,21 @@ export function renderSmpcDocument(doc, { arabicSections = null } = {}) {
   const sections = arabicSections || doc.sections || [];
   const isArabic = Boolean(arabicSections);
 
+  const renderBody = (section) => {
+    const html = String(section.html || "").trim();
+    if (html && /<(?:table|img|p|ul|ol|br|div|strong|em)\b/i.test(html)) {
+      return `<div class="smpc-section-body smpc-section-rich">${sanitizeRichHtml(html)}</div>`;
+    }
+    const text = String(section.text || "");
+    if (/<(?:table|img)\b/i.test(text)) {
+      const rich = enrichSectionContent(text, DAILYMED_BASE);
+      if (rich.html) {
+        return `<div class="smpc-section-body smpc-section-rich">${sanitizeRichHtml(rich.html)}</div>`;
+      }
+    }
+    return `<div class="smpc-section-body">${escapeHtml(text).replace(/\n/g, "<br>")}</div>`;
+  };
+
   return `
     <article class="smpc-document ${isArabic ? "smpc-document-ar" : "smpc-document-en"}" data-id="${escapeHtml(doc.id)}" dir="${isArabic ? "rtl" : "ltr"}" lang="${isArabic ? "ar" : "en"}">
       <header class="smpc-document-header">
@@ -1510,7 +1777,7 @@ export function renderSmpcDocument(doc, { arabicSections = null } = {}) {
                   (section) => `
           <section class="smpc-section" id="smpc-${escapeHtml(section.key)}">
             <h4>${escapeHtml(section.title)}</h4>
-            <div class="smpc-section-body">${escapeHtml(section.text).replace(/\n/g, "<br>")}</div>
+            ${renderBody(section)}
           </section>`
                 )
                 .join("")

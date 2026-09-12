@@ -112,9 +112,12 @@ import {
   renderSmpcDocument,
   renderSmpcSearchResults,
   searchSmpc,
-} from "./smpc.js";
-import { translateSmpcSections } from "./smpc-translate.js";
-import { downloadSmpcDocxPair } from "./smpc-docx.js";
+} from "./smpc.js?v=20260912d";
+import {
+  getLastTranslationEngine,
+  translateSmpcSections,
+} from "./smpc-translate.js?v=20260912d";
+import { downloadSmpcDocxPair } from "./smpc-docx.js?v=20260912d";
 import {
   CERT_BODIES,
   bindCertificationResults,
@@ -2076,7 +2079,13 @@ async function translateActiveSmpc() {
     smpcViewer?.classList.add("has-arabic");
     if (smpcDownloadArBtn) smpcDownloadArBtn.disabled = false;
     if (smpcDownloadBothBtn) smpcDownloadBothBtn.disabled = false;
-    setSmpcViewerStatus("اكتملت الترجمة إلى العربية. يمكنك تنزيل EN و AR كملفات DOCX.", false);
+    const engine = getLastTranslationEngine();
+    setSmpcViewerStatus(
+      engine
+        ? `اكتملت الترجمة عبر ${engine}. تنزيل EN+AR ينتج ملفاً واحداً ثنائي اللغة.`
+        : "اكتملت الترجمة إلى العربية. تنزيل EN+AR ينتج ملفاً واحداً ثنائي اللغة.",
+      false
+    );
   } catch (error) {
     setSmpcViewerStatus(error.message, true);
   } finally {
@@ -2104,6 +2113,7 @@ async function downloadActiveSmpc(mode) {
       meta: smpcMeta(),
       englishSections: null,
       arabicSections: null,
+      bilingual: mode === "both",
     };
     if (mode === "en" || mode === "both") payload.englishSections = activeSmpcDoc.sections;
     if (mode === "ar" || mode === "both") {
@@ -2114,7 +2124,12 @@ async function downloadActiveSmpc(mode) {
       payload.arabicSections = activeSmpcArabicSections;
     }
     await downloadSmpcDocxPair(payload);
-    setSmpcViewerStatus("تم تنزيل الملف/الملفات.", false);
+    setSmpcViewerStatus(
+      mode === "both"
+        ? "تم تنزيل ملف DOCX واحد (EN + AR)."
+        : "تم تنزيل ملف DOCX.",
+      false
+    );
   } catch (error) {
     setSmpcViewerStatus(error.message, true);
   }
