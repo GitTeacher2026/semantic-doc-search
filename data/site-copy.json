@@ -1,5 +1,12 @@
 {
   "entries": {
+    "mega-login-note": {
+      "id": "mega-login-note",
+      "text": "الاتصال بـ MEGA اختياري. أدخِل البيانات فقط إذا أردت الرفع أو مزامنة الملفات، ثم اضغط «الاتصال بـ MEGA».",
+      "visible": false,
+      "updatedAt": "2026-09-12T08:40:38.882Z",
+      "updatedBy": "admin"
+    },
     "pending-images-note": {
       "id": "pending-images-note",
       "text": "الصور تتطلب الاسم والمجلد. باقي الملفات يمكن تخصيصها اختيارياً. المجلدات المقفلة تتطلب كلمة المرور عند الإضافة أو التصفح.",
