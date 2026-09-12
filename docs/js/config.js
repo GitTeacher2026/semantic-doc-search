@@ -5,6 +5,7 @@ export const GITHUB_BRANCH = "main";
 export const GITHUB_TOKEN = "";
 export const STORE_PATH = "data/browser-store.enc.json";
 export const USERS_PATH = "data/users.json";
+export const SITE_COPY_PATH = "data/site-copy.json";
 export const ADMIN_EMAIL = "reagon.gm@pm.me";
 export const SITE_URL = "https://gitteacher2026.github.io/semantic-doc-search/";
 export const VAULT_PASSWORD = "docshelf2024";

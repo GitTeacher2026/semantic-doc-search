@@ -10,7 +10,7 @@ uploads/*
 data/*
 !data/.gitkeep
 !data/users.json
-!data/site-changelog.json
+!data/site-copy.json
 *.faiss
 .DS_Store
 .cache/

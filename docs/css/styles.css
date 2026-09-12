@@ -3957,3 +3957,127 @@ html[data-theme="dark"] .cert-source-chip.is-pdf {
   }
 }
 
+
+
+/* Site copy admin editor */
+.site-copy-dialog-card {
+  width: min(960px, 96vw);
+  max-height: min(88vh, 900px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.site-copy-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.site-copy-dialog-header h2 {
+  margin: 0 0 0.25rem;
+}
+
+.site-copy-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) 1fr;
+  gap: 1rem;
+  min-height: 0;
+  flex: 1;
+}
+
+.site-copy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  overflow: auto;
+  max-height: min(60vh, 560px);
+  padding: 0.15rem;
+}
+
+.site-copy-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  width: 100%;
+  text-align: right;
+  border: 1px solid color-mix(in srgb, var(--border, #c9d5d0) 80%, transparent);
+  background: color-mix(in srgb, var(--panel, #fff) 92%, #eef6f2);
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.site-copy-item.is-active {
+  border-color: color-mix(in srgb, #0f766e 55%, var(--border, #c9d5d0));
+  background: color-mix(in srgb, #0f766e 10%, var(--panel, #fff));
+}
+
+.site-copy-item-label {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.site-copy-item-status {
+  font-size: 0.78rem;
+  opacity: 0.7;
+}
+
+.site-copy-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.site-copy-editor h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.site-copy-editor textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  border-radius: 10px;
+  border: 1px solid var(--border, #c9d5d0);
+  padding: 0.75rem;
+  font: inherit;
+  line-height: 1.6;
+  background: var(--panel, #fff);
+  color: inherit;
+}
+
+.site-copy-visible-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.92rem;
+}
+
+.site-copy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+@media (max-width: 800px) {
+  .site-copy-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .site-copy-list {
+    max-height: 180px;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .site-copy-item {
+    min-width: 160px;
+  }
+}

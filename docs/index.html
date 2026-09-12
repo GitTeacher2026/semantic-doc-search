@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&family=Noto+Serif+Arabic:wght@600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/styles.css?v=20260912a" />
+  <link rel="stylesheet" href="css/styles.css?v=20260912b" />
   <link rel="stylesheet" href="css/auth.css" />
 </head>
 <body class="auth-body">
@@ -251,7 +251,7 @@
         <div>
           <h1>مخزن الوثائق</h1>
           <p id="user-greeting" class="user-greeting"></p>
-          <p class="tagline">ارفع ملفات PDF وOffice والنصوص، صنّفها تلقائياً، وابحث فوراً.</p>
+          <p class="tagline" data-site-copy="hero-tagline">ارفع ملفات PDF وOffice والنصوص، صنّفها تلقائياً، وابحث فوراً.</p>
         </div>
       </div>
       <div class="hero-actions">
@@ -262,6 +262,7 @@
             طلبات التسجيل
             <span id="pending-count-badge" class="pending-badge hidden">0</span>
           </button>
+          <button id="open-site-copy-btn" class="btn ghost small" type="button">نصوص الموقع</button>
         </div>
         <button id="logout-btn" class="btn ghost" type="button">تسجيل الخروج</button>
       </div>
@@ -298,7 +299,7 @@
               <span class="drive-connect-icon" aria-hidden="true">🟥</span>
               <div>
                 <strong id="mega-connect-title">تخزين MEGA (اختياري)</strong>
-                <p id="mega-connect-hint" class="muted">اختياري — اتصل فقط عند الرفع أو عرض ملفات MEGA. يمكنك استخدام البحث وباقي الأقسام دون اتصال.</p>
+                <p id="mega-connect-hint" class="muted" data-site-copy="mega-connect-hint">اختياري — اتصل فقط عند الرفع أو عرض ملفات MEGA. يمكنك استخدام البحث وباقي الأقسام دون اتصال.</p>
                 <p id="mega-connect-error" class="auth-recovery-error hidden" role="alert"></p>
                 <div id="mega-login-fields" class="mega-login-fields">
                   <label class="sr-only" for="mega-email">بريد MEGA</label>
@@ -320,7 +321,7 @@
                     />
                     <button type="button" class="password-toggle-btn" aria-label="إظهار كلمة المرور" aria-pressed="false">👁</button>
                   </div>
-                  <p class="muted mega-login-note">
+                  <p class="muted mega-login-note" data-site-copy="mega-login-note">
                     الاتصال بـ MEGA اختياري. أدخِل البيانات فقط إذا أردت الرفع أو مزامنة الملفات، ثم اضغط «الاتصال بـ MEGA».
                   </p>
                 </div>
@@ -332,7 +333,7 @@
             </div>
           </div>
           <div id="pending-images-note" class="pending-images-note hidden" role="status">
-            <p class="muted">
+            <p class="muted" data-site-copy="pending-images-note">
               الصور تتطلب <strong>الاسم</strong> و<strong>المجلد</strong>. باقي الملفات يمكن تخصيصها اختيارياً.
               المجلدات المقفلة تتطلب كلمة المرور عند الإضافة أو التصفح.
             </p>
@@ -427,7 +428,7 @@
 
         <section id="pharma-search-panel" class="panel hidden">
           <h2>بحث monographs — دساتير الأدوية</h2>
-          <p class="muted pharma-search-intro">النتائج روابط Google Drive. يمكنك فتح الملف مباشرة أو سحبه (Leech) إلى خادم MEGA وإضافته للمكتبة.</p>
+          <p class="muted pharma-search-intro" data-site-copy="pharma-search-intro">النتائج روابط Google Drive. يمكنك فتح الملف مباشرة أو سحبه (Leech) إلى خادم MEGA وإضافته للمكتبة.</p>
           <label for="pharma-search-query">ابحث عن مادة / monograph</label>
           <div class="pharma-suggest-wrap">
             <input id="pharma-search-query" type="search" placeholder="Search chapters… مثال: Tramadol, Levofloxacin" autocomplete="off" />
@@ -448,14 +449,14 @@
             <button id="pharma-sync-btn" class="btn ghost" type="button" title="مزامنة فهرس مجلد إضافي من Google Drive">مزامنة مجلد Drive</button>
             <button id="pharma-clear-btn" class="btn ghost" type="button" disabled>مسح النتائج</button>
           </div>
-          <p class="muted pharma-search-credit">الفهرس مأخوذ من <a href="https://www.webofpharma.com/2025/08/pharmacopoeia-search-engine.html" target="_blank" rel="noopener noreferrer">Web of Pharma Pharmacopoeia Search Engine</a> — النتائج روابط Google Drive مع خيار Leech إلى MEGA.</p>
+          <p class="muted pharma-search-credit" data-site-copy="pharma-search-credit">الفهرس مأخوذ من <a href="https://www.webofpharma.com/2025/08/pharmacopoeia-search-engine.html" target="_blank" rel="noopener noreferrer">Web of Pharma Pharmacopoeia Search Engine</a> — النتائج روابط Google Drive مع خيار Leech إلى MEGA.</p>
           <p id="pharma-search-status" class="muted pharma-search-status hidden" role="status"></p>
           <div id="pharma-search-results" class="results pharma-results"></div>
         </section>
 
         <section id="smpc-search-panel" class="panel hidden">
           <h2>بحث SmPC — نشرة خصائص المنتج</h2>
-          <p class="muted smpc-search-intro">
+          <p class="muted smpc-search-intro" data-site-copy="smpc-search-intro">
             اختر المصدر ثم ابحث بالمادة الفعّالة أو الاسم التجاري. يُعرض SmPC/النشرة الكاملة داخل نافذة منبثقة مع خيارات الترجمة والتنزيل.
           </p>
 
@@ -536,7 +537,7 @@
                 </select>
               </label>
             </div>
-            <p class="muted smpc-filters-hint">
+            <p class="muted smpc-filters-hint" data-site-copy="smpc-filters-hint">
               الفلاتر تعمل بأفضل دقة مع DailyMed و drugs.com عبر OpenFDA NDC.
               لـ eMC تُستخدم ككلمات بحث إضافية. حقل ATC يقبل رمزاً (مثل C10AA05) أو فئة دوائية FDA (EPC/MoA).
             </p>
@@ -596,7 +597,7 @@
 
         <section id="cert-search-panel" class="panel hidden">
           <h2>بحث شهادات ISO / اعتماد الشركات</h2>
-          <p class="muted cert-search-intro">
+          <p class="muted cert-search-intro" data-site-copy="cert-search-intro">
             بديل عملي لـ IAF CertSearch المحدود مجاناً: ابحث مباشرة عبر أشهر هيئات التصديق
             (SGS، TÜV Rheinland/Certipedia، Bureau Veritas، Intertek، BSI، TÜV SÜD، DNV، LRQA، DEKRA، UKAS).
             النتائج الحية تُعرض داخل الموقع مع إمكانية <strong>عرض الشهادة</strong> و<strong>تنزيل PDF أو بطاقة الشهادة</strong>.
@@ -690,6 +691,38 @@
       <div id="smpc-viewer" class="smpc-viewer-body">
         <div id="smpc-viewer-en" class="smpc-viewer-pane smpc-viewer-en" dir="ltr" lang="en"></div>
         <div id="smpc-viewer-ar" class="smpc-viewer-pane smpc-viewer-ar hidden" dir="rtl" lang="ar"></div>
+      </div>
+    </div>
+  </div>
+
+  
+  <div id="site-copy-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="site-copy-dialog-title">
+    <div class="modal-backdrop" id="site-copy-dialog-backdrop"></div>
+    <div class="modal-card site-copy-dialog-card">
+      <div class="site-copy-dialog-header">
+        <div>
+          <h2 id="site-copy-dialog-title">نصوص الموقع</h2>
+          <p class="muted">عدّل أو أخفِ النصوص التوضيحية التي تظهر في الصفحات (مثل مقدمة بحث الشهادات).</p>
+        </div>
+        <button id="site-copy-close-btn" class="btn ghost small" type="button">إغلاق</button>
+      </div>
+      <div class="site-copy-layout">
+        <div id="site-copy-list" class="site-copy-list" role="listbox" aria-label="قائمة النصوص"></div>
+        <div id="site-copy-editor" class="site-copy-editor hidden">
+          <h3 id="site-copy-editor-title">النص</h3>
+          <p id="site-copy-editor-desc" class="muted"></p>
+          <label for="site-copy-text">المحتوى</label>
+          <textarea id="site-copy-text" rows="8" placeholder="اكتب النص الذي سيظهر للمستخدمين…"></textarea>
+          <label class="site-copy-visible-row">
+            <input id="site-copy-visible" type="checkbox" checked />
+            إظهار هذا النص على الموقع
+          </label>
+          <div class="site-copy-actions">
+            <button id="site-copy-save-btn" class="btn primary" type="button">حفظ</button>
+            <button id="site-copy-reset-btn" class="btn ghost" type="button">استعادة الافتراضي</button>
+            <button id="site-copy-hide-btn" class="btn ghost" type="button">إخفاء من الموقع</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -1015,6 +1048,6 @@
 
   <iframe id="credential-catcher" name="credential-catcher" title="" tabindex="-1" aria-hidden="true" hidden></iframe>
 
-  <script type="module" src="js/main.js?v=20260912a"></script>
+  <script type="module" src="js/main.js?v=20260912b"></script>
 </body>
 </html>

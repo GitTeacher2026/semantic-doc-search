@@ -148,6 +148,7 @@ import {
   resendPendingSignupEmails,
 } from "./auth-service.js";
 import { initAdminMembers } from "./admin-members.js";
+import { initAdminSiteCopy } from "./admin-site-copy.js";
 import { getVaultPassword } from "./auth-page.js";
 import { initPasswordToggles } from "./password-toggle.js";
 import {
@@ -213,6 +214,7 @@ let pendingMoveTargetCategory = null;
 let authApi = null;
 let currentUser = null;
 let adminMembersApi = null;
+let adminSiteCopyApi = null;
 
 const appView = document.getElementById("app-view");
 const logoutBtn = document.getElementById("logout-btn");
@@ -3434,6 +3436,12 @@ export async function startApp({ user, auth }) {
   setStorageUserId(user.id);
 
   adminMembersApi = initAdminMembers({
+    getActor: () => currentUser,
+    onStatus: setStatus,
+    isAdmin: () => authApi?.isAdmin?.(),
+  });
+
+  adminSiteCopyApi = initAdminSiteCopy({
     getActor: () => currentUser,
     onStatus: setStatus,
     isAdmin: () => authApi?.isAdmin?.(),
