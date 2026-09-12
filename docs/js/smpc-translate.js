@@ -1,9 +1,9 @@
 /**
  * SmPC EN→AR translation priority (MyMemory is last resort only):
- * 1) Google Translate via CORS proxy (browser-safe)
- * 2) Google via Puter.net.fetch when Puter is available
- * 3) Direct Google endpoints
- * 4) Lingva mirrors
+ * 1) Google clients5 direct (CORS *) — historically the reliable browser path
+ * 2) Google via Puter.net.fetch
+ * 3) Google via short-timeout CORS proxies (raced)
+ * 4) Lingva mirrors (raced, short timeout)
  * 5) Puter AI chat
  * 6) Optional LibreTranslate
  * 7) MyMemory
@@ -34,6 +34,7 @@ const SECTION_CONCURRENCY = 2;
 const MAX_RETRIES = 2;
 
 let lastEngineUsed = "";
+let stickyEngine = null; // reuse the first engine that works this session
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -141,13 +142,28 @@ async function getPuterIfReady() {
   }
 }
 
+async function fetchWithBudget(url, timeoutMs = 8000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: ctrl.signal, cache: "no-store" });
+    return response;
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error(`timeout ${timeoutMs}ms`);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function translateWithGoogleViaPuter(text) {
   const puter = await getPuterIfReady();
   if (!puter?.net?.fetch) throw new Error("Puter net غير متاح.");
 
+  // clients5 first — CORS-friendly and less 429-prone than gtx.
   const urls = [
-    `${GOOGLE_GTX}${encodeURIComponent(text)}`,
     `${GOOGLE_CLIENTS5}${encodeURIComponent(text)}`,
+    `${GOOGLE_GTX}${encodeURIComponent(text)}`,
   ];
   const errors = [];
   for (const url of urls) {
@@ -155,6 +171,7 @@ async function translateWithGoogleViaPuter(text) {
       const response = await puter.net.fetch(url);
       const translated = await parseGoogleResponse(response, "Google/Puter");
       lastEngineUsed = "Google (via Puter)";
+      stickyEngine = "puter-google";
       return translated;
     } catch (error) {
       errors.push(error.message || String(error));
@@ -163,43 +180,50 @@ async function translateWithGoogleViaPuter(text) {
   throw new Error(errors.filter(Boolean).join(" · ") || "Google/Puter failed");
 }
 
-/** Browser-safe Google Translate via public CORS proxies (avoids MyMemory as default). */
+/** Browser-safe Google Translate via public CORS proxies (short timeouts, raced). */
 async function translateWithGoogleProxied(text) {
   const targets = [
-    `${GOOGLE_GTX}${encodeURIComponent(text)}`,
     `${GOOGLE_CLIENTS5}${encodeURIComponent(text)}`,
+    `${GOOGLE_GTX}${encodeURIComponent(text)}`,
   ];
-  const wrap = (url) => [
-    `https://corsproxy.org/?${encodeURIComponent(url)}`,
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  ];
-  const errors = [];
+  const proxies = [];
   for (const target of targets) {
-    for (const proxied of wrap(target)) {
-      try {
-        const response = await fetch(proxied);
-        const translated = await parseGoogleResponse(response, "Google/proxy");
-        lastEngineUsed = "Google Translate";
-        return translated;
-      } catch (error) {
-        errors.push(error.message || String(error));
-      }
-    }
+    proxies.push(
+      `https://corsproxy.io/?${encodeURIComponent(target)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`
+    );
   }
-  throw new Error(errors.filter(Boolean).slice(0, 4).join(" · ") || "Google proxy failed");
+  const errors = [];
+  try {
+    const translated = await Promise.any(
+      proxies.map(async (proxied) => {
+        const response = await fetchWithBudget(proxied, 7000);
+        return parseGoogleResponse(response, "Google/proxy");
+      })
+    );
+    lastEngineUsed = "Google Translate";
+    stickyEngine = "google-proxy";
+    return translated;
+  } catch (error) {
+    const details =
+      error?.errors?.map((e) => e?.message || e).join(" · ") || error?.message || "proxy failed";
+    throw new Error(details);
+  }
 }
 
 async function translateWithGoogleDirect(text) {
+  // clients5 exposes Access-Control-Allow-Origin: * and is the reliable browser path.
   const urls = [
-    `${GOOGLE_GTX}${encodeURIComponent(text)}`,
     `${GOOGLE_CLIENTS5}${encodeURIComponent(text)}`,
+    `${GOOGLE_GTX}${encodeURIComponent(text)}`,
   ];
   const errors = [];
   for (const url of urls) {
     try {
-      const response = await fetch(url);
+      const response = await fetchWithBudget(url, 8000);
       const translated = await parseGoogleResponse(response, "Google");
       lastEngineUsed = "Google Translate";
+      stickyEngine = "google-direct";
       return translated;
     } catch (error) {
       errors.push(error.message || String(error));
@@ -210,21 +234,29 @@ async function translateWithGoogleDirect(text) {
 
 async function translateWithLingva(text) {
   const errors = [];
-  for (const host of LINGVA_HOSTS) {
-    try {
-      const response = await fetch(`https://${host}/api/v1/en/ar/${encodeURIComponent(text)}`);
-      if (response.status === 429) throw new Error(`Lingva/${host} (429)`);
-      if (!response.ok) throw new Error(`Lingva/${host} (${response.status})`);
-      const data = await response.json();
-      const translated = cleanTranslated(data.translation || data.text || "");
-      if (!translated) throw new Error(`Lingva/${host} فارغ`);
-      lastEngineUsed = `Lingva (${host})`;
-      return translated;
-    } catch (error) {
-      errors.push(error.message || String(error));
-    }
+  try {
+    const translated = await Promise.any(
+      LINGVA_HOSTS.map(async (host) => {
+        const response = await fetchWithBudget(
+          `https://${host}/api/v1/en/ar/${encodeURIComponent(text)}`,
+          7000
+        );
+        if (response.status === 429) throw new Error(`Lingva/${host} (429)`);
+        if (!response.ok) throw new Error(`Lingva/${host} (${response.status})`);
+        const data = await response.json();
+        const out = cleanTranslated(data.translation || data.text || "");
+        if (!out) throw new Error(`Lingva/${host} فارغ`);
+        lastEngineUsed = `Lingva (${host})`;
+        stickyEngine = "lingva";
+        return out;
+      })
+    );
+    return translated;
+  } catch (error) {
+    const details =
+      error?.errors?.map((e) => e?.message || e).join(" · ") || error?.message || "Lingva failed";
+    throw new Error(details);
   }
-  throw new Error(errors.filter(Boolean).join(" · ") || "Lingva failed");
 }
 
 async function translateWithPuterAi(text) {
@@ -245,37 +277,46 @@ async function translateWithPuterAi(text) {
   );
   if (!translated) throw new Error("Puter AI أعاد ترجمة فارغة.");
   lastEngineUsed = "Puter AI";
+  stickyEngine = "puter-ai";
   return translated;
 }
 
-async function translateWithLibreTranslate(text) {
+async function translateWithLibreTranslatePost(text) {
   const base = String(LIBRETRANSLATE_URL || "").replace(/\/$/, "");
   if (!base) throw new Error("LibreTranslate غير مضبوط.");
   const payload = { q: text, source: "en", target: "ar", format: "text" };
   const key = String(LIBRETRANSLATE_API_KEY || "").trim();
   if (key) payload.api_key = key;
-  const response = await fetch(`${base}/translate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (response.status === 429) throw new Error("LibreTranslate (429)");
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error || `LibreTranslate (${response.status})`);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10000);
+  try {
+    const response = await fetch(`${base}/translate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    });
+    if (response.status === 429) throw new Error("LibreTranslate (429)");
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || `LibreTranslate (${response.status})`);
+    }
+    const data = await response.json();
+    const translated = cleanTranslated(data.translatedText);
+    if (!translated) throw new Error("LibreTranslate أعاد ترجمة فارغة.");
+    lastEngineUsed = "LibreTranslate";
+    stickyEngine = "libre";
+    return translated;
+  } finally {
+    clearTimeout(timer);
   }
-  const data = await response.json();
-  const translated = cleanTranslated(data.translatedText);
-  if (!translated) throw new Error("LibreTranslate أعاد ترجمة فارغة.");
-  lastEngineUsed = "LibreTranslate";
-  return translated;
 }
 
 async function translateWithMyMemory(text) {
   const url =
     `${MYMEMORY_ENDPOINT}?q=${encodeURIComponent(text)}` +
     `&langpair=${encodeURIComponent("en|ar")}`;
-  const response = await fetch(url);
+  const response = await fetchWithBudget(url, 10000);
   if (response.status === 429) throw new Error("MyMemory (429)");
   if (!response.ok) throw new Error(`MyMemory (${response.status})`);
   const data = await response.json();
@@ -289,6 +330,7 @@ async function translateWithMyMemory(text) {
     throw new Error("MyMemory: حد الطول/الحصة.");
   }
   lastEngineUsed = "MyMemory";
+  stickyEngine = "mymemory";
   return translated;
 }
 
@@ -308,19 +350,37 @@ async function withRetries(fn) {
   throw lastError || new Error("translator failed");
 }
 
+function engineOrder(libreConfigured) {
+  const bySticky = {
+    "google-direct": translateWithGoogleDirect,
+    "puter-google": translateWithGoogleViaPuter,
+    "google-proxy": translateWithGoogleProxied,
+    lingva: translateWithLingva,
+    "puter-ai": translateWithPuterAi,
+    libre: translateWithLibreTranslatePost,
+    mymemory: translateWithMyMemory,
+  };
+  const base = [
+    translateWithGoogleDirect,
+    translateWithGoogleViaPuter,
+    translateWithGoogleProxied,
+    translateWithLingva,
+    translateWithPuterAi,
+    ...(libreConfigured ? [translateWithLibreTranslatePost] : []),
+    translateWithMyMemory,
+  ];
+  if (stickyEngine && bySticky[stickyEngine]) {
+    const preferred = bySticky[stickyEngine];
+    return [preferred, ...base.filter((fn) => fn !== preferred)];
+  }
+  return base;
+}
+
 async function translateChunkFast(text) {
   const errors = [];
   const libreConfigured = Boolean(String(LIBRETRANSLATE_URL || "").trim());
-  // Google (proxied) first so MyMemory is never the everyday engine in the browser.
-  const order = [
-    translateWithGoogleProxied,
-    translateWithGoogleViaPuter,
-    translateWithGoogleDirect,
-    translateWithLingva,
-    translateWithPuterAi,
-    ...(libreConfigured ? [translateWithLibreTranslate] : []),
-    translateWithMyMemory,
-  ];
+  // Google clients5 direct first so MyMemory is not the everyday engine.
+  const order = engineOrder(libreConfigured);
 
   for (const fn of order) {
     try {
@@ -427,7 +487,7 @@ async function translateHeading(title, { onStatus } = {}) {
 }
 
 export function getTranslationEngineLabel() {
-  return "Google → Lingva → Puter AI → MyMemory (احتياطي)";
+  return "Google (clients5) → Puter → Lingva → Puter AI → MyMemory (احتياطي)";
 }
 
 async function mapPool(items, concurrency, worker) {
@@ -478,6 +538,7 @@ async function translateRichHtml(html, { onStatus, label } = {}) {
 
 export async function translateSmpcSections(sections, { onStatus } = {}) {
   lastEngineUsed = "";
+  stickyEngine = null;
   onStatus?.(`محرك الترجمة: ${getTranslationEngineLabel()}`);
   await getPuterIfReady();
 

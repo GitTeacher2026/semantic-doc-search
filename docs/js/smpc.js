@@ -12,7 +12,10 @@ const OPENFDA_NDC = "https://api.fda.gov/drug/ndc.json";
 const DAILYMED_SPLS = "https://dailymed.nlm.nih.gov/dailymed/services/v2/spls.json";
 const JINA_PREFIX = "https://r.jina.ai/";
 const ALLORIGINS_RAW = "https://api.allorigins.win/raw?url=";
-const PROXY_PREF_KEY = "smpc_proxy_pref_v3";
+const PROXY_PREF_KEY = "smpc_proxy_pref_v4";
+
+/** Serialize Puter networking so the Wisp/WebSocket can finish connecting. */
+let puterFetchQueue = Promise.resolve();
 
 export const SMPC_SOURCE_OPTIONS = [
   {
@@ -329,46 +332,96 @@ function buildJinaTargets(target) {
   return out;
 }
 
+async function fetchViaPuter(url, { timeoutMs = 22000 } = {}) {
+  const run = async () => {
+    const { loadPuter } = await import("./puter-auth.js");
+    const puter = await loadPuter();
+    if (!puter?.net?.fetch) throw new Error("puter.net unavailable");
+
+    let lastError = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const response = await puter.net.fetch(url, {
+          method: "GET",
+          signal: ctrl.signal,
+          headers: { Accept: "*/*" },
+        });
+        if (!response?.ok) throw new Error(`HTTP ${response?.status || "?"}`);
+        const text = await response.text();
+        if (!text || text.length < 80) throw new Error("empty");
+        return text;
+      } catch (error) {
+        lastError = error;
+        const message = String(error?.message || error || "");
+        if (error?.name === "AbortError") throw new Error(`timeout ${timeoutMs}ms`);
+        if (/CONNECTING|InvalidStateError|WebSocket|Socket errored/i.test(message) && attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 400 + attempt * 350));
+          continue;
+        }
+        throw error instanceof Error ? error : new Error(String(error));
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  };
+
+  const queued = puterFetchQueue.then(run, run);
+  puterFetchQueue = queued.catch(() => {});
+  return queued;
+}
+
 function buildProxyAttempts(target) {
   const attempts = [];
-  for (const variant of buildJinaTargets(target)) {
+  // Jina usually works for eMC markdown; race a couple of URL variants quickly.
+  for (const variant of buildJinaTargets(target).slice(0, 2)) {
     attempts.push({
       name: "jina",
-      timeoutMs: 32000,
-      run: () => fetchWithTimeout(`${JINA_PREFIX}${variant}`, { timeoutMs: 32000 }),
+      timeoutMs: 12000,
+      run: () => fetchWithTimeout(`${JINA_PREFIX}${variant}`, { timeoutMs: 12000 }),
     });
   }
-  // Short timeouts — allorigins is often down (5xx) and should not block the UX.
+  attempts.push({
+    name: "corsproxy-io",
+    timeoutMs: 10000,
+    run: () =>
+      fetchWithTimeout(`https://corsproxy.io/?${encodeURIComponent(target)}`, {
+        timeoutMs: 10000,
+      }),
+  });
   attempts.push({
     name: "allorigins",
-    timeoutMs: 10000,
-    run: () => fetchWithTimeout(`${ALLORIGINS_RAW}${encodeURIComponent(target)}`, { timeoutMs: 10000 }),
+    timeoutMs: 7000,
+    run: () =>
+      fetchWithTimeout(`${ALLORIGINS_RAW}${encodeURIComponent(target)}`, {
+        timeoutMs: 7000,
+      }),
   });
   attempts.push({
     name: "allorigins-json",
-    timeoutMs: 10000,
+    timeoutMs: 7000,
     run: async () => {
       const raw = await fetchWithTimeout(
         `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`,
-        { timeoutMs: 10000 }
+        { timeoutMs: 7000 }
       );
       const data = JSON.parse(raw);
       if (!data?.contents) throw new Error("empty");
       return String(data.contents);
     },
   });
-  attempts.push({
-    name: "corsproxy-org",
-    timeoutMs: 14000,
-    run: () =>
-      fetchWithTimeout(`https://corsproxy.org/?${encodeURIComponent(target)}`, {
-        timeoutMs: 14000,
-      }),
-  });
   return attempts;
 }
 
-async function fetchRemotePage(url, { preferHtml = false } = {}) {
+function acceptRemoteText(text) {
+  if (!text || text.length < 80) throw new Error("empty");
+  if (isBlockedOrMissing(text)) throw new Error("blocked");
+  return text;
+}
+
+async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 16000 } = {}) {
   const target = String(url || "").trim();
   if (!target) throw new Error("رابط المصدر فارغ.");
 
@@ -376,46 +429,44 @@ async function fetchRemotePage(url, { preferHtml = false } = {}) {
   // browser CORS preflight on X-Return-Format was a common "Failed to fetch" cause.
   void preferHtml;
 
-  const attempts = buildProxyAttempts(target);
+  const errors = [];
   const pref = preferredProxyName();
+  const budget = Math.max(8000, Math.min(timeoutMs, 16000));
+
+  const attempts = [];
+  if (pref !== "skip-puter") {
+    attempts.push({
+      name: "puter",
+      run: async () => acceptRemoteText(await fetchViaPuter(target, { timeoutMs: Math.min(budget, 12000) })),
+    });
+  }
+  for (const attempt of buildProxyAttempts(target)) {
+    attempts.push(attempt);
+  }
   if (pref) {
     attempts.sort((a, b) => Number(b.name.startsWith(pref)) - Number(a.name.startsWith(pref)));
   }
 
-  const errors = [];
-
-  // Race the first two Jina variants — usually enough and faster than serial waits.
-  const jinaAttempts = attempts.filter((item) => item.name === "jina").slice(0, 2);
-  if (jinaAttempts.length) {
-    try {
-      const text = await Promise.any(
-        jinaAttempts.map(async (attempt) => {
-          const value = await attempt.run();
-          if (!value || value.length < 80) throw new Error("empty");
-          if (isBlockedOrMissing(value)) throw new Error("blocked");
-          return value;
-        })
-      );
-      rememberProxy("jina");
-      return { text, via: "jina" };
-    } catch (error) {
-      const details = error?.errors?.map((e) => e?.message || e).join(", ") || error?.message || "race failed";
-      errors.push(`jina-race: ${details}`);
-    }
+  // Race Puter + public proxies together so a slow/unavailable Puter cannot stall eMC search.
+  const racePool = attempts.slice(0, 4);
+  try {
+    const winner = await Promise.any(
+      racePool.map(async (attempt) => {
+        const text = acceptRemoteText(await attempt.run());
+        return { text, via: attempt.name };
+      })
+    );
+    rememberProxy(winner.via);
+    return winner;
+  } catch (error) {
+    const details =
+      error?.errors?.map((e) => e?.message || e).join(", ") || error?.message || "race failed";
+    errors.push(`proxy-race: ${details}`);
   }
 
-  for (const attempt of attempts) {
-    if (attempt.name === "jina" && jinaAttempts.includes(attempt)) continue;
+  for (const attempt of attempts.slice(4)) {
     try {
-      const text = await attempt.run();
-      if (!text || text.length < 80) {
-        errors.push(`${attempt.name}: empty`);
-        continue;
-      }
-      if (isBlockedOrMissing(text)) {
-        errors.push(`${attempt.name}: blocked`);
-        continue;
-      }
+      const text = acceptRemoteText(await attempt.run());
       rememberProxy(attempt.name);
       return { text, via: attempt.name };
     } catch (error) {
@@ -478,46 +529,13 @@ function finalizeDailyMedDoc(doc, sections, sourceNote) {
 
 /** Prefer raw HTML proxies (skip Jina markdown) so tables/images survive. */
 async function fetchRemoteHtmlPrefer(url) {
-  const target = String(url || "").trim();
-  const attempts = [
-    {
-      name: "corsproxy-org",
-      run: () =>
-        fetchWithTimeout(`https://corsproxy.org/?${encodeURIComponent(target)}`, {
-          timeoutMs: 28000,
-        }),
-    },
-    {
-      name: "allorigins",
-      run: () =>
-        fetchWithTimeout(`${ALLORIGINS_RAW}${encodeURIComponent(target)}`, {
-          timeoutMs: 16000,
-        }),
-    },
-    {
-      name: "allorigins-json",
-      run: async () => {
-        const raw = await fetchWithTimeout(
-          `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`,
-          { timeoutMs: 16000 }
-        );
-        const data = JSON.parse(raw);
-        if (!data?.contents) throw new Error("empty");
-        return String(data.contents);
-      },
-    },
-  ];
-  for (const attempt of attempts) {
-    try {
-      const text = await attempt.run();
-      if (!text || text.length < 400) continue;
-      if (isBlockedOrMissing(text)) continue;
-      if (!/<(?:html|table|img|div|h[1-4])\b/i.test(text)) continue;
-      rememberProxy(attempt.name);
-      return { text, via: attempt.name };
-    } catch {
-      /* next */
+  try {
+    const hit = await fetchRemotePage(url, { preferHtml: true, timeoutMs: 16000 });
+    if (hit?.text && /<(?:html|table|img|div|h[1-4])\b/i.test(hit.text)) {
+      return hit;
     }
+  } catch {
+    /* fall through */
   }
   return null;
 }
@@ -1379,16 +1397,19 @@ async function searchEmcSource(query, { limit = 8, filters = {} } = {}) {
   const searchQ = appendFilterKeywords(query, f);
   if (!searchQ) return [];
 
+  // One primary URL first — retrying www/non-www through dead proxies made search feel stuck.
   const searchUrls = [
     `https://www.medicines.org.uk/emc/search?q=${encodeURIComponent(searchQ)}&docType=smpc`,
     `https://www.medicines.org.uk/emc/search?q=${encodeURIComponent(searchQ)}`,
-    `https://medicines.org.uk/emc/search?q=${encodeURIComponent(searchQ)}&docType=smpc`,
   ];
 
   const errors = [];
   for (const searchUrl of searchUrls) {
     try {
-      const { text: payload } = await fetchRemotePage(searchUrl, { preferHtml: false });
+      const { text: payload } = await fetchRemotePage(searchUrl, {
+        preferHtml: false,
+        timeoutMs: 14000,
+      });
       const results = parseEmcSearch(payload, { limit: Math.max(limit * 2, 12) }).filter((doc) =>
         matchesClientFilters(doc, f)
       );
@@ -1396,6 +1417,10 @@ async function searchEmcSource(query, { limit = 8, filters = {} } = {}) {
       errors.push(`${searchUrl}: no parseable products`);
     } catch (error) {
       errors.push(error?.message || String(error));
+      // If Puter/proxies are down, don't burn another full timeout on a near-identical URL.
+      if (/puter:|proxy-race:|تعذّر جلب الصفحة/i.test(String(error?.message || error))) {
+        break;
+      }
     }
   }
 
@@ -1488,6 +1513,11 @@ export async function searchSmpc(query, { limit = 8, source = "dailymed", filter
   const f = normalizeSmpcFilters(filters);
   const src = SMPC_SOURCE_OPTIONS.some((item) => item.id === source) ? source : "dailymed";
   if (!q && !hasActiveSmpcFilters(f)) return [];
+
+  // Warm Puter in the background so eMC/proxy fetches do not pay script-load latency.
+  if (src === "emc" || src === "all") {
+    import("./puter-auth.js").then((mod) => mod.loadPuter?.()).catch(() => {});
+  }
 
   if (src === "all") {
     const perSource = Math.max(3, Math.ceil(limit / 2));
