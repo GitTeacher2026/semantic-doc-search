@@ -1,5 +1,12 @@
 {
   "entries": {
+    "mega-connect-hint": {
+      "id": "mega-connect-hint",
+      "text": "اختياري — اتصل فقط عند الرفع أو عرض ملفات MEGA. يمكنك استخدام البحث وباقي الأقسام دون اتصال.",
+      "visible": false,
+      "updatedAt": "2026-09-12T08:40:55.605Z",
+      "updatedBy": "admin"
+    },
     "mega-login-note": {
       "id": "mega-login-note",
       "text": "الاتصال بـ MEGA اختياري. أدخِل البيانات فقط إذا أردت الرفع أو مزامنة الملفات، ثم اضغط «الاتصال بـ MEGA».",
