@@ -1,5 +1,12 @@
 {
   "entries": {
+    "hero-tagline": {
+      "id": "hero-tagline",
+      "text": "ارفع ملفات PDF وOffice والنصوص، صنّفها تلقائياً، وابحث فوراً.",
+      "visible": false,
+      "updatedAt": "2026-09-12T08:41:01.931Z",
+      "updatedBy": "admin"
+    },
     "mega-connect-hint": {
       "id": "mega-connect-hint",
       "text": "اختياري — اتصل فقط عند الرفع أو عرض ملفات MEGA. يمكنك استخدام البحث وباقي الأقسام دون اتصال.",
