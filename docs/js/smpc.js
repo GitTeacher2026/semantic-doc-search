@@ -488,9 +488,10 @@ function waybackCandidateUrls(snapshotOrLiveUrl) {
   if (!raw) return [];
   const https = raw.replace(/^http:\/\//i, "https://");
   const identity = toWaybackIdentityUrl(https);
+  const rawMime = identity.replace(/\/web\/(\d{8,14})id_\//i, "/web/$1im_/");
   const plain = identity.replace(/\/web\/(\d{8,14})id_\//i, "/web/$1/");
   const out = [];
-  for (const value of [identity, plain, https]) {
+  for (const value of [rawMime, identity, plain, https]) {
     if (value && !out.includes(value)) out.push(value);
   }
   return out;
@@ -565,95 +566,141 @@ async function resolveWaybackSnapshot(url, { timeoutMs = 9000 } = {}) {
   return identity;
 }
 
+const emcPageCache = new Map();
+let waybackCooldownUntil = 0;
+
+function isRateLimitedError(error) {
+  return /HTTP\s*429|too many requests|rate limit/i.test(String(error?.message || error || ""));
+}
+
 async function fetchViaPuterWayback(target, { timeoutMs = 18000 } = {}) {
+  if (Date.now() < waybackCooldownUntil) {
+    throw new Error("HTTP 429");
+  }
   const errors = [];
   const snap = await resolveWaybackSnapshot(target, { timeoutMs: Math.min(10000, timeoutMs) });
 
-  for (const candidate of waybackCandidateUrls(snap)) {
+  // One candidate at a time — racing Wayback triggers HTTP 429.
+  for (const candidate of waybackCandidateUrls(snap).slice(0, 2)) {
     try {
       return acceptRemoteText(await fetchViaPuter(candidate, { timeoutMs, followRedirects: true }));
     } catch (error) {
       errors.push(`${candidate.slice(0, 56)}:${error?.message || error}`);
+      if (isRateLimitedError(error)) {
+        waybackCooldownUntil = Date.now() + 60000;
+        break;
+      }
     }
   }
   throw new Error(errors.slice(0, 3).join(" · ") || "wayback fetch failed");
 }
 
+/**
+ * Fetch a remote page without CORS.
+ *
+ * For UK eMC: try Puter→Jina (live) first, then a single Puter→Wayback hop.
+ * Never race multiple Wayback requests — archive.org rate-limits with HTTP 429.
+ */
 async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = {}) {
   const target = String(url || "").trim();
   if (!target) throw new Error("رابط المصدر فارغ.");
   void preferHtml;
+
+  if (emcPageCache.has(target)) {
+    return { text: emcPageCache.get(target), via: "cache" };
+  }
 
   const errors = [];
   const pref = preferredProxyName();
   const budget = Math.max(9000, Math.min(timeoutMs, 22000));
   const ukEmc = isUkEmcHost(target);
 
-  const attempts = [];
+  const remember = (via, text) => {
+    rememberProxy(via);
+    if (ukEmc && text && text.length > 500) {
+      emcPageCache.set(target, text);
+      try {
+        sessionStorage.setItem(`smpc_emc_page_${target}`, text.slice(0, 450000));
+      } catch {
+        /* ignore quota */
+      }
+    }
+    return { text, via };
+  };
 
-  if (pref !== "skip-puter") {
-    if (ukEmc) {
-      // Primary: Puter → Wayback (archive.org is reachable; medicines.org.uk is not /
-      // Puter→Jina returns HTTP 403 for eMC).
-      attempts.push({
-        name: "puter-wayback",
-        run: async () => fetchViaPuterWayback(target, { timeoutMs: Math.min(budget, 20000) }),
-      });
-      if (!/\/print\/?$/i.test(target)) {
-        const printUrl = `${target.replace(/\/$/, "")}/print`;
-        attempts.push({
-          name: "puter-wayback-print",
-          run: async () => fetchViaPuterWayback(printUrl, { timeoutMs: Math.min(budget, 20000) }),
-        });
+  // Restore from session cache for eMC re-opens.
+  if (ukEmc) {
+    try {
+      const cached = sessionStorage.getItem(`smpc_emc_page_${target}`);
+      if (cached && cached.length > 500) {
+        emcPageCache.set(target, cached);
+        return { text: cached, via: "session-cache" };
       }
-    } else {
-      const jinaTargets = buildJinaTargets(target).slice(0, 2);
-      for (const variant of jinaTargets) {
-        attempts.push({
-          name: "puter-jina",
-          run: async () =>
-            acceptRemoteText(
-              await fetchViaPuter(jinaReaderUrl(variant), {
-                timeoutMs: Math.min(budget, 14000),
-              })
-            ),
-        });
-      }
-      attempts.push({
-        name: "puter",
-        run: async () =>
-          acceptRemoteText(await fetchViaPuter(target, { timeoutMs: Math.min(budget, 12000) })),
-      });
+    } catch {
+      /* ignore */
     }
   }
 
   if (ukEmc) {
-    // Live medicines.org.uk proxies almost always 403/timeout — skip them.
-    // Try Wayback via Puter first (above), then one non-Puter Wayback attempt.
-    attempts.push({
-      name: "allorigins-wayback",
-      run: async () => {
-        const snap = await resolveWaybackSnapshot(target, { timeoutMs: 8000 });
-        const raw = await fetchWithTimeout(
-          `https://api.allorigins.win/get?url=${encodeURIComponent(snap)}`,
-          { timeoutMs: Math.min(budget, 12000) }
-        );
-        if (/^\s*</.test(raw)) throw new Error("allorigins html error");
-        const data = JSON.parse(raw);
-        return acceptRemoteText(String(data?.contents || ""));
-      },
-    });
-  } else {
-    for (const attempt of buildProxyAttempts(target)) {
-      attempts.push(attempt);
+    // 1) Puter → Jina → live eMC (works when Jina allows Puter's egress).
+    if (pref !== "skip-puter") {
+      for (const variant of buildJinaTargets(target).slice(0, 1)) {
+        try {
+          const text = acceptRemoteText(
+            await fetchViaPuter(jinaReaderUrl(variant), { timeoutMs: Math.min(budget, 16000) })
+          );
+          return remember("puter-jina", text);
+        } catch (error) {
+          errors.push(`puter-jina: ${error?.message || error}`);
+        }
+      }
+
+      // 2) Single Puter → Wayback attempt (no race).
+      if (Date.now() >= waybackCooldownUntil) {
+        try {
+          const text = await fetchViaPuterWayback(target, { timeoutMs: Math.min(budget, 20000) });
+          return remember("puter-wayback", text);
+        } catch (error) {
+          errors.push(`puter-wayback: ${error?.message || error}`);
+          if (isRateLimitedError(error)) waybackCooldownUntil = Date.now() + 60000;
+        }
+      } else {
+        errors.push("puter-wayback: HTTP 429 (cooldown)");
+      }
     }
+
+    throw new Error(
+      `تعذّر جلب الصفحة عبر كل الوسطاء. جرّب مصدراً آخر أو أعد المحاولة بعد قليل. التفاصيل: ${errors.slice(0, 4).join(" · ")}`
+    );
   }
 
-  if (pref && !ukEmc) {
+  // Non-eMC hosts: existing Puter + proxy race.
+  const attempts = [];
+  if (pref !== "skip-puter") {
+    const jinaTargets = buildJinaTargets(target).slice(0, 2);
+    for (const variant of jinaTargets) {
+      attempts.push({
+        name: "puter-jina",
+        run: async () =>
+          acceptRemoteText(
+            await fetchViaPuter(jinaReaderUrl(variant), {
+              timeoutMs: Math.min(budget, 14000),
+            })
+          ),
+      });
+    }
+    attempts.push({
+      name: "puter",
+      run: async () =>
+        acceptRemoteText(await fetchViaPuter(target, { timeoutMs: Math.min(budget, 12000) })),
+    });
+  }
+  for (const attempt of buildProxyAttempts(target)) attempts.push(attempt);
+  if (pref) {
     attempts.sort((a, b) => Number(b.name.startsWith(pref)) - Number(a.name.startsWith(pref)));
   }
 
-  const racePool = attempts.slice(0, ukEmc ? 2 : 4);
+  const racePool = attempts.slice(0, 4);
   try {
     const winner = await Promise.any(
       racePool.map(async (attempt) => {
@@ -661,8 +708,7 @@ async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = 
         return { text, via: attempt.name };
       })
     );
-    rememberProxy(winner.via);
-    return winner;
+    return remember(winner.via, winner.text);
   } catch (error) {
     const details =
       error?.errors?.map((e) => e?.message || e).join(", ") || error?.message || "race failed";
@@ -672,8 +718,7 @@ async function fetchRemotePage(url, { preferHtml = false, timeoutMs = 18000 } = 
   for (const attempt of attempts.slice(racePool.length)) {
     try {
       const text = acceptRemoteText(await attempt.run());
-      rememberProxy(attempt.name);
-      return { text, via: attempt.name };
+      return remember(attempt.name, text);
     } catch (error) {
       errors.push(`${attempt.name}: ${error?.message || error}`);
     }
@@ -1323,6 +1368,78 @@ async function searchByNdcFilters(query, { limit = 8, source = "dailymed", filte
     seen.add(key);
     out.push(doc);
     if (out.length >= limit) break;
+  }
+  return out;
+}
+
+const UK_TO_US_DRUG_NAMES = {
+  paracetamol: "acetaminophen",
+  adrenaline: "epinephrine",
+  noradrenaline: "norepinephrine",
+  salbutamol: "albuterol",
+  frusemide: "furosemide",
+  furosemide: "furosemide",
+  bendrofluazide: "bendroflumethiazide",
+  lignocaine: "lidocaine",
+  pethidine: "meperidine",
+  carbamazepine: "carbamazepine",
+  amoxycillin: "amoxicillin",
+  ciclosporin: "cyclosporine",
+  cyclosporin: "cyclosporine",
+  rifampicin: "rifampin",
+  phenobarbitone: "phenobarbital",
+  dothiepin: "dosulepin",
+  methadone: "methadone",
+  morphine: "morphine",
+  ibuprofen: "ibuprofen",
+  aspirin: "aspirin",
+  metformin: "metformin",
+  amlodipine: "amlodipine",
+  omeprazole: "omeprazole",
+  atorvastatin: "atorvastatin",
+  simvastatin: "simvastatin",
+  losartan: "losartan",
+  ramipril: "ramipril",
+  sertraline: "sertraline",
+  fluoxetine: "fluoxetine",
+  warfarin: "warfarin",
+  digoxin: "digoxin",
+  prednisolone: "prednisolone",
+  levothyroxine: "levothyroxine",
+  insulin: "insulin",
+};
+
+function expandUkDrugHints(rawHint) {
+  const hint = String(rawHint || "").replace(/\s+/g, " ").trim();
+  if (!hint) return [];
+  const out = [];
+  const push = (value) => {
+    const next = String(value || "").replace(/\s+/g, " ").trim();
+    if (next.length >= 3 && !out.includes(next)) out.push(next);
+  };
+
+  push(hint);
+  push(hint.split(/[-–|:(,/]/)[0]);
+  push(hint.replace(/\b\d+([.,]\d+)?\s*(mg|mcg|µg|g|ml|%|iu|units?)\b/gi, " "));
+  push(hint.replace(/\b(tablets?|capsules?|injection|solution|suspension|cream|ointment|gel|syrup|smpc|emc)\b/gi, " "));
+
+  const token = hint
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/\s+/)
+    .find((part) => part.length >= 4);
+  if (token) {
+    push(token);
+    const mapped = UK_TO_US_DRUG_NAMES[token];
+    if (mapped) push(mapped);
+  }
+
+  // Map any known UK INN appearing anywhere in the hint.
+  for (const [uk, us] of Object.entries(UK_TO_US_DRUG_NAMES)) {
+    if (new RegExp(`\\b${uk}\\b`, "i").test(hint)) {
+      push(uk);
+      push(us);
+    }
   }
   return out;
 }
@@ -2005,26 +2122,24 @@ async function hydrateEmcFull(doc) {
     doc.url || (doc.productId ? `https://www.medicines.org.uk/emc/product/${doc.productId}/smpc` : "");
   if (!baseUrl) return doc;
 
-  // Warm Puter before eMC hydration — Wayback path depends on it.
   try {
     const { loadPuter } = await import("./puter-auth.js");
     await loadPuter();
   } catch {
-    /* continue; allorigins-wayback may still help */
+    /* continue */
   }
 
   const productId = doc.productId || (baseUrl.match(/\/product\/(\d+)/) || [])[1] || "";
+  // Prefer print once — sequential fetchRemotePage already tries Jina then Wayback.
   const candidates = [
     productId ? `https://www.medicines.org.uk/emc/product/${productId}/smpc/print` : "",
     productId ? `https://www.medicines.org.uk/emc/product/${productId}/smpc` : "",
-    baseUrl.endsWith("/print") ? baseUrl : `${baseUrl.replace(/\/$/, "")}/print`,
-    baseUrl,
   ].filter((value, index, arr) => value && arr.indexOf(value) === index);
 
   let lastError = null;
   for (const candidate of candidates) {
     try {
-      const { text, via } = await fetchRemotePage(candidate, { preferHtml: false, timeoutMs: 22000 });
+      const { text, via } = await fetchRemotePage(candidate, { preferHtml: false, timeoutMs: 20000 });
       if (isBlockedOrMissing(text)) {
         lastError = new Error("blocked");
         continue;
@@ -2051,6 +2166,7 @@ async function hydrateEmcFull(doc) {
         title =
           stripTags(titleMatch[1])
             .replace(/\s*-\s*Summary of Product Characteristics.*$/i, "")
+            .replace(/\s*-\s*print friendly.*$/i, "")
             .replace(/\s*\|\s*\d+\s*$/i, "")
             .replace(/\s*-\s*\(emc\).*$/i, "")
             .trim() || title;
@@ -2070,28 +2186,16 @@ async function hydrateEmcFull(doc) {
       };
     } catch (error) {
       lastError = error;
+      // On Wayback rate-limit, skip remaining eMC URLs and fall through to OpenFDA.
+      if (isRateLimitedError(error)) break;
     }
   }
 
-  // Soft fallback: keep the eMC result but fill body from OpenFDA/DailyMed by name.
-  const hintSources = [
-    doc.title,
-    String(doc.title || "").split(/[-–|:(]/)[0],
-    String(doc.title || "").replace(/\d+\s*mg|\d+\s*%/gi, " "),
-  ]
-    .map((value) =>
-      String(value || "")
-        .replace(/\beMC product\s+\d+\b/gi, "")
-        .replace(/\bSmPC\b/gi, "")
-        .replace(/\bSummary of Product Characteristics\b/gi, "")
-        .replace(/\s+/g, " ")
-        .trim()
-    )
-    .filter((value, index, arr) => value.length >= 3 && arr.indexOf(value) === index);
-
+  // Soft fallback: eMC link + US label body (UK INNs mapped, e.g. paracetamol→acetaminophen).
+  const hintSources = expandUkDrugHints(doc.title).concat(expandUkDrugHints(doc.api));
   for (const hint of hintSources) {
     try {
-      for (const expr of buildQueryVariants(hint).slice(0, 3)) {
+      for (const expr of buildQueryVariants(hint).slice(0, 4)) {
         const batch = await fetchOpenFda(expr, 2);
         if (!batch[0]) continue;
         const fda = normalizeOpenFda(batch[0]);
@@ -2107,6 +2211,24 @@ async function hydrateEmcFull(doc) {
           fetchVia: "openfda-fallback",
           url: baseUrl,
         };
+      }
+      // Looser OpenFDA token search when exact field queries miss.
+      const loose = await fetchOpenFda(hint, 2);
+      if (loose[0]) {
+        const fda = normalizeOpenFda(loose[0]);
+        if (fda.sections?.length) {
+          return {
+            ...doc,
+            title: doc.title || fda.title,
+            sections: fda.sections,
+            englishText: fda.englishText,
+            hydrated: true,
+            needsFullLabel: false,
+            sourceLabel: "eMC link · body via OpenFDA/DailyMed",
+            fetchVia: "openfda-fallback",
+            url: baseUrl,
+          };
+        }
       }
     } catch {
       /* try next hint */
